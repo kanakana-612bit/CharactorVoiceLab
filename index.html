@@ -1,0 +1,173 @@
+<!doctype html>
+<html lang="ja">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Character Voice Lab</title>
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <header class="app-header">
+      <div>
+        <h1>Character Voice Lab</h1>
+        <p>身体推定値と統計事前分布から音声制約を作る実験UI</p>
+      </div>
+      <div class="header-actions">
+        <button id="analyzeBtn" class="primary">解析開始</button>
+        <button id="saveJsonBtn">JSON保存</button>
+        <button id="loadJsonBtn">JSON読込</button>
+        <input id="loadJsonInput" type="file" accept="application/json" hidden />
+      </div>
+    </header>
+
+    <main class="workspace">
+      <section class="pane input-pane" aria-label="入力">
+        <h2>入力</h2>
+
+        <div class="upload-grid">
+          <label class="drop-zone">
+            <span>全身立ち絵</span>
+            <input id="bodyImageInput" type="file" accept="image/*" />
+          </label>
+          <label class="drop-zone">
+            <span>顔詳細画像</span>
+            <input id="faceImageInput" type="file" accept="image/*" />
+          </label>
+        </div>
+
+        <div class="form-grid">
+          <label>
+            年齢
+            <input id="ageInput" type="number" min="0" max="120" value="17" />
+          </label>
+          <label>
+            性別区分
+            <select id="sexInput">
+              <option value="female">female</option>
+              <option value="male">male</option>
+              <option value="neutral">neutral</option>
+            </select>
+          </label>
+          <label>
+            身長 cm
+            <input id="heightInput" type="number" min="30" max="240" step="0.1" value="158" />
+          </label>
+          <label>
+            体重 kg
+            <input id="weightInput" type="number" min="2" max="250" step="0.1" value="47" />
+          </label>
+          <label>
+            体脂肪率 %
+            <input id="bodyFatInput" type="number" min="0" max="80" step="0.1" />
+          </label>
+          <label>
+            参照母集団
+            <select id="populationInput">
+              <option value="Japanese">Japanese</option>
+              <option value="Generic">Generic</option>
+            </select>
+          </label>
+        </div>
+
+        <details>
+          <summary>詳細設定</summary>
+          <div class="form-grid detail-grid">
+            <label>
+              画像優先度
+              <input id="globalImageWeight" type="range" min="0" max="1" step="0.01" value="0.7" />
+            </label>
+            <label>
+              Constraint幅 k
+              <input id="rangeKInput" type="range" min="1" max="3" step="0.1" value="1" />
+            </label>
+            <label>
+              声門閉鎖傾向
+              <input id="glottalClosureInput" type="range" min="0" max="1" step="0.01" value="0.5" />
+            </label>
+            <label>
+              最大呼吸圧 Pa
+              <input id="pressureInput" type="number" min="200" max="3000" step="10" value="900" />
+            </label>
+          </div>
+        </details>
+
+        <div class="landmark-controls">
+          <h3>ランドマーク</h3>
+          <div class="auto-actions">
+            <button id="autoCurrentBtn">表示画像から自動抽出</button>
+            <button id="autoAllBtn">両方を自動抽出</button>
+          </div>
+          <div class="segmented">
+            <button id="bodyModeBtn" class="active">全身</button>
+            <button id="faceModeBtn">顔</button>
+          </div>
+          <label>
+            配置点
+            <select id="landmarkSelect"></select>
+          </label>
+          <p id="extractionStatus" class="status-line">自動抽出は単純背景・正面画像向けです。</p>
+          <p class="note">点を直接ドラッグできます。空いている場所を押すと選択中の点を配置します。</p>
+        </div>
+      </section>
+
+      <section class="pane model-pane" aria-label="推定身体モデル">
+        <div class="pane-head">
+          <h2>推定身体モデル</h2>
+          <span>外見再現ではなく、音声制約用の形態モデル</span>
+        </div>
+        <div class="canvas-stack">
+          <canvas id="imageCanvas" width="720" height="560"></canvas>
+          <canvas id="bodyModelCanvas" width="720" height="560"></canvas>
+        </div>
+        <div class="model-toggle">
+          <label><input id="showLandmarks" type="checkbox" checked /> ランドマーク</label>
+          <label><input id="showModel" type="checkbox" checked /> 低ポリモデル</label>
+        </div>
+      </section>
+
+      <section class="pane analysis-pane" aria-label="解析と音声">
+        <h2>解析・音声</h2>
+
+        <div class="audio-actions">
+          <label class="compact-select">
+            母音
+            <select id="vowelSelect">
+              <option value="a">/a/</option>
+              <option value="i">/i/</option>
+              <option value="u">/u/</option>
+              <option value="e">/e/</option>
+              <option value="o">/o/</option>
+            </select>
+          </label>
+          <button id="playVowelButton" class="primary">母音を再生</button>
+          <button id="saveWavBtn">WAV保存</button>
+        </div>
+
+        <div class="slider-list" id="quickSliders"></div>
+
+        <h3>一次解析値</h3>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>項目</th>
+                <th>現在値</th>
+                <th>統計平均</th>
+                <th>z</th>
+                <th>画像比率</th>
+                <th>根拠</th>
+              </tr>
+            </thead>
+            <tbody id="featureTable"></tbody>
+          </table>
+        </div>
+
+        <h3>Constraint Ranges</h3>
+        <pre id="constraintOutput"></pre>
+      </section>
+    </main>
+
+    <script src="./reference_data.js"></script>
+    <script src="./app.js"></script>
+  </body>
+</html>
