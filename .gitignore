@@ -2,3 +2,5 @@ character_voice_profile.json
 preview_*.wav
 *.tmp
 *.log
+data/source_pdfs/
+tmp/

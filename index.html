@@ -9,68 +9,341 @@
   <body>
     <header class="app-header">
       <div>
-        <h1>Character Voice Lab</h1>
+        <h1>Character Voice Lab <span class="version-badge">Ver 0.3</span></h1>
         <p>身体推定値と統計事前分布から音声制約を作る実験UI</p>
       </div>
       <div class="header-actions">
-        <button id="analyzeBtn" class="primary">解析開始</button>
-        <button id="saveJsonBtn">JSON保存</button>
-        <button id="loadJsonBtn">JSON読込</button>
-        <input id="loadJsonInput" type="file" accept="application/json" hidden />
+        <label class="header-field project-title-field">
+          プロジェクト名
+          <input id="projectTitleInput" type="text" value="character-voice" maxlength="80" />
+        </label>
+        <label class="header-field">
+          データソース
+          <select id="dataSourceInput">
+            <option value="current_mvp">MVP priors</option>
+            <option value="japanese_age_band_planned">日本人年齢階級 priors</option>
+            <option value="manual_design">Manual design</option>
+          </select>
+        </label>
+        <button id="saveProjectBtn">プロフィール保存</button>
+        <button id="loadProjectBtn">プロフィール読込</button>
+        <input id="loadProjectInput" type="file" accept=".zip,.json,application/zip,application/json" hidden />
       </div>
     </header>
 
+    <nav class="tabbar" aria-label="解析タブ">
+      <button class="tab-button active" data-tab-target="setupTab">入力・特徴点</button>
+      <button class="tab-button" data-tab-target="initialTab">初期解析</button>
+      <button class="tab-button" data-tab-target="detailTab">詳細解析と設定</button>
+      <button class="tab-button" data-tab-target="outputTab">音素出力・書出し</button>
+      <button class="tab-button" data-tab-target="referenceTab">参考文献・公開方針</button>
+    </nav>
+
     <main class="workspace">
-      <section class="pane input-pane" aria-label="入力">
-        <h2>入力</h2>
+      <section id="setupTab" class="tab-panel active" aria-label="入力・特徴点">
+        <section class="pane input-pane" aria-label="基礎入力">
+          <h2>基礎入力</h2>
 
-        <div class="upload-grid">
-          <label class="drop-zone">
-            <span>全身立ち絵</span>
-            <input id="bodyImageInput" type="file" accept="image/*" />
-          </label>
-          <label class="drop-zone">
-            <span>顔詳細画像</span>
-            <input id="faceImageInput" type="file" accept="image/*" />
-          </label>
-        </div>
+          <div class="upload-grid">
+            <label class="drop-zone">
+              <span>全身正面画像</span>
+              <input id="bodyImageInput" type="file" accept="image/*" />
+            </label>
+            <label class="drop-zone">
+              <span>頭頚部・顔正面画像</span>
+              <input id="faceImageInput" type="file" accept="image/*" />
+            </label>
+            <label class="drop-zone">
+              <span>頭頚部・顔側面画像</span>
+              <input id="profileImageInput" type="file" accept="image/*" />
+            </label>
+          </div>
 
-        <div class="form-grid">
-          <label>
-            年齢
-            <input id="ageInput" type="number" min="0" max="120" value="17" />
-          </label>
-          <label>
-            性別区分
-            <select id="sexInput">
-              <option value="female">female</option>
-              <option value="male">male</option>
-              <option value="neutral">neutral</option>
-            </select>
-          </label>
-          <label>
-            身長 cm
-            <input id="heightInput" type="number" min="30" max="240" step="0.1" value="158" />
-          </label>
-          <label>
-            体重 kg
-            <input id="weightInput" type="number" min="2" max="250" step="0.1" value="47" />
-          </label>
-          <label>
-            体脂肪率 %
-            <input id="bodyFatInput" type="number" min="0" max="80" step="0.1" />
-          </label>
-          <label>
-            参照母集団
-            <select id="populationInput">
-              <option value="Japanese">Japanese</option>
-              <option value="Generic">Generic</option>
-            </select>
-          </label>
-        </div>
+          <div class="form-grid">
+            <label>
+              年齢
+              <input id="ageInput" type="number" min="0" max="120" value="17" />
+            </label>
+            <label>
+              性別区分
+              <select id="sexInput">
+                <option value="female">female</option>
+                <option value="male">male</option>
+                <option value="neutral">neutral</option>
+              </select>
+            </label>
+            <label>
+              身長 cm
+              <input id="heightInput" type="number" min="30" max="240" step="0.1" value="158" />
+            </label>
+            <label>
+              体重 kg
+              <input id="weightInput" type="number" min="2" max="250" step="0.1" value="47" />
+            </label>
+            <label>
+              体脂肪率 %
+              <input id="bodyFatInput" type="number" min="0" max="80" step="0.1" />
+            </label>
+            <label>
+              主言語
+              <select id="primaryLanguageInput">
+                <option value="ja-JP">日本語</option>
+                <option value="en">英語</option>
+                <option value="other">その他・未指定</option>
+              </select>
+            </label>
+            <label>
+              音素ターゲット
+              <select id="phoneticTargetProfileInput">
+                <option value="ja_JP_standard_neutral_aggregate_0_1" selected>日本語（標準語・中立母音）</option>
+                <option value="general_five_vowel_engineering_0_1">一般的5母音（比較用）</option>
+              </select>
+            </label>
+            <label>
+              形態参照集団
+              <select id="populationInput">
+                <option value="General">General</option>
+                <option value="Japanese_public_aggregate">Japanese / public aggregate</option>
+              </select>
+            </label>
+            <label>
+              参照画像の表現
+              <select id="referenceImageStyleInput">
+                <option value="illustration" selected>イラスト／デフォルメ</option>
+                <option value="photo_realistic">写真／写実的表現</option>
+              </select>
+            </label>
+          </div>
 
-        <details>
-          <summary>詳細設定</summary>
+          <section class="composition-guide" aria-label="BMIと体脂肪率設定ガイド">
+            <div class="composition-metrics">
+              <div class="composition-metric">
+                <span>算出BMI</span>
+                <strong id="computedBmi">-</strong>
+                <small id="computedBmiClass">身長・体重から計算</small>
+              </div>
+              <div class="composition-metric">
+                <span>同年代統計中央値</span>
+                <strong id="referenceBmiMedian">-</strong>
+                <small id="referenceBmiNote">参照可能な年齢階級データを表示</small>
+              </div>
+              <div class="composition-metric">
+                <span>差分</span>
+                <strong id="bmiDelta">-</strong>
+                <small id="bmiReferenceSource">BMI kg/m2</small>
+              </div>
+            </div>
+            <details class="body-fat-guide" open>
+              <summary>体脂肪率設定ガイド</summary>
+              <p id="bodyFatGuideSummary" class="note"></p>
+              <div id="bodyFatGuideBadges" class="guide-badges"></div>
+              <div class="table-wrap guide-table-wrap">
+                <table>
+                  <thead>
+                    <tr>
+                      <th>体型</th>
+                      <th>基準</th>
+                      <th>BMI</th>
+                      <th>体脂肪率</th>
+                      <th>分布</th>
+                    </tr>
+                  </thead>
+                  <tbody id="bodyFatGuideTable"></tbody>
+                </table>
+              </div>
+              <p id="bodyFatGuideNote" class="note"></p>
+            </details>
+          </section>
+
+          <div class="landmark-internals" hidden>
+            <h3>ランドマーク</h3>
+            <div class="segmented">
+              <button id="bodyModeBtn" class="active">全身</button>
+              <button id="faceModeBtn">頭頚部</button>
+            </div>
+            <label>
+              配置点
+              <select id="landmarkSelect"></select>
+            </label>
+            <label>
+              側面配置点
+              <select id="profileLandmarkSelect"></select>
+            </label>
+            <label>
+              側面の向き
+              <select id="profileDirectionInput">
+                <option value="right">右向き</option>
+                <option value="left">左向き</option>
+              </select>
+            </label>
+            <p id="extractionStatus" class="status-line">初期点はシェーマ上の仮配置です。各点を直接つかんで調整してください。</p>
+            <p class="note">点を直接ドラッグできます。空いている場所を押すと選択中の点を配置します。</p>
+          </div>
+        </section>
+
+        <section class="pane model-pane" aria-label="画像プレビュー">
+          <div class="pane-head">
+            <h2>全身・頭頚部プレビュー</h2>
+            <span>正面幅と側面特徴点から2.5D声道テンプレートを半自動変形します。</span>
+          </div>
+          <div class="preview-layout">
+            <div class="body-preview-row">
+              <div class="preview-card">
+                <div class="preview-card-head">
+                  <h3>&#20840;&#36523;&#27491;&#38754;</h3>
+                  <div class="layer-toggle" aria-label="全身正面レイヤー">
+                    <label><input id="bodyShowLandmarks" type="checkbox" checked /> 基本参照点群</label>
+                    <label><input id="bodyShowModel" type="checkbox" /> 低ポリモデル</label>
+                  </div>
+                </div>
+                <div class="canvas-stack">
+                  <canvas id="bodyImageCanvas" width="720" height="560"></canvas>
+                  <canvas id="bodyModelCanvas" width="720" height="560"></canvas>
+                </div>
+              </div>
+              <div id="compositionGuideMount" class="preview-card composition-preview-card"></div>
+            </div>
+            <div class="head-preview-grid">
+              <div class="preview-card">
+                <div class="preview-card-head">
+                  <h3>&#38957;&#38938;&#37096;&#27491;&#38754;</h3>
+                  <div class="layer-toggle" aria-label="頭頚部正面レイヤー">
+                    <label><input id="faceShowLandmarks" type="checkbox" checked /> 基本参照点群</label>
+                  </div>
+                </div>
+                <div class="canvas-stack">
+                  <canvas id="faceImageCanvas" width="720" height="560"></canvas>
+                  <canvas id="faceModelCanvas" width="720" height="560"></canvas>
+                </div>
+              </div>
+              <div class="preview-card">
+                <div class="preview-card-head">
+                  <h3>&#38957;&#38938;&#37096;&#20596;&#38754; / 2.5D&#22768;&#36947;</h3>
+                  <div class="layer-toggle" aria-label="頭頚部側面レイヤー">
+                    <label><input id="profileShowBaseLandmarks" type="checkbox" checked /> 基本参照点群</label>
+                    <label><input id="profileShowArticulationLandmarks" type="checkbox" /> 構音空間参照点群</label>
+                    <label><input id="profileShowVocalTract" type="checkbox" /> 2.5D声道</label>
+                  </div>
+                </div>
+                <div class="canvas-stack profile-canvas-stack">
+                  <canvas id="profileImageCanvas" width="720" height="560"></canvas>
+                  <canvas id="vocalTractCanvas" width="720" height="560"></canvas>
+                </div>
+              </div>
+            </div>
+          </div>
+          <aside id="landmarkHintPanel" class="landmark-hint" aria-live="polite">
+            <strong id="landmarkHintTitle">ランドマーク定義</strong>
+            <span id="landmarkHintDefinition">点をつかむか、カーソルを重ねると定義を表示します。</span>
+            <small id="landmarkHintRole">全身・頭頚部・側面の点名は解剖学的表現へ統一します。</small>
+          </aside>
+        </section>
+      </section>
+
+      <section id="initialTab" class="tab-panel" aria-label="初期解析" hidden>
+        <section class="pane analysis-pane" aria-label="統計比較">
+          <h2>解析寸法と統計値の比較</h2>
+          <section class="calibration-section" aria-labelledby="calibrationHeading">
+            <div class="pane-head">
+              <h3 id="calibrationHeading">画像スケール基準</h3>
+              <span>身長 B1 → 全頭高 A36 → 頭頚部正面・側面</span>
+            </div>
+            <div id="calibrationSummary" class="calibration-summary"></div>
+          </section>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>項目</th>
+                  <th>現在値</th>
+                  <th>統計中央値</th>
+                  <th>z</th>
+                  <th>画像比率</th>
+                  <th>根拠</th>
+                </tr>
+              </thead>
+              <tbody id="featureTable"></tbody>
+            </table>
+          </div>
+          <section class="landmark-reference" aria-labelledby="landmarkReferenceHeading">
+            <div class="pane-head">
+              <h3 id="landmarkReferenceHeading">解剖学的計測点の相互参照</h3>
+              <span>正面・側面・全身画像で同一概念の点を対応づけます</span>
+            </div>
+            <div class="table-wrap landmark-reference-table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th>統一名称</th>
+                    <th>全身正面</th>
+                    <th>頭頚部正面</th>
+                    <th>頭頚部側面</th>
+                    <th>定義・用途</th>
+                  </tr>
+                </thead>
+                <tbody id="landmarkReferenceTable"></tbody>
+              </table>
+            </div>
+          </section>
+          <section class="tract-analysis">
+            <div class="pane-head">
+              <h3>声道断面積関数 A(x)</h3>
+              <span>側面径・正面幅・断面形状から導く合成2.5Dテンプレート</span>
+            </div>
+            <div class="tract-visual-grid">
+              <canvas id="tractProfileCanvas" width="760" height="260"></canvas>
+              <canvas id="tractCrossSectionCanvas" width="760" height="260" aria-label="選択母音の2.5D断面プレビュー"></canvas>
+            </div>
+            <div id="tractRegionSummary" class="tract-region-summary"></div>
+          </section>
+        </section>
+      </section>
+
+      <section id="detailTab" class="tab-panel" aria-label="詳細解析と設定" hidden>
+        <section class="pane">
+          <h2>生活習慣・呼吸器既往</h2>
+          <div class="form-grid">
+            <label>
+              喫煙歴
+              <select id="smokingInput">
+                <option value="unknown">unknown</option>
+                <option value="never">never</option>
+                <option value="past">past</option>
+                <option value="current">current</option>
+              </select>
+            </label>
+            <label>
+              運動習慣
+              <select id="exerciseInput">
+                <option value="unknown">unknown</option>
+                <option value="low">low</option>
+                <option value="moderate">moderate</option>
+                <option value="high">high</option>
+              </select>
+            </label>
+            <label>
+              食事習慣
+              <select id="dietInput">
+                <option value="unknown">unknown</option>
+                <option value="balanced">balanced</option>
+                <option value="irregular">irregular</option>
+                <option value="high_salt_or_alcohol">high salt/alcohol</option>
+              </select>
+            </label>
+            <label>
+              呼吸器既往
+              <select id="respiratoryHistoryInput">
+                <option value="unknown">unknown</option>
+                <option value="none">none</option>
+                <option value="asthma">asthma</option>
+                <option value="copd_or_chronic">COPD/chronic</option>
+              </select>
+            </label>
+          </div>
+        </section>
+
+        <section class="pane">
+          <h2>推定値の詳細と調整</h2>
           <div class="form-grid detail-grid">
             <label>
               画像優先度
@@ -89,85 +362,108 @@
               <input id="pressureInput" type="number" min="200" max="3000" step="10" value="900" />
             </label>
           </div>
-        </details>
+          <div class="slider-list" id="quickSliders"></div>
+        </section>
 
-        <div class="landmark-controls">
-          <h3>ランドマーク</h3>
-          <div class="auto-actions">
-            <button id="autoCurrentBtn">表示画像から自動抽出</button>
-            <button id="autoAllBtn">両方を自動抽出</button>
+        <section class="pane">
+          <h2>声帯・声道詳細</h2>
+          <div class="slider-list compact-list" id="vocalFoldSliders"></div>
+          <p class="note">ばね定数、筋緊張、炎症、内腔容積変化はプレビュー用パラメータとして追加し、後で物理コアへ接続します。</p>
+        </section>
+
+        <section class="pane geometry-detail-pane">
+          <div class="pane-head">
+            <h2>2.5D声道形状</h2>
+            <span>外部ランドマークで校正した合成断面テンプレート</span>
           </div>
-          <div class="segmented">
-            <button id="bodyModeBtn" class="active">全身</button>
-            <button id="faceModeBtn">顔</button>
-          </div>
-          <label>
-            配置点
-            <select id="landmarkSelect"></select>
-          </label>
-          <p id="extractionStatus" class="status-line">自動抽出は単純背景・正面画像向けです。</p>
-          <p class="note">点を直接ドラッグできます。空いている場所を押すと選択中の点を配置します。</p>
-        </div>
+          <div class="slider-list compact-list" id="geometrySliders"></div>
+          <p class="note">硬口蓋・舌・口唇の内部形状は画像から直接推定せず、公開集計値と設計値で制約した潜在形状として扱います。</p>
+        </section>
       </section>
 
-      <section class="pane model-pane" aria-label="推定身体モデル">
-        <div class="pane-head">
-          <h2>推定身体モデル</h2>
-          <span>外見再現ではなく、音声制約用の形態モデル</span>
-        </div>
-        <div class="canvas-stack">
-          <canvas id="imageCanvas" width="720" height="560"></canvas>
-          <canvas id="bodyModelCanvas" width="720" height="560"></canvas>
-        </div>
-        <div class="model-toggle">
-          <label><input id="showLandmarks" type="checkbox" checked /> ランドマーク</label>
-          <label><input id="showModel" type="checkbox" checked /> 低ポリモデル</label>
-        </div>
+      <section id="outputTab" class="tab-panel" aria-label="音素出力・書出し" hidden>
+        <section class="pane analysis-pane">
+          <h2>音素プレビュー</h2>
+
+          <div class="audio-actions">
+            <label class="compact-select">
+              母音
+              <select id="vowelSelect">
+                <option value="a">/a/</option>
+                <option value="i">/i/</option>
+                <option value="u">/u/</option>
+                <option value="e">/e/</option>
+                <option value="o">/o/</option>
+              </select>
+            </label>
+            <label class="compact-select synthesis-select">
+              合成モデル
+              <select id="synthesisBackendSelect">
+                <option value="tube" selected>1D音響管</option>
+                <option value="hybrid">ハイブリッド</option>
+                <option value="formant">フォルマント</option>
+              </select>
+            </label>
+            <button id="playVowelButton" class="primary">母音を再生</button>
+            <button id="saveWavBtn">WAV保存</button>
+            <button id="saveJsonBtn">JSON保存</button>
+          </div>
+        </section>
+
+        <section class="pane export-pane">
+          <h2>設計値・制約JSON</h2>
+          <pre id="constraintOutput"></pre>
+        </section>
       </section>
 
-      <section class="pane analysis-pane" aria-label="解析と音声">
-        <h2>解析・音声</h2>
+      <section id="referenceTab" class="tab-panel" aria-label="参考文献・公開方針" hidden>
+        <section class="pane publication-policy-pane">
+          <h2>公開版の採用基準</h2>
+          <p id="publicationPolicyDisclosure" class="policy-disclosure"></p>
+          <div class="policy-grid">
+            <section>
+              <h3>使用する範囲</h3>
+              <ul id="publicationPolicyScope"></ul>
+            </section>
+            <section>
+              <h3>使用しない範囲</h3>
+              <ul id="publicationPolicyExclusions"></ul>
+            </section>
+          </div>
+        </section>
 
-        <div class="audio-actions">
-          <label class="compact-select">
-            母音
-            <select id="vowelSelect">
-              <option value="a">/a/</option>
-              <option value="i">/i/</option>
-              <option value="u">/u/</option>
-              <option value="e">/e/</option>
-              <option value="o">/o/</option>
-            </select>
-          </label>
-          <button id="playVowelButton" class="primary">母音を再生</button>
-          <button id="saveWavBtn">WAV保存</button>
-        </div>
-
-        <div class="slider-list" id="quickSliders"></div>
-
-        <h3>一次解析値</h3>
-        <div class="table-wrap">
-          <table>
-            <thead>
-              <tr>
-                <th>項目</th>
-                <th>現在値</th>
-                <th>統計平均</th>
-                <th>z</th>
-                <th>画像比率</th>
-                <th>根拠</th>
-              </tr>
-            </thead>
-            <tbody id="featureTable"></tbody>
-          </table>
-        </div>
-
-        <h3>Constraint Ranges</h3>
-        <pre id="constraintOutput"></pre>
+        <section class="pane references-pane">
+          <div class="pane-head">
+            <h2>引用・参照データ</h2>
+            <span>数値根拠と公開時の扱い</span>
+          </div>
+          <div class="table-wrap reference-table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>出典</th>
+                  <th>使用方法</th>
+                  <th>公開版での扱い</th>
+                  <th>注意</th>
+                </tr>
+              </thead>
+              <tbody id="referenceSourceTable"></tbody>
+            </table>
+          </div>
+        </section>
       </section>
     </main>
 
+    <aside class="floating-action-dock" aria-label="常時操作">
+      <button id="playSampleButton" type="button">サンプル再生</button>
+      <button id="analyzeBtn" class="primary" type="button">解析開始</button>
+    </aside>
+
     <script src="./reference_data.js"></script>
+    <script src="./local_pdf_growth_priors.js"></script>
+    <script src="./prior_resolver.js"></script>
+    <script src="./project_package.js"></script>
+    <script src="./landmark_schema.js"></script>
     <script src="./app.js"></script>
   </body>
 </html>
