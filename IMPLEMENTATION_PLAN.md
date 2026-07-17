@@ -338,7 +338,7 @@ Sections:
 - phoneme/material list
 - WAV export
 - JSON profile export
-- future Irodori-TTS/core API export
+- future external TTS/core API export
 
 ## Implementation Order
 

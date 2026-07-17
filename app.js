@@ -65,6 +65,13 @@ const state = {
   profileDrag: null,
   profileCursor: { point: null, target: null },
   lastWav: null,
+  vowelAreaTuning: {},
+  vowelWidthTuning: {},
+  tractEditMode: "area",
+  areaTuningDrag: null,
+  selectedTractTuningHandle: null,
+  selectedSyllableToken: "a",
+  auditoryEvaluationLog: [],
 };
 
 const referenceData = window.CVL_REFERENCE;
@@ -73,7 +80,7 @@ const projectPackage = window.CVL_PROJECT_PACKAGE;
 const landmarkSystem = window.CVL_LANDMARKS;
 const labels = landmarkSystem.labels;
 const featureDefs = referenceData.anthropometricFeaturePriors;
-const APP_VERSION = "1.0";
+const APP_VERSION = "1.1";
 const GESTURE_EXECUTION_INPUT_MIN = 0.35;
 const GESTURE_EXECUTION_INPUT_MAX = 1.35;
 const LEGACY_GESTURE_EXECUTION_EFFECTIVE_MAX = 1.45;
@@ -283,6 +290,31 @@ const els = {
   referenceSourceTable: document.getElementById("referenceSourceTable"),
   vowelSelect: document.getElementById("vowelSelect"),
   saveWavBtn: document.getElementById("saveWavBtn"),
+  resetAreaTuningBtn: document.getElementById("resetAreaTuningBtn"),
+  tractEditStatus: document.getElementById("tractEditStatus"),
+  editAreaModeBtn: document.getElementById("editAreaModeBtn"),
+  editWidthModeBtn: document.getElementById("editWidthModeBtn"),
+  nudgeTractDownBtn: document.getElementById("nudgeTractDownBtn"),
+  nudgeTractUpBtn: document.getElementById("nudgeTractUpBtn"),
+  tractSelectedPointValue: document.getElementById("tractSelectedPointValue"),
+  playUntunedVowelBtn: document.getElementById("playUntunedVowelBtn"),
+  playTunedVowelBtn: document.getElementById("playTunedVowelBtn"),
+  phonemeClarityInput: document.getElementById("phonemeClarityInput"),
+  phonemeClarityValue: document.getElementById("phonemeClarityValue"),
+  targetMatchInput: document.getElementById("targetMatchInput"),
+  targetMatchValue: document.getElementById("targetMatchValue"),
+  auditoryNoteInput: document.getElementById("auditoryNoteInput"),
+  recordAuditoryEvaluationBtn: document.getElementById("recordAuditoryEvaluationBtn"),
+  auditoryEvaluationVowel: document.getElementById("auditoryEvaluationVowel"),
+  auditoryEvaluationHistory: document.getElementById("auditoryEvaluationHistory"),
+  ttsOutputLanguageInput: document.getElementById("ttsOutputLanguageInput"),
+  syllableSetInput: document.getElementById("syllableSetInput"),
+  datasetPrefixInput: document.getElementById("datasetPrefixInput"),
+  previewSyllableBtn: document.getElementById("previewSyllableBtn"),
+  exportSyllableDatasetBtn: document.getElementById("exportSyllableDatasetBtn"),
+  syllableSetSummary: document.getElementById("syllableSetSummary"),
+  syllableTokenList: document.getElementById("syllableTokenList"),
+  datasetExportStatus: document.getElementById("datasetExportStatus"),
 };
 
 function num(el, fallback = 0) {
@@ -579,6 +611,110 @@ function handleProfilePointerLeave(event) {
   state.profileCursor = { point: null, target: null };
   updateLandmarkHint(null, "profile", "selected");
   draw();
+}
+
+function handleAreaTuningPointerDown(event) {
+  if (!state.vocalTractGeometry?.sections?.length) return;
+  drawTractProfile(state.vocalTractGeometry);
+  const point = canvasPoint(event, els.tractProfileCanvas);
+  const hit = nearestAreaTuningHandle(point);
+  if (!hit) return;
+  state.areaTuningDrag = hit;
+  state.selectedTractTuningHandle = hit;
+  els.tractProfileCanvas.setPointerCapture?.(event.pointerId);
+  updateAreaTuningFromPoint(point);
+  event.preventDefault();
+}
+
+function handleAreaTuningPointerMove(event) {
+  if (!state.areaTuningDrag) return;
+  const point = canvasPoint(event, els.tractProfileCanvas);
+  updateAreaTuningFromPoint(point);
+  event.preventDefault();
+}
+
+function handleAreaTuningPointerUp(event) {
+  if (!state.areaTuningDrag) return;
+  els.tractProfileCanvas.releasePointerCapture?.(event.pointerId);
+  state.areaTuningDrag = null;
+  updateTractEditStatus();
+  renderConstraints();
+  draw();
+}
+
+function nearestAreaTuningHandle(point) {
+  const meta = state.areaTuningPlot;
+  if (!meta) return null;
+  const mode = state.tractEditMode === "width" ? "width" : "area";
+  const points = mode === "width" ? normalizedWidthTuningPoints(meta.vowel) : normalizedAreaTuningPoints(meta.vowel);
+  const xAt = (position) => meta.plot.left + position * (meta.plot.right - meta.plot.left);
+  let best = null;
+  for (let index = 0; index < points.length; index++) {
+    const dx = Math.abs(point.x - xAt(points[index].position));
+    if (dx > 20) continue;
+    if (!best || dx < best.dx) best = { vowel: meta.vowel, handleIndex: index, mode, dx };
+  }
+  return best ? { vowel: best.vowel, handleIndex: best.handleIndex, mode: best.mode } : null;
+}
+
+function updateAreaTuningFromPoint(point) {
+  const drag = state.areaTuningDrag;
+  const meta = state.areaTuningPlot;
+  if (!drag || !meta) return;
+  const clampedY = clamp(point.y, meta.plot.top, meta.plot.bottom);
+  const valueAtPointer = (meta.plot.bottom - clampedY) / Math.max(1, meta.plot.bottom - meta.plot.top) * meta.maxValue;
+  const areaFunction = buildTubeAreaFunction(
+    state.vocalTractGeometry,
+    drag.vowel,
+    PREVIEW_SAMPLE_RATE,
+    currentArticulationMotorProfile(state.constraints)
+  );
+  if (drag.mode === "width") {
+    const pointDef = normalizedWidthTuningPoints(drag.vowel)[drag.handleIndex];
+    const widths = areaFunction.cross_sections_2_5d.map((section) => section.coronal_width_cm);
+    const currentWidth = areaAtPositionFromArray(widths, pointDef.position);
+    const untunedWidth = currentWidth / Math.max(0.05, pointDef.gain);
+    setWidthTuningPoint(drag.vowel, drag.handleIndex, valueAtPointer / Math.max(0.05, untunedWidth));
+  } else {
+    const pointDef = normalizedAreaTuningPoints(drag.vowel)[drag.handleIndex];
+    const currentArea = areaAtPositionFromArray(areaFunction.areas_cm2, pointDef.position);
+    const untunedArea = currentArea / Math.max(0.05, pointDef.gain);
+    setAreaTuningPoint(drag.vowel, drag.handleIndex, valueAtPointer / Math.max(0.05, untunedArea));
+  }
+  updateTractEditStatus();
+  draw();
+}
+
+function setTractEditMode(mode) {
+  state.tractEditMode = mode === "width" ? "width" : "area";
+  state.selectedTractTuningHandle = null;
+  els.editAreaModeBtn?.classList.toggle("active", state.tractEditMode === "area");
+  els.editWidthModeBtn?.classList.toggle("active", state.tractEditMode === "width");
+  els.editAreaModeBtn?.setAttribute("aria-pressed", state.tractEditMode === "area" ? "true" : "false");
+  els.editWidthModeBtn?.setAttribute("aria-pressed", state.tractEditMode === "width" ? "true" : "false");
+  updateTractEditStatus();
+  draw();
+}
+
+function nudgeSelectedTractPoint(delta) {
+  const selection = state.selectedTractTuningHandle;
+  if (!selection || selection.vowel !== selectedVowel()) return;
+  const points = selection.mode === "width"
+    ? normalizedWidthTuningPoints(selection.vowel)
+    : normalizedAreaTuningPoints(selection.vowel);
+  const point = points[selection.handleIndex];
+  if (!point) return;
+  if (selection.mode === "width") setWidthTuningPoint(selection.vowel, selection.handleIndex, point.gain + delta);
+  else setAreaTuningPoint(selection.vowel, selection.handleIndex, point.gain + delta);
+  updateTractEditStatus();
+  renderConstraints();
+  draw();
+}
+
+function handleTractTuningKeyDown(event) {
+  if (!["ArrowUp", "ArrowDown"].includes(event.key)) return;
+  nudgeSelectedTractPoint((event.key === "ArrowUp" ? 1 : -1) * (event.shiftKey ? 0.05 : 0.01));
+  event.preventDefault();
 }
 
 function loadImage(file, target, shouldAnalyze = false) {
@@ -1445,9 +1581,22 @@ function drawTractProfile(geometry = state.vocalTractGeometry) {
   if (!geometry?.sections?.length) return;
   const plot = { left: 46, right: width - 18, top: 30, bottom: height - 40 };
   const sections = geometry.sections;
-  const maxValue = Math.max(6, ...sections.flatMap((section) => [section.area_cm2, section.frontal_width_cm, section.sagittal_diameter_cm])) * 1.08;
+  const vowel = selectedVowel();
+  const areaFunction = buildTubeAreaFunction(geometry, vowel, PREVIEW_SAMPLE_RATE);
+  const vowelSections = areaFunction.areas_cm2.map((area, index) => ({
+    position: areaFunction.areas_cm2.length > 1 ? index / (areaFunction.areas_cm2.length - 1) : 0.5,
+    vowel_area_cm2: area,
+    vowel_width_cm: areaFunction.cross_sections_2_5d[index]?.coronal_width_cm ?? 1,
+  }));
+  const maxValue = Math.max(
+    6,
+    ...sections.flatMap((section) => [section.area_cm2, section.frontal_width_cm, section.sagittal_diameter_cm]),
+    ...areaFunction.areas_cm2,
+    ...vowelSections.map((section) => section.vowel_width_cm)
+  ) * 1.08;
   const xAt = (position) => plot.left + position * (plot.right - plot.left);
   const yAt = (value) => plot.bottom - value / maxValue * (plot.bottom - plot.top);
+  state.areaTuningPlot = { plot, maxValue, canvasWidth: width, canvasHeight: height, vowel };
 
   for (const region of tractRegions) {
     ctx.fillStyle = region.color;
@@ -1476,18 +1625,68 @@ function drawTractProfile(geometry = state.vocalTractGeometry) {
     ctx.lineTo(plot.right, y);
     ctx.stroke();
   }
-  drawProfileLine(ctx, sections, "area_cm2", "#8a542f", xAt, yAt, 2.5);
-  drawProfileLine(ctx, sections, "frontal_width_cm", "#36648c", xAt, yAt, 2);
+  drawProfileLine(ctx, sections, "area_cm2", "rgba(138,84,47,0.32)", xAt, yAt, 1.5);
+  drawProfileLine(ctx, vowelSections, "vowel_area_cm2", "#8a542f", xAt, yAt, 3);
+  drawProfileLine(ctx, sections, "frontal_width_cm", "rgba(54,100,140,0.30)", xAt, yAt, 1.5);
+  drawProfileLine(ctx, vowelSections, "vowel_width_cm", "#36648c", xAt, yAt, 2.5);
   drawProfileLine(ctx, sections, "sagittal_diameter_cm", "#236b5b", xAt, yAt, 2);
+  drawAreaTuningHandles(ctx, areaFunction, xAt, yAt);
   ctx.textAlign = "center";
   ctx.fillStyle = "#666257";
   ctx.fillText(`声門からの距離 0 - ${format(geometry.vocal_tract_length_cm, 1)} cm`, (plot.left + plot.right) / 2, height - 12);
   drawChartLegend(ctx, [
-    ["断面積 cm²", "#8a542f"],
-    ["正面幅 cm", "#36648c"],
+    ["母音断面積 cm²", "#8a542f"],
+    ["母音横幅 cm", "#36648c"],
     ["側面径 cm", "#236b5b"],
   ], plot.right - 290, plot.top + 12);
   renderTractRegionSummary(geometry.region_summary, geometry.honda_articulatory_space, geometry.side_branch_guides);
+}
+
+function drawAreaTuningHandles(ctx, areaFunction, xAt, yAt) {
+  const mode = state.tractEditMode === "width" ? "width" : "area";
+  const points = mode === "width"
+    ? normalizedWidthTuningPoints(areaFunction.vowel_shape)
+    : normalizedAreaTuningPoints(areaFunction.vowel_shape);
+  const values = mode === "width"
+    ? areaFunction.cross_sections_2_5d.map((section) => section.coronal_width_cm)
+    : areaFunction.areas_cm2;
+  const color = mode === "width" ? "#36648c" : "#8a542f";
+  ctx.save();
+  for (let index = 0; index < points.length; index++) {
+    const point = points[index];
+    const value = areaAtPositionFromArray(values, point.position);
+    const x = xAt(point.position);
+    const y = yAt(value);
+    ctx.fillStyle = Math.abs(point.gain - 1) > 0.0001 ? "#b9472f" : "#fffdf8";
+    ctx.strokeStyle = color;
+    ctx.lineWidth = 1.8;
+    ctx.beginPath();
+    ctx.arc(x, y, 6.5, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.stroke();
+    const selected = state.selectedTractTuningHandle;
+    if ((state.areaTuningDrag?.handleIndex === index && state.areaTuningDrag?.mode === mode)
+      || (selected?.handleIndex === index && selected?.mode === mode && selected?.vowel === areaFunction.vowel_shape)) {
+      ctx.strokeStyle = "rgba(185,71,47,0.35)";
+      ctx.beginPath();
+      ctx.moveTo(x, y - 15);
+      ctx.lineTo(x, y + 15);
+      ctx.moveTo(x - 15, y);
+      ctx.lineTo(x + 15, y);
+      ctx.stroke();
+    }
+  }
+  ctx.restore();
+}
+
+function areaAtPositionFromArray(areas, position) {
+  if (!areas?.length) return 1;
+  if (areas.length === 1) return areas[0];
+  const scaled = clamp(position, 0, 1) * (areas.length - 1);
+  const leftIndex = Math.floor(scaled);
+  const rightIndex = Math.min(areas.length - 1, leftIndex + 1);
+  const t = scaled - leftIndex;
+  return areas[leftIndex] + (areas[rightIndex] - areas[leftIndex]) * t;
 }
 
 function drawTractCrossSectionProfile(geometry = state.vocalTractGeometry, vowel = selectedVowel()) {
@@ -4015,6 +4214,115 @@ function renderConstraints() {
   els.constraintOutput.textContent = JSON.stringify(buildExport(), null, 2);
 }
 
+function renderSyllableDatasetPreview() {
+  const tokens = selectedSyllableTokens();
+  if (!tokens.includes(state.selectedSyllableToken)) state.selectedSyllableToken = tokens[0] ?? "a";
+  if (els.syllableSetSummary) {
+    els.syllableSetSummary.textContent = `${tokens.length} samples / ${selectedSyllableSetKey()} / ${els.ttsOutputLanguageInput?.value ?? "ja-JP"}`;
+  }
+  if (els.syllableTokenList) {
+    els.syllableTokenList.innerHTML = "";
+    for (const token of tokens) {
+      const item = document.createElement("button");
+      item.type = "button";
+      item.textContent = `/${token}/`;
+      item.classList.toggle("active", token === state.selectedSyllableToken);
+      item.setAttribute("aria-pressed", token === state.selectedSyllableToken ? "true" : "false");
+      item.addEventListener("click", () => {
+        state.selectedSyllableToken = token;
+        renderSyllableDatasetPreview();
+      });
+      els.syllableTokenList.appendChild(item);
+    }
+  }
+}
+
+function updateTractEditStatus() {
+  if (!els.tractEditStatus) return;
+  const vowel = selectedVowel();
+  const mode = state.tractEditMode === "width" ? "width" : "area";
+  const points = mode === "width" ? normalizedWidthTuningPoints(vowel) : normalizedAreaTuningPoints(vowel);
+  const changed = points.filter((point) => Math.abs(point.gain - 1) > 0.0001);
+  const label = mode === "width" ? "W(x)横幅" : "A(x)断面積";
+  els.tractEditStatus.textContent = changed.length
+    ? `/${vowel}/ ${label}補正: ${changed.map((point) => `${Math.round(point.position * 100)}%=${point.gain.toFixed(2)}x`).join(" / ")}`
+    : `/${vowel}/ ${label}補正なし。丸い補正点を上下にドラッグできます。`;
+  const selected = state.selectedTractTuningHandle;
+  if (els.tractSelectedPointValue) {
+    const selectedPoints = selected?.mode === "width" ? normalizedWidthTuningPoints(vowel) : normalizedAreaTuningPoints(vowel);
+    const point = selected?.vowel === vowel ? selectedPoints[selected.handleIndex] : null;
+    els.tractSelectedPointValue.textContent = point ? `${Math.round(point.position * 100)}%  ${point.gain.toFixed(2)}x` : "点を選択";
+  }
+}
+
+function exportVowelAreaTuning() {
+  const exported = {};
+  for (const vowel of Object.keys(vowelFormants)) {
+    const points = normalizedAreaTuningPoints(vowel);
+    if (!points.some((point) => Math.abs(point.gain - 1) > 0.0001)) continue;
+    exported[vowel] = points;
+  }
+  return {
+    schema_version: "vowel_area_tuning_0.1",
+    gain_range: { min: AREA_TUNING_GAIN_MIN, max: AREA_TUNING_GAIN_MAX },
+    control_points: exported,
+  };
+}
+
+function exportVowelWidthTuning() {
+  const exported = {};
+  for (const vowel of Object.keys(vowelFormants)) {
+    const points = normalizedWidthTuningPoints(vowel);
+    if (!points.some((point) => Math.abs(point.gain - 1) > 0.0001)) continue;
+    exported[vowel] = points;
+  }
+  return {
+    schema_version: "vowel_width_tuning_0.1",
+    gain_range: { min: WIDTH_TUNING_GAIN_MIN, max: WIDTH_TUNING_GAIN_MAX },
+    control_points: exported,
+    semantics: "coronal width gain at fixed sagittal height; total A(x) is recomputed from the 2.5D section",
+  };
+}
+
+function normalizeLoadedAreaTuning(data) {
+  const source = data?.control_points ?? data;
+  const next = {};
+  if (!source || typeof source !== "object") return next;
+  for (const vowel of Object.keys(vowelFormants)) {
+    if (!Array.isArray(source[vowel])) continue;
+    const points = source[vowel]
+      .map((point) => ({
+        position: Number(point.position),
+        gain: Number(point.gain),
+      }))
+      .filter((point) => Number.isFinite(point.position) && Number.isFinite(point.gain));
+    if (!points.length) continue;
+    next[vowel] = points.map((point) => ({
+      position: Number(clamp(point.position, 0, 1).toFixed(4)),
+      gain: Number(clamp(point.gain, AREA_TUNING_GAIN_MIN, AREA_TUNING_GAIN_MAX).toFixed(4)),
+    }));
+  }
+  return next;
+}
+
+function normalizeLoadedWidthTuning(data) {
+  const source = data?.control_points ?? data;
+  const next = {};
+  if (!source || typeof source !== "object") return next;
+  for (const vowel of Object.keys(vowelFormants)) {
+    if (!Array.isArray(source[vowel])) continue;
+    const points = source[vowel]
+      .map((point) => ({ position: Number(point.position), gain: Number(point.gain) }))
+      .filter((point) => Number.isFinite(point.position) && Number.isFinite(point.gain));
+    if (!points.length) continue;
+    next[vowel] = points.map((point) => ({
+      position: Number(clamp(point.position, 0, 1).toFixed(4)),
+      gain: Number(clamp(point.gain, WIDTH_TUNING_GAIN_MIN, WIDTH_TUNING_GAIN_MAX).toFixed(4)),
+    }));
+  }
+  return next;
+}
+
 function overridesFromConstraints(constraints = {}) {
   const overrides = {};
   if (!constraints || typeof constraints !== "object") return overrides;
@@ -4271,6 +4579,9 @@ function buildExport() {
       respiratory_history: els.respiratoryHistoryInput.value,
       image_analysis_weight: Number((state.appliedImageWeight ?? selectedImageWeight()).toFixed(4)),
       preview_synthesis_backend: "tube",
+      tts_output_language: els.ttsOutputLanguageInput?.value ?? "ja-JP",
+      syllable_dataset_set: selectedSyllableSetKey(),
+      dataset_prefix: els.datasetPrefixInput?.value?.trim() || "voice_profile",
     },
     landmark_schema: landmarkSystem.schema,
     landmarks: state.landmarks,
@@ -4281,6 +4592,9 @@ function buildExport() {
     body_composition_summary: buildBodyCompositionSummary(),
     phonetic_target: currentPhoneticTargetSummary(),
     vocal_tract_geometry: state.vocalTractGeometry,
+    vowel_area_tuning: exportVowelAreaTuning(),
+    vowel_width_tuning: exportVowelWidthTuning(),
+    auditory_evaluation_log: state.auditoryEvaluationLog,
     voice_constraints: withoutRetiredConstraints(state.constraints),
     constraint_overrides: withoutReadOnlyDerivedOverrides(withoutRetiredConstraints(state.constraintOverrides)),
     performance_range_overrides: withoutReadOnlyDerivedOverrides(withoutRetiredConstraints(state.performanceRangeOverrides)),
@@ -4524,13 +4838,170 @@ function currentPhoneticTargetSummary() {
 
 const PREVIEW_REFERENCE_SAMPLE_RATE = 22050;
 const PREVIEW_SAMPLE_RATE = 44100;
+const AREA_TUNING_HANDLES = Object.freeze([0.08, 0.2, 0.34, 0.5, 0.66, 0.82, 0.94]);
+const AREA_TUNING_GAIN_MIN = 0.45;
+const AREA_TUNING_GAIN_MAX = 1.8;
+const WIDTH_TUNING_GAIN_MIN = 0.55;
+const WIDTH_TUNING_GAIN_MAX = 1.65;
+const SYLLABLE_SETS = Object.freeze({
+  vowels: ["a", "i", "u", "e", "o"],
+  japanese_core_cv: [
+    "a", "i", "u", "e", "o",
+    "ka", "ki", "ku", "ke", "ko",
+    "sa", "shi", "su", "se", "so",
+    "ta", "chi", "tsu", "te", "to",
+    "na", "ni", "nu", "ne", "no",
+    "ha", "hi", "fu", "he", "ho",
+    "ma", "mi", "mu", "me", "mo",
+    "ya", "yu", "yo",
+    "ra", "ri", "ru", "re", "ro",
+    "wa", "wo", "n",
+  ],
+  japanese_extended_cv: [
+    "a", "i", "u", "e", "o",
+    "ka", "ki", "ku", "ke", "ko",
+    "ga", "gi", "gu", "ge", "go",
+    "sa", "shi", "su", "se", "so",
+    "za", "ji", "zu", "ze", "zo",
+    "ta", "chi", "tsu", "te", "to",
+    "da", "di", "du", "de", "do",
+    "na", "ni", "nu", "ne", "no",
+    "ha", "hi", "fu", "he", "ho",
+    "ba", "bi", "bu", "be", "bo",
+    "pa", "pi", "pu", "pe", "po",
+    "ma", "mi", "mu", "me", "mo",
+    "ya", "yu", "yo",
+    "ra", "ri", "ru", "re", "ro",
+    "wa", "wo", "n",
+  ],
+});
 
 function selectedVowel() {
   return vowelFormants[els.vowelSelect.value] ? els.vowelSelect.value : "a";
 }
 
-function synthesizeVowel(vowel = selectedVowel()) {
-  return synthesizeTubeVowel(vowel);
+function selectedSyllableSetKey() {
+  const key = els.syllableSetInput?.value ?? "vowels";
+  return SYLLABLE_SETS[key] ? key : "vowels";
+}
+
+function selectedSyllableTokens() {
+  return SYLLABLE_SETS[selectedSyllableSetKey()] ?? SYLLABLE_SETS.vowels;
+}
+
+function selectedSyllableToken() {
+  const tokens = selectedSyllableTokens();
+  return tokens.includes(state.selectedSyllableToken) ? state.selectedSyllableToken : tokens[0] ?? selectedVowel();
+}
+
+function defaultAreaTuningPoints() {
+  return AREA_TUNING_HANDLES.map((position) => ({ position, gain: 1 }));
+}
+
+function normalizedAreaTuningPoints(vowel = selectedVowel()) {
+  const saved = Array.isArray(state.vowelAreaTuning?.[vowel]) ? state.vowelAreaTuning[vowel] : [];
+  const byPosition = new Map(saved.map((point) => [Number(point.position).toFixed(3), point]));
+  return AREA_TUNING_HANDLES.map((position) => {
+    const savedPoint = byPosition.get(Number(position).toFixed(3));
+    const gain = Number(savedPoint?.gain);
+    return {
+      position,
+      gain: Number(clamp(Number.isFinite(gain) ? gain : 1, AREA_TUNING_GAIN_MIN, AREA_TUNING_GAIN_MAX).toFixed(4)),
+    };
+  });
+}
+
+function setAreaTuningPoint(vowel, handleIndex, gain) {
+  const points = normalizedAreaTuningPoints(vowel);
+  const point = points[handleIndex];
+  if (!point) return;
+  point.gain = Number(clamp(gain, AREA_TUNING_GAIN_MIN, AREA_TUNING_GAIN_MAX).toFixed(4));
+  state.vowelAreaTuning = {
+    ...(state.vowelAreaTuning ?? {}),
+    [vowel]: points,
+  };
+  state.lastWav = null;
+}
+
+function normalizedWidthTuningPoints(vowel = selectedVowel()) {
+  const saved = Array.isArray(state.vowelWidthTuning?.[vowel]) ? state.vowelWidthTuning[vowel] : [];
+  const byPosition = new Map(saved.map((point) => [Number(point.position).toFixed(3), point]));
+  return AREA_TUNING_HANDLES.map((position) => {
+    const savedPoint = byPosition.get(Number(position).toFixed(3));
+    const gain = Number(savedPoint?.gain);
+    return {
+      position,
+      gain: Number(clamp(Number.isFinite(gain) ? gain : 1, WIDTH_TUNING_GAIN_MIN, WIDTH_TUNING_GAIN_MAX).toFixed(4)),
+    };
+  });
+}
+
+function setWidthTuningPoint(vowel, handleIndex, gain) {
+  const points = normalizedWidthTuningPoints(vowel);
+  const point = points[handleIndex];
+  if (!point) return;
+  point.gain = Number(clamp(gain, WIDTH_TUNING_GAIN_MIN, WIDTH_TUNING_GAIN_MAX).toFixed(4));
+  state.vowelWidthTuning = {
+    ...(state.vowelWidthTuning ?? {}),
+    [vowel]: points,
+  };
+  state.lastWav = null;
+}
+
+function resetAreaTuning(vowel = selectedVowel()) {
+  const nextArea = { ...(state.vowelAreaTuning ?? {}) };
+  const nextWidth = { ...(state.vowelWidthTuning ?? {}) };
+  delete nextArea[vowel];
+  delete nextWidth[vowel];
+  state.vowelAreaTuning = nextArea;
+  state.vowelWidthTuning = nextWidth;
+  state.selectedTractTuningHandle = null;
+  state.lastWav = null;
+  updateTractEditStatus();
+  renderConstraints();
+  draw();
+}
+
+function areaTuningGainAt(position, vowel = selectedVowel()) {
+  const points = normalizedAreaTuningPoints(vowel);
+  if (!points.length) return 1;
+  if (position <= points[0].position) return points[0].gain;
+  for (let index = 1; index < points.length; index++) {
+    const right = points[index];
+    if (position > right.position) continue;
+    const left = points[index - 1];
+    const t = (position - left.position) / Math.max(0.0001, right.position - left.position);
+    const smoothT = t * t * (3 - 2 * t);
+    return left.gain + (right.gain - left.gain) * smoothT;
+  }
+  return points.at(-1).gain;
+}
+
+function widthTuningGainAt(position, vowel = selectedVowel()) {
+  const points = normalizedWidthTuningPoints(vowel);
+  if (position <= points[0].position) return points[0].gain;
+  for (let index = 1; index < points.length; index++) {
+    const right = points[index];
+    if (position > right.position) continue;
+    const left = points[index - 1];
+    const t = (position - left.position) / Math.max(0.0001, right.position - left.position);
+    const smoothT = t * t * (3 - 2 * t);
+    return left.gain + (right.gain - left.gain) * smoothT;
+  }
+  return points.at(-1).gain;
+}
+
+function applyAreaTuning(areas, vowel) {
+  const hasCustom = normalizedAreaTuningPoints(vowel).some((point) => Math.abs(point.gain - 1) > 0.0001);
+  if (!hasCustom) return areas;
+  return areas.map((area, index) => {
+    const position = areas.length > 1 ? index / (areas.length - 1) : 0.5;
+    return clamp(area * areaTuningGainAt(position, vowel), 0.07, 14);
+  });
+}
+
+function synthesizeVowel(vowel = selectedVowel(), options = {}) {
+  return synthesizeTubeVowel(vowel, options);
 }
 
 function constraintCenter(constraints, key, fallback) {
@@ -4686,7 +5157,7 @@ function areaStats(areas, start, end) {
   };
 }
 
-function synthesizeTubeVowel(vowel = selectedVowel()) {
+function synthesizeTubeVowel(vowel = selectedVowel(), options = {}) {
   const sampleRate = PREVIEW_SAMPLE_RATE;
   const constraints = state.constraints;
   const geometry = state.vocalTractGeometry ?? buildVocalTractGeometry();
@@ -4701,7 +5172,7 @@ function synthesizeTubeVowel(vowel = selectedVowel()) {
   const n = Math.floor(sampleRate * duration);
   const f0 = currentDerivedF0(constraints);
   const motorProfile = currentArticulationMotorProfile(constraints);
-  const areaFunction = buildTubeAreaFunction(geometry, vowel, sampleRate, motorProfile);
+  const areaFunction = buildTubeAreaFunction(geometry, vowel, sampleRate, motorProfile, options);
   const glottalParams = currentGlottalSourceParams(constraints, tension, inflammation, lumenNarrowing);
   const effectiveClosure = glottalClosureProxyFromOpenQuotient(glottalParams.open_quotient);
   const aspirationNoiseScale = 1;
@@ -4782,7 +5253,7 @@ function currentArticulationMotorProfile(constraints) {
   };
 }
 
-function buildTubeAreaFunction(geometry, vowel, sampleRate, motorProfile = currentArticulationMotorProfile(state.constraints)) {
+function buildTubeAreaFunction(geometry, vowel, sampleRate, motorProfile = currentArticulationMotorProfile(state.constraints), options = {}) {
   const fallbackVtl = state.constraints.vocal_tract_length_cm?.center ?? 15.5;
   const vtlCm = geometry?.vocal_tract_length_cm ?? fallbackVtl;
   const cCmPerS = 35000;
@@ -4796,8 +5267,17 @@ function buildTubeAreaFunction(geometry, vowel, sampleRate, motorProfile = curre
     rawAreas.push(section.area_cm2);
   }
   const articulationTarget = vowelArticulationTarget(vowel);
-  const warpedAreas = applyVowelAreaWarp(rawAreas, vowel, motorProfile, articulationTarget);
-  const crossSections2_5d = realizeVowelCrossSections2_5D(rawCrossSections, warpedAreas, vowel, articulationTarget, motorProfile);
+  const useManualTuning = options.manualTuning !== false;
+  const vowelWarpedAreas = applyVowelAreaWarp(rawAreas, vowel, motorProfile, articulationTarget);
+  const warpedAreas = useManualTuning ? applyAreaTuning(vowelWarpedAreas, vowel) : vowelWarpedAreas;
+  const crossSections2_5d = realizeVowelCrossSections2_5D(
+    rawCrossSections,
+    warpedAreas,
+    vowel,
+    articulationTarget,
+    motorProfile,
+    { manualWidthTuning: useManualTuning }
+  );
   const derivedAreas = crossSections2_5d.map((section) => section.total_area_cm2);
   const formantReference = currentVowelReference(vowel, vtlCm);
   return {
@@ -4811,6 +5291,9 @@ function buildTubeAreaFunction(geometry, vowel, sampleRate, motorProfile = curre
     section_length_cm: Number((vtlCm / tubeCount).toFixed(4)),
     areas_cm2: derivedAreas.map((area) => Number(area.toFixed(4))),
     raw_areas_cm2: rawAreas.map((area) => Number(area.toFixed(4))),
+    vowel_area_tuning: normalizedAreaTuningPoints(vowel),
+    vowel_width_tuning: normalizedWidthTuningPoints(vowel),
+    manual_tuning_applied: useManualTuning,
     cross_sections_2_5d: crossSections2_5d,
     phonetic_target_profile: {
       id: formantReference.profile_id,
@@ -4912,7 +5395,7 @@ function crossSectionAtPosition(sections, position) {
   return { ...last, position: Number(position.toFixed(5)) };
 }
 
-function realizeVowelCrossSections2_5D(rawSections, warpedAreas, vowel, articulationTarget, motorProfile) {
+function realizeVowelCrossSections2_5D(rawSections, warpedAreas, vowel, articulationTarget, motorProfile, options = {}) {
   const gestureExecution = clamp(motorProfile.gesture_execution ?? motorProfile.articulatory_range_utilization, 0.18, GESTURE_EXECUTION_EFFECTIVE_MAX);
   const tongueAvailability = clamp(motorProfile.tongue_dorsum_performance_range ?? motorProfile.tongue_dorsum_range_utilization, 0.2, 1);
   const labialAvailability = clamp(motorProfile.labial_transverse_performance_range ?? motorProfile.labial_transverse_range_utilization, 0.2, 1);
@@ -4922,15 +5405,18 @@ function realizeVowelCrossSections2_5D(rawSections, warpedAreas, vowel, articula
   const tongueGrooveTarget = clamp(crossTarget.tongue_groove_target ?? 0, 0, 1);
   const lateralChannelTarget = clamp(crossTarget.lateral_channel_target ?? 0, 0, 1);
   return rawSections.map((raw, index) => {
-    const totalArea = clamp(warpedAreas[index], 0.07, 14);
+    const baseTotalArea = clamp(warpedAreas[index], 0.07, 14);
     const terminalWeight = Math.exp(-0.5 * Math.pow((raw.position - 0.94) / 0.105, 2));
     const tongueZone = Math.exp(-0.5 * Math.pow((raw.position - 0.72) / 0.18, 2));
     const aspectFactor = 1 + (lipAspectTarget - 1) * terminalWeight * labialAvailability * gestureExecution;
     const aspectRatio = clamp(raw.aspect_ratio * aspectFactor, 0.16, 12);
     const shapeFactor = clamp(raw.ellipse_shape_factor, 0.45, 1);
-    const equivalentRectangleArea = totalArea / shapeFactor;
-    const coronalWidth = Math.sqrt(equivalentRectangleArea * aspectRatio);
+    const equivalentRectangleArea = baseTotalArea / shapeFactor;
+    const widthGain = options.manualWidthTuning === false ? 1 : widthTuningGainAt(raw.position, vowel);
+    const coronalWidth = Math.sqrt(equivalentRectangleArea * aspectRatio) * widthGain;
     const sagittalHeight = Math.sqrt(equivalentRectangleArea / aspectRatio);
+    const totalArea = clamp(coronalWidth * sagittalHeight * shapeFactor, 0.07, 14);
+    const realizedAspectRatio = clamp(coronalWidth / Math.max(0.08, sagittalHeight), 0.16, 12);
     const constriction = clamp(1 - totalArea / Math.max(0.08, raw.area_cm2), 0, 1);
     const tongueGrooveDepth = clamp(tongueGrooveTarget * tongueAvailability * grooveAvailability * gestureExecution * tongueZone, 0, 1);
     const lateralDemand = clamp(lateralChannelTarget * 3 + tongueGrooveTarget * 0.45, 0, 1);
@@ -4947,7 +5433,8 @@ function realizeVowelCrossSections2_5D(rawSections, warpedAreas, vowel, articula
       sagittal_height_cm: Number(sagittalHeight.toFixed(4)),
       coronal_width_cm: Number(coronalWidth.toFixed(4)),
       ellipse_shape_factor: Number(shapeFactor.toFixed(5)),
-      aspect_ratio: Number(aspectRatio.toFixed(4)),
+      aspect_ratio: Number(realizedAspectRatio.toFixed(4)),
+      width_tuning_gain: Number(widthGain.toFixed(4)),
       tongue_groove_depth: Number(tongueGrooveDepth.toFixed(4)),
       lateral_channel_activation: Number(lateralActivation.toFixed(4)),
       projection: "total_area_cm2 is supplied to the current single-channel 1D tube solver",
@@ -5713,13 +6200,227 @@ async function playVowel() {
   if (!Object.keys(state.constraints).length) analyze();
   const audio = synthesizeVowel();
   state.lastWav = encodeWav(audio.samples, audio.sampleRate);
-  const context = new AudioContext({ sampleRate: audio.sampleRate });
-  const buffer = context.createBuffer(1, audio.samples.length, audio.sampleRate);
-  buffer.copyToChannel(audio.samples, 0);
+  await playAudioSamples(audio.samples, audio.sampleRate);
+}
+
+async function playAudioSamples(samples, sampleRate) {
+  const context = new AudioContext({ sampleRate });
+  const buffer = context.createBuffer(1, samples.length, sampleRate);
+  buffer.copyToChannel(samples, 0);
   const source = context.createBufferSource();
   source.buffer = buffer;
   source.connect(context.destination);
   source.start();
+}
+
+async function playVowelCalibrationVariant(manualTuning) {
+  if (!Object.keys(state.constraints).length) analyze();
+  const vowel = selectedVowel();
+  const audio = synthesizeVowel(vowel, { manualTuning });
+  await playAudioSamples(audio.samples, audio.sampleRate);
+}
+
+function renderAuditoryEvaluation() {
+  const vowel = selectedVowel();
+  const records = state.auditoryEvaluationLog.filter((entry) => entry.vowel === vowel);
+  const latest = records.at(-1);
+  if (els.auditoryEvaluationVowel) els.auditoryEvaluationVowel.textContent = `/${vowel}/ の評価`;
+  if (els.phonemeClarityInput) els.phonemeClarityInput.value = String(latest?.phoneme_clarity ?? 3);
+  if (els.targetMatchInput) els.targetMatchInput.value = String(latest?.target_match ?? 3);
+  if (els.auditoryNoteInput) els.auditoryNoteInput.value = latest?.note ?? "";
+  updateAuditoryRatingOutputs();
+  if (!els.auditoryEvaluationHistory) return;
+  els.auditoryEvaluationHistory.innerHTML = "";
+  for (const entry of records.slice(-5).reverse()) {
+    const row = document.createElement("div");
+    row.className = "auditory-evaluation-entry";
+    const token = document.createElement("strong");
+    token.textContent = `/${entry.vowel}/`;
+    const score = document.createElement("span");
+    score.textContent = `判別 ${entry.phoneme_clarity}/5 · 一致 ${entry.target_match}/5`;
+    const note = document.createElement("span");
+    note.textContent = entry.note || "メモなし";
+    row.append(token, score, note);
+    els.auditoryEvaluationHistory.appendChild(row);
+  }
+}
+
+function updateAuditoryRatingOutputs() {
+  if (els.phonemeClarityValue) els.phonemeClarityValue.textContent = `${num(els.phonemeClarityInput, 3)} / 5`;
+  if (els.targetMatchValue) els.targetMatchValue.textContent = `${num(els.targetMatchInput, 3)} / 5`;
+}
+
+function recordAuditoryEvaluation() {
+  const vowel = selectedVowel();
+  state.auditoryEvaluationLog.push({
+    id: `${Date.now()}-${vowel}`,
+    created_at: new Date().toISOString(),
+    vowel,
+    phoneme_clarity: clamp(Math.round(num(els.phonemeClarityInput, 3)), 1, 5),
+    target_match: clamp(Math.round(num(els.targetMatchInput, 3)), 1, 5),
+    note: String(els.auditoryNoteInput?.value ?? "").trim(),
+    area_tuning: normalizedAreaTuningPoints(vowel),
+    width_tuning: normalizedWidthTuningPoints(vowel),
+  });
+  state.auditoryEvaluationLog = state.auditoryEvaluationLog.slice(-100);
+  renderAuditoryEvaluation();
+  renderConstraints();
+}
+
+function normalizeAuditoryEvaluationLog(data) {
+  if (!Array.isArray(data)) return [];
+  return data.slice(-100).map((entry, index) => ({
+    id: String(entry?.id ?? `migrated-${index}`),
+    created_at: String(entry?.created_at ?? ""),
+    vowel: vowelFormants[entry?.vowel] ? entry.vowel : "a",
+    phoneme_clarity: clamp(Math.round(Number(entry?.phoneme_clarity) || 3), 1, 5),
+    target_match: clamp(Math.round(Number(entry?.target_match) || 3), 1, 5),
+    note: String(entry?.note ?? "").slice(0, 400),
+    area_tuning: Array.isArray(entry?.area_tuning) ? entry.area_tuning : [],
+    width_tuning: Array.isArray(entry?.width_tuning) ? entry.width_tuning : [],
+  }));
+}
+
+async function playSelectedSyllablePreview() {
+  if (!Object.keys(state.constraints).length) analyze();
+  const token = selectedSyllableToken();
+  const audio = synthesizeSyllable(token);
+  await playAudioSamples(audio.samples, audio.sampleRate);
+  if (els.datasetExportStatus) els.datasetExportStatus.textContent = `/${token}/ を再生しました。`;
+}
+
+function parseSyllableToken(token) {
+  if (token === "n") return { consonant: "n", vowel: "u", moraic_nasal: true };
+  const normalized = String(token || "a").toLowerCase();
+  const vowel = [...normalized].reverse().find((char) => vowelFormants[char]) ?? "a";
+  const consonant = normalized.endsWith(vowel) ? normalized.slice(0, -1) : "";
+  return { consonant, vowel, moraic_nasal: false };
+}
+
+function synthesizeSyllable(token) {
+  const parsed = parseSyllableToken(token);
+  const vowelAudio = synthesizeVowel(parsed.vowel);
+  const onset = synthesizeConsonantOnset(parsed, vowelAudio.sampleRate, currentDerivedF0(state.constraints));
+  const samples = new Float32Array(onset.length + vowelAudio.samples.length);
+  samples.set(onset, 0);
+  samples.set(vowelAudio.samples, onset.length);
+  applyFade(samples, 0, Math.min(samples.length, Math.floor(vowelAudio.sampleRate * 0.012)));
+  applyFade(samples, Math.max(0, samples.length - Math.floor(vowelAudio.sampleRate * 0.04)), samples.length, true);
+  normalize(samples, 0.92);
+  return {
+    ...vowelAudio,
+    token,
+    vowel: parsed.vowel,
+    consonant: parsed.consonant,
+    samples,
+    onset_model: onsetDescriptor(parsed),
+  };
+}
+
+function synthesizeConsonantOnset(parsed, sampleRate, f0) {
+  const consonant = parsed.consonant;
+  const durationMs = parsed.moraic_nasal ? 180
+    : ["s", "sh", "z", "j", "h", "f"].includes(consonant) ? 95
+      : ["k", "g", "t", "d", "p", "b", "ch", "ts"].includes(consonant) ? 72
+        : ["m", "n", "r", "y", "w"].includes(consonant) ? 64
+          : 0;
+  const count = Math.floor(sampleRate * durationMs / 1000);
+  const onset = new Float32Array(count);
+  if (!count) return onset;
+  let seed = 17 + consonant.length * 31;
+  const noise = () => {
+    seed = (seed * 1664525 + 1013904223) >>> 0;
+    return ((seed / 0xffffffff) * 2 - 1);
+  };
+  let state1 = 0;
+  let state2 = 0;
+  for (let index = 0; index < count; index++) {
+    const t = index / Math.max(1, count - 1);
+    const attack = Math.min(1, t / 0.18);
+    const release = Math.min(1, (1 - t) / 0.35);
+    const env = Math.sin(Math.PI * Math.min(1, t)) * Math.min(attack, release);
+    let sample = 0;
+    if (parsed.moraic_nasal || ["m", "n"].includes(consonant)) {
+      sample = Math.sin(2 * Math.PI * f0 * index / sampleRate) * 0.22 + Math.sin(2 * Math.PI * 260 * index / sampleRate) * 0.08;
+      sample *= env;
+    } else if (["s", "sh", "z", "j", "h", "f", "ch", "ts"].includes(consonant)) {
+      const cutoff = ["sh", "ch", "j"].includes(consonant) ? 3600 : consonant === "f" || consonant === "h" ? 1800 : 5200;
+      state1 += (noise() - state1) * 0.72;
+      state2 += (state1 - state2) * clamp(cutoff / sampleRate, 0.02, 0.4);
+      sample = (state1 - state2) * 0.42 * env;
+      if (["z", "j"].includes(consonant)) sample += Math.sin(2 * Math.PI * f0 * index / sampleRate) * 0.08 * env;
+    } else if (["k", "g", "t", "d", "p", "b"].includes(consonant)) {
+      const burst = t < 0.24 ? Math.pow(1 - t / 0.24, 2) : 0;
+      sample = noise() * burst * 0.55 + Math.sin(2 * Math.PI * f0 * index / sampleRate) * (["g", "d", "b"].includes(consonant) ? 0.05 : 0) * env;
+    } else if (consonant === "r") {
+      const tap = Math.exp(-Math.pow((t - 0.32) / 0.12, 2));
+      sample = (Math.sin(2 * Math.PI * 1450 * index / sampleRate) * 0.18 + noise() * 0.08) * tap;
+    } else if (["y", "w"].includes(consonant)) {
+      const glideHz = consonant === "y" ? 1800 : 520;
+      sample = Math.sin(2 * Math.PI * glideHz * index / sampleRate) * 0.10 * env;
+    }
+    onset[index] = sample;
+  }
+  return onset;
+}
+
+function onsetDescriptor(parsed) {
+  return {
+    schema_version: "cv_onset_placeholder_0.1",
+    consonant: parsed.consonant,
+    moraic_nasal: parsed.moraic_nasal,
+    note: "Simple browser placeholder onset for dataset scaffolding; replace with the future temporal TTS/articulation layer.",
+  };
+}
+
+function applyFade(samples, start, end, fadeOut = false) {
+  const length = Math.max(1, end - start);
+  for (let index = start; index < end; index++) {
+    const t = (index - start) / length;
+    const gain = fadeOut ? 1 - t : t;
+    samples[index] *= clamp(gain, 0, 1);
+  }
+}
+
+async function exportSyllableDataset() {
+  if (!Object.keys(state.constraints).length) analyze();
+  const tokens = selectedSyllableTokens();
+  const prefix = safeFilePart(els.datasetPrefixInput?.value || els.projectTitleInput.value || "voice_profile");
+  const entries = [];
+  const samples = [];
+  for (const token of tokens) {
+    const audio = synthesizeSyllable(token);
+    const wavName = `wav/${prefix}_${token}.wav`;
+    entries.push({ name: wavName, data: encodeWav(audio.samples, audio.sampleRate) });
+    samples.push({
+      id: token,
+      file: wavName,
+      token,
+      vowel: audio.vowel,
+      consonant: audio.consonant,
+      sample_rate_hz: audio.sampleRate,
+      duration_s: Number((audio.samples.length / audio.sampleRate).toFixed(4)),
+      derived_f0_hz: audio.derived_f0_hz,
+      area_function: areaFunctionDescriptor(audio.area_function),
+      onset_model: audio.onset_model,
+    });
+  }
+  const metadata = {
+    schema_version: "character_voice_lab_syllable_dataset_0.1",
+    app_version: APP_VERSION,
+    created_at: new Date().toISOString(),
+    project_title: els.projectTitleInput.value.trim() || "voice_profile",
+    language: els.ttsOutputLanguageInput?.value ?? "ja-JP",
+    syllable_set: selectedSyllableSetKey(),
+    synthesis_backend: "area_function_tube",
+    profile: buildExport(),
+    samples,
+    ethics: "Generated synthetic audio and local design metadata only; no participant-level records, source recordings, or clinical images are included.",
+  };
+  entries.push({ name: "metadata.json", data: JSON.stringify(metadata, null, 2) });
+  const blob = await projectPackage.createZip(entries);
+  download(`${localDateStamp()}-${prefix}-${selectedSyllableSetKey()}-syllables.zip`, blob);
+  if (els.datasetExportStatus) els.datasetExportStatus.textContent = `${tokens.length}件の音節サンプルを書き出しました。`;
 }
 
 function encodeWav(samples, sampleRate) {
@@ -5879,6 +6580,9 @@ function applyProfile(data) {
     els.exerciseInput.value = data.inputs.exercise_habit ?? els.exerciseInput.value;
     els.dietInput.value = data.inputs.diet_habit ?? els.dietInput.value;
     els.respiratoryHistoryInput.value = data.inputs.respiratory_history ?? els.respiratoryHistoryInput.value;
+    if (els.ttsOutputLanguageInput) els.ttsOutputLanguageInput.value = data.inputs.tts_output_language ?? els.ttsOutputLanguageInput.value;
+    if (els.syllableSetInput) els.syllableSetInput.value = SYLLABLE_SETS[data.inputs.syllable_dataset_set] ? data.inputs.syllable_dataset_set : els.syllableSetInput.value;
+    if (els.datasetPrefixInput) els.datasetPrefixInput.value = data.inputs.dataset_prefix ?? els.projectTitleInput.value ?? els.datasetPrefixInput.value;
     const savedImageWeight = Number(data.inputs.image_analysis_weight ?? data.inputs.global_image_weight);
     if (els.globalImageWeight) {
       els.globalImageWeight.value = Number.isFinite(savedImageWeight) ? clamp(savedImageWeight, 0, 1) : 0.7;
@@ -5894,6 +6598,9 @@ function applyProfile(data) {
   if (data.landmark_extraction) state.extractionReports = data.landmark_extraction;
   state.constraintOverrides = savedOverrides;
   state.performanceRangeOverrides = savedPerformanceRangeOverrides;
+  state.vowelAreaTuning = normalizeLoadedAreaTuning(data.vowel_area_tuning);
+  state.vowelWidthTuning = normalizeLoadedWidthTuning(data.vowel_width_tuning);
+  state.auditoryEvaluationLog = normalizeAuditoryEvaluationLog(data.auditory_evaluation_log);
   analyze();
   if (data.integrated_features) state.features = data.integrated_features;
   if (data.prior_resolution) state.priorResolution = data.prior_resolution;
@@ -5905,6 +6612,9 @@ function applyProfile(data) {
   renderDetailControls();
   renderFeatureTable();
   renderConstraints();
+  renderSyllableDatasetPreview();
+  updateTractEditStatus();
+  renderAuditoryEvaluation();
   draw();
 }
 
@@ -5961,6 +6671,12 @@ function init() {
   els.profileImageCanvas.addEventListener("pointerup", handleProfilePointerUp);
   els.profileImageCanvas.addEventListener("pointercancel", handleProfilePointerUp);
   els.profileImageCanvas.addEventListener("pointerleave", handleProfilePointerLeave);
+  els.tractProfileCanvas?.addEventListener("pointerdown", handleAreaTuningPointerDown);
+  els.tractProfileCanvas?.addEventListener("pointermove", handleAreaTuningPointerMove);
+  els.tractProfileCanvas?.addEventListener("pointerup", handleAreaTuningPointerUp);
+  els.tractProfileCanvas?.addEventListener("pointercancel", handleAreaTuningPointerUp);
+  els.tractProfileCanvas?.addEventListener("pointerleave", handleAreaTuningPointerUp);
+  els.tractProfileCanvas?.addEventListener("keydown", handleTractTuningKeyDown);
   for (const el of [els.ageInput, els.sexInput, els.heightInput, els.weightInput, els.bodyFatInput, els.primaryLanguageInput, els.phoneticTargetProfileInput, els.populationInput, els.referenceImageStyleInput, els.dataSourceInput, els.smokingInput, els.exerciseInput, els.dietInput, els.respiratoryHistoryInput].filter(Boolean)) {
     el.addEventListener("input", analyze);
   }
@@ -5982,8 +6698,33 @@ function init() {
   els.playSampleButton.addEventListener("click", playVowel);
   els.vowelSelect.addEventListener("input", () => {
     state.lastWav = null;
+    state.selectedTractTuningHandle = null;
+    updateTractEditStatus();
+    renderAuditoryEvaluation();
     draw();
   });
+  els.resetAreaTuningBtn?.addEventListener("click", () => resetAreaTuning(selectedVowel()));
+  els.editAreaModeBtn?.addEventListener("click", () => setTractEditMode("area"));
+  els.editWidthModeBtn?.addEventListener("click", () => setTractEditMode("width"));
+  els.nudgeTractDownBtn?.addEventListener("click", () => nudgeSelectedTractPoint(-0.01));
+  els.nudgeTractUpBtn?.addEventListener("click", () => nudgeSelectedTractPoint(0.01));
+  els.playUntunedVowelBtn?.addEventListener("click", () => playVowelCalibrationVariant(false));
+  els.playTunedVowelBtn?.addEventListener("click", () => playVowelCalibrationVariant(true));
+  els.phonemeClarityInput?.addEventListener("input", updateAuditoryRatingOutputs);
+  els.targetMatchInput?.addEventListener("input", updateAuditoryRatingOutputs);
+  els.recordAuditoryEvaluationBtn?.addEventListener("click", recordAuditoryEvaluation);
+  els.syllableSetInput?.addEventListener("input", () => {
+    renderSyllableDatasetPreview();
+    renderConstraints();
+  });
+  els.ttsOutputLanguageInput?.addEventListener("input", renderConstraints);
+  els.datasetPrefixInput?.addEventListener("input", renderConstraints);
+  els.previewSyllableBtn?.addEventListener("click", () => playSelectedSyllablePreview().catch((error) => {
+    if (els.datasetExportStatus) els.datasetExportStatus.textContent = `再生失敗: ${error.message}`;
+  }));
+  els.exportSyllableDatasetBtn?.addEventListener("click", () => exportSyllableDataset().catch((error) => {
+    if (els.datasetExportStatus) els.datasetExportStatus.textContent = `書き出し失敗: ${error.message}`;
+  }));
   els.saveWavBtn.addEventListener("click", () => {
     const vowel = selectedVowel();
     const audio = synthesizeVowel(vowel);
@@ -5995,6 +6736,9 @@ function init() {
   els.loadProjectBtn.addEventListener("click", () => els.loadProjectInput.click());
   els.loadProjectInput.addEventListener("change", (e) => loadProjectFile(e.target.files[0]));
   updateLandmarkHint(els.landmarkSelect.value, state.mode, "selected");
+  renderSyllableDatasetPreview();
+  updateTractEditStatus();
+  renderAuditoryEvaluation();
   draw();
 }
 

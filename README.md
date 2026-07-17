@@ -1,10 +1,10 @@
 # Character Voice Lab
 
-Current release version: Ver 1.0
+Current release version: Ver 1.1
 
 This is a dependency-free MVP for the character-oriented voice design experiment.
 
-Open `index.html` in a browser. It is intentionally independent from the Open WebUI runtime so the experimental data model can evolve without coupling to the main app. Future TTS integration should happen through the API boundary described in `API_CONTRACT.md`, not by embedding Irodori-TTS or VocalTractLab directly in this UI.
+Open `index.html` in a browser. It is intentionally independent from the Open WebUI runtime so the experimental data model can evolve without coupling to the main app. Future TTS integration should happen through the API boundary described in `API_CONTRACT.md`, not by embedding a specific TTS engine or VocalTractLab directly in this UI.
 
 The implementation roadmap is tracked in `IMPLEMENTATION_PLAN.md`.
 Literature and dataset gaps are tracked in `EVIDENCE_GAPS.md`.
@@ -47,6 +47,9 @@ Implemented:
 - landmark-calibrated midsagittal height, coronal width, elliptical section shape, and latent lateral-channel capacity per tract section
 - pharyngeal-length scaling connected to the 2.5D longitudinal area-function allocation rather than only to schematic drawing
 - 44.1 kHz 2.5D-derived acoustic-tube vowel preview that projects the designed cross sections to total `A(x)`, using length-correct Kelly-Lochbaum discretization, separate jaw-opening/oral-volume/lip-rounding vowel targets, an LF-style volume-velocity glottal input, tract-length-normalized distributed losses, simple nasal/sinus/piriform side-branch losses, and restrained soft-wall compliance
+- vowel-specific direct editing of total area `A(x)` and coronal width `W(x)`; width edits preserve sagittal height and recompute the projected tube area
+- auditory calibration workflow with untuned/tuned A/B playback, phoneme-clarity and target-match ratings, notes, and profile-persisted evaluation history
+- engine-independent vowel/CV dataset export; CV onsets remain explicitly experimental and can be selected and evaluated one token at a time
 - read-only F0 derived from the reference center, vocal-fold spring constant, baseline muscle tension, and the currently provisional inflammation mapping
 - respiratory source drive using VC/FVC, FEV1/PEF, maximum ventilation, maximum respiratory pressure, and speech-time support utilization; thoracic and abdominal volumes constrain maximum ventilation upstream
 - body resonance implemented as an independent parallel branch whose thoracic-volume-derived frequency, peak gain, and wet/dry coupling are stored separately
@@ -85,7 +88,7 @@ Not implemented in this MVP:
 
 - SMPL-X, MediaPipe Face Mesh, DensePose, or robust background removal
 - VocalTractLab adapter
-- final TTS or Irodori-TTS integration
+- final external TTS engine integration
 - validated anthropometric database
 - validated mapping from external neck breadth to internal airway dimensions; the prototype deliberately does not make that inference
 - participant-level linkage across external data sources

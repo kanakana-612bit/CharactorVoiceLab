@@ -5,8 +5,8 @@ const projectRoot = path.resolve(__dirname, "..");
 const indexHtml = fs.readFileSync(path.join(projectRoot, "index.html"), "utf8");
 const styleSheet = fs.readFileSync(path.join(projectRoot, "styles.css"), "utf8");
 
-if (!/<h1>Character Voice Lab <span class="version-badge">Ver 1\.0<\/span><\/h1>/.test(indexHtml)) {
-  throw new Error("The release version badge is not Ver 1.0");
+if (!/<h1>Character Voice Lab <span class="version-badge">Ver 1\.1<\/span><\/h1>/.test(indexHtml)) {
+  throw new Error("The release version badge is not Ver 1.1");
 }
 if (/話出力設定/.test(indexHtml) || !/<button class="tab-button" data-tab-target="outputTab">TTS設定<\/button>/.test(indexHtml)) {
   throw new Error("The output workflow tab is not consistently labeled TTS設定");
@@ -19,6 +19,17 @@ if (!/<select id="phoneticTargetProfileInput">\s*<option value="ja_JP_standard_n
 }
 if (/id="synthesisBackendSelect"|value="hybrid"|value="formant"/.test(indexHtml)) {
   throw new Error("Retired synthesis backend choices remain in the UI");
+}
+const retiredEnginePattern = new RegExp(["Iro", "dori"].join("") + "|" + ["iro", "dori"].join(""));
+if (retiredEnginePattern.test(indexHtml + fs.readFileSync(path.join(projectRoot, "README.md"), "utf8") + fs.readFileSync(path.join(projectRoot, "API_CONTRACT.md"), "utf8"))) {
+  throw new Error("A specific TTS engine name remains in the public UI/docs");
+}
+if (!/id="syllableSetInput"[\s\S]*value="japanese_core_cv"/.test(indexHtml)
+  || !/id="exportSyllableDatasetBtn"/.test(indexHtml)
+  || !/id="resetAreaTuningBtn"/.test(indexHtml)
+  || !/id="editWidthModeBtn"/.test(indexHtml)
+  || !/id="recordAuditoryEvaluationBtn"/.test(indexHtml)) {
+  throw new Error("Syllable dataset export or vowel A(x) tuning controls are missing from the UI");
 }
 if (!/<summary>2\.5D音響管・出力詳細<\/summary>/.test(indexHtml)) {
   throw new Error("The acoustic preview is not labeled as the sole 2.5D tube model");
@@ -359,6 +370,73 @@ if (!iAreaBaseline.articulation_target.cross_section || iAreaBaseline.cross_sect
 }
 const sumLateralArea = (areaFunction) => areaFunction.cross_sections_2_5d.reduce((total, section) => total + section.lateral_channel_area_cm2, 0);
 const totalAreaDelta = (left, right) => left.areas_cm2.reduce((total, area, index) => total + Math.abs(area - right.areas_cm2[index]), 0);
+state.vowelAreaTuning = { i: normalizedAreaTuningPoints("i").map((point) => point.position === 0.66 ? { ...point, gain: 1.35 } : point) };
+const iAreaTuned = buildTubeAreaFunction(state.vocalTractGeometry, "i", PREVIEW_SAMPLE_RATE);
+if (totalAreaDelta(iAreaBaseline, iAreaTuned) < 0.5 || iAreaTuned.vowel_area_tuning?.find((point) => point.position === 0.66)?.gain !== 1.35) {
+  throw new Error("Vowel-specific A(x) tuning did not alter or export the /i/ area function");
+}
+const iAreaWithoutManualTuning = buildTubeAreaFunction(
+  state.vocalTractGeometry,
+  "i",
+  PREVIEW_SAMPLE_RATE,
+  currentArticulationMotorProfile(state.constraints),
+  { manualTuning: false }
+);
+if (totalAreaDelta(iAreaBaseline, iAreaWithoutManualTuning) > 0.0001 || iAreaWithoutManualTuning.manual_tuning_applied !== false) {
+  throw new Error("Auditory A/B baseline did not bypass manual A(x) tuning");
+}
+const tunedI = synthesizeVowel("i");
+state.vowelAreaTuning = {};
+const untunedI = synthesizeVowel("i");
+let tunedWaveDelta = 0;
+for (let index = 0; index < Math.min(tunedI.samples.length, untunedI.samples.length, 4096); index++) {
+  tunedWaveDelta += Math.abs(tunedI.samples[index] - untunedI.samples[index]);
+}
+if (tunedWaveDelta / 4096 < 0.001) {
+  throw new Error("Vowel-specific A(x) tuning did not affect synthesized audio");
+}
+state.vowelWidthTuning = { i: normalizedWidthTuningPoints("i").map((point) => point.position === 0.82 ? { ...point, gain: 1.3 } : point) };
+const iWidthTuned = buildTubeAreaFunction(state.vocalTractGeometry, "i", PREVIEW_SAMPLE_RATE);
+const widthIndex = Math.round(0.82 * (iWidthTuned.cross_sections_2_5d.length - 1));
+if (totalAreaDelta(iAreaBaseline, iWidthTuned) < 0.25
+  || iWidthTuned.cross_sections_2_5d[widthIndex].coronal_width_cm <= iAreaBaseline.cross_sections_2_5d[widthIndex].coronal_width_cm
+  || iWidthTuned.cross_sections_2_5d[widthIndex].sagittal_height_cm !== iAreaBaseline.cross_sections_2_5d[widthIndex].sagittal_height_cm) {
+  throw new Error("Vowel-specific W(x) tuning did not recompute area at fixed sagittal height");
+}
+const iWidthUntunedForComparison = buildTubeAreaFunction(
+  state.vocalTractGeometry,
+  "i",
+  PREVIEW_SAMPLE_RATE,
+  currentArticulationMotorProfile(state.constraints),
+  { manualTuning: false }
+);
+if (totalAreaDelta(iAreaBaseline, iWidthUntunedForComparison) > 0.0001) {
+  throw new Error("Auditory A/B baseline did not bypass manual W(x) tuning");
+}
+state.auditoryEvaluationLog = [{
+  id: "test-i",
+  created_at: "2026-07-17T00:00:00.000Z",
+  vowel: "i",
+  phoneme_clarity: 4,
+  target_match: 3,
+  note: "low-frequency balance check",
+  area_tuning: normalizedAreaTuningPoints("i"),
+  width_tuning: normalizedWidthTuningPoints("i"),
+}];
+const calibrationExport = buildExport();
+if (calibrationExport.vowel_width_tuning?.control_points?.i?.find((point) => point.position === 0.82)?.gain !== 1.3
+  || calibrationExport.auditory_evaluation_log?.[0]?.phoneme_clarity !== 4
+  || normalizeLoadedWidthTuning(calibrationExport.vowel_width_tuning).i?.length !== AREA_TUNING_HANDLES.length
+  || normalizeAuditoryEvaluationLog(calibrationExport.auditory_evaluation_log)[0]?.note !== "low-frequency balance check") {
+  throw new Error("W(x) tuning or auditory-evaluation records did not survive profile serialization");
+}
+state.vowelWidthTuning = {};
+state.auditoryEvaluationLog = [];
+const ka = synthesizeSyllable("ka");
+const aOnly = synthesizeSyllable("a");
+if (ka.samples.length <= aOnly.samples.length || ka.onset_model?.consonant !== "k" || ka.vowel !== "a") {
+  throw new Error("CV syllable synthesis did not prepend a consonant onset");
+}
 if (sumLateralArea(iAreaBaseline) <= sumLateralArea(uAreaBaseline)) {
   throw new Error("2.5D /i/ target did not preserve more lateral-channel potential than /u/");
 }
@@ -725,8 +803,8 @@ const rangeExport = buildExport();
 if (rangeExport.schema_version !== "character_voice_lab_mvp_0.3") {
   throw new Error("Export schema was not upgraded for the range-semantics revision");
 }
-if (rangeExport.app_version !== "1.0") {
-  throw new Error("Export metadata is not marked as app version 1.0");
+if (rangeExport.app_version !== "1.1") {
+  throw new Error("Export metadata is not marked as app version 1.1");
 }
 if (rangeExport.performance_range_overrides?.respiratory_support?.min !== 0.72
   || state.constraints.respiratory_support.constraint_range?.max !== 1.28) {

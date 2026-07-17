@@ -11,7 +11,7 @@
       <div class="header-leading">
         <button id="loadProjectBtn" type="button">プロファイル読込</button>
         <div>
-          <h1>Character Voice Lab <span class="version-badge">Ver 1.0</span></h1>
+          <h1>Character Voice Lab <span class="version-badge">Ver 1.1</span></h1>
           <p>身体推定値と統計事前分布から音声制約を作る実験UI</p>
         </div>
       </div>
@@ -354,11 +354,52 @@
               <h3>声道断面積関数 A(x)</h3>
               <span>側面径・正面幅・断面形状から導く合成2.5Dテンプレート</span>
             </div>
+            <div class="tract-edit-toolbar">
+              <div class="tract-edit-mode" role="group" aria-label="声道グラフ編集対象">
+                <button id="editAreaModeBtn" class="active" type="button" aria-pressed="true">断面積 A(x)</button>
+                <button id="editWidthModeBtn" type="button" aria-pressed="false">横幅 W(x)</button>
+              </div>
+              <span id="tractEditStatus">選択中の母音のA(x)補正点を上下にドラッグできます。</span>
+              <div class="tract-nudge-controls" aria-label="選択点の微調整">
+                <button id="nudgeTractDownBtn" type="button" title="選択点を0.01下げる">−</button>
+                <output id="tractSelectedPointValue">点を選択</output>
+                <button id="nudgeTractUpBtn" type="button" title="選択点を0.01上げる">＋</button>
+              </div>
+              <button id="resetAreaTuningBtn" type="button">選択母音をリセット</button>
+            </div>
             <div class="tract-visual-grid">
-              <canvas id="tractProfileCanvas" width="760" height="260"></canvas>
+              <canvas id="tractProfileCanvas" width="760" height="260" tabindex="0" aria-label="母音別の断面積・横幅編集グラフ"></canvas>
               <canvas id="tractCrossSectionCanvas" width="760" height="260" aria-label="選択母音の2.5D断面プレビュー"></canvas>
             </div>
             <div id="tractRegionSummary" class="tract-region-summary"></div>
+            <section class="auditory-calibration" aria-labelledby="auditoryCalibrationHeading">
+              <div class="subsection-heading">
+                <h3 id="auditoryCalibrationHeading">聴覚校正</h3>
+                <span id="auditoryEvaluationVowel">/a/ の評価</span>
+              </div>
+              <div class="auditory-calibration-actions">
+                <button id="playUntunedVowelBtn" type="button">推定原形を再生</button>
+                <button id="playTunedVowelBtn" class="primary" type="button">調整後を再生</button>
+              </div>
+              <div class="auditory-rating-grid">
+                <label>
+                  音素判別性
+                  <input id="phonemeClarityInput" type="range" min="1" max="5" step="1" value="3" />
+                  <output id="phonemeClarityValue">3 / 5</output>
+                </label>
+                <label>
+                  目標母音との一致
+                  <input id="targetMatchInput" type="range" min="1" max="5" step="1" value="3" />
+                  <output id="targetMatchValue">3 / 5</output>
+                </label>
+                <label class="auditory-note-field">
+                  試聴メモ
+                  <textarea id="auditoryNoteInput" rows="2" maxlength="400" placeholder="例: /i/ の低域が強い"></textarea>
+                </label>
+                <button id="recordAuditoryEvaluationBtn" type="button">評価を記録</button>
+              </div>
+              <div id="auditoryEvaluationHistory" class="auditory-evaluation-history"></div>
+            </section>
           </section>
         </section>
 
@@ -419,10 +460,47 @@
       </section>
 
       <section id="outputTab" class="tab-panel" aria-label="TTS設定" hidden>
-        <section class="pane output-placeholder">
-          <span class="section-kicker">TTS layer</span>
-          <h2>TTS設定</h2>
-          <p>出力言語、読み上げテキスト、抑揚、ブレス、運動周期および外力入力を接続する予約領域です。</p>
+        <section class="pane output-dataset-panel">
+          <div class="pane-head">
+            <div>
+              <span class="section-kicker">Dataset export</span>
+              <h2>TTS設定</h2>
+            </div>
+            <span>外部TTSに接続する前段として、音素・音節サンプルとメタデータを書き出します。</span>
+          </div>
+          <div class="output-settings-grid">
+            <label>
+              出力言語
+              <select id="ttsOutputLanguageInput">
+                <option value="ja-JP" selected>日本語</option>
+                <option value="und">未指定</option>
+              </select>
+            </label>
+            <label>
+              音節セット
+              <select id="syllableSetInput">
+                <option value="vowels" selected>母音 /a i u e o/</option>
+                <option value="japanese_core_cv">実験: 日本語コアCV音節</option>
+                <option value="japanese_extended_cv">実験: 日本語拡張CV音節</option>
+              </select>
+            </label>
+            <label>
+              サンプル接頭辞
+              <input id="datasetPrefixInput" type="text" value="voice_profile" maxlength="64" />
+            </label>
+          </div>
+          <div class="audio-actions preview-export-actions">
+            <button id="previewSyllableBtn" type="button">選択音を確認</button>
+            <button id="exportSyllableDatasetBtn" class="primary" type="button">音節セットを書き出し</button>
+          </div>
+          <div class="dataset-preview">
+            <div>
+              <strong>出力予定</strong>
+              <p id="syllableSetSummary" class="note"></p>
+            </div>
+            <div id="syllableTokenList" class="syllable-token-list"></div>
+          </div>
+          <p id="datasetExportStatus" class="status-line">TTSエンジン非依存のWAV + metadata.jsonとして書き出します。</p>
         </section>
       </section>
 

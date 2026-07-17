@@ -54,7 +54,7 @@ Preview source/acoustic-loss controls include:
 - `sinus_coupling`, `velopharyngeal_loss_coupling`, `piriform_fossa_loss_coupling`, `piriform_fossa_frequency_hz`, and `nasal_branch_damping`: independent side-branch controls for paranasal sinus, velopharyngeal/nasal, and piriform-fossa coloring. The former global `side_branch_loss_coupling` master is migration-only.
 - `body_resonance_frequency_hz`, `body_resonance_gain_db`, and `body_resonance_coupling`: respectively the stored branch frequency, branch peak gain, and parallel wet/dry coupling. Frequency is initially derived from thoracic volume but becomes an explicit persisted override when edited.
 
-`inflammation_index` and `airway_lumen_narrowing` are not exposed as editable controls in the 1.0 UI. Their provisional internal mappings remain under review and must not be interpreted as validated medical quantities.
+`inflammation_index` and `airway_lumen_narrowing` are not exposed as editable controls in the 1.1 UI. Their provisional internal mappings remain under review and must not be interpreted as validated medical quantities.
 
 Respiratory flow is ordered as follows: thoracic and abdominal volumes limit the initial maximum-ventilation estimate; VC/FVC, FEV1/PEF, maximum ventilation, and maximum respiratory pressure define available source capacity; `respiratory_support` specifies how much of that capacity is used during the current speech performance. Structural volumes are therefore not reapplied directly to `respiratory_support`.
 
@@ -129,6 +129,9 @@ The profile includes three intentionally separate metadata fields:
 - `morphology_reference_population`: selection of an approved aggregate anthropometric prior; `General` is the default
 - `constraint_overrides`: user-edited baseline constraint centers re-applied during profile loading and automatic regeneration; explicit user-triggered `解析` / `再計算` intentionally clears them
 - `performance_range_overrides`: user-edited per-parameter dynamic minima and maxima that should be re-applied after analytical regeneration
+- `vowel_area_tuning`: vowel-specific total-area gains along normalized tract position
+- `vowel_width_tuning`: vowel-specific coronal-width gains; sagittal height is held fixed and total area is recomputed before 1D projection
+- `auditory_evaluation_log`: local design evaluations containing vowel, clarity/target-match ratings, notes, and the A(x)/W(x) settings present when the evaluation was recorded
 
 `range_semantics` documents the distinction among baseline, morphological plausibility, WebUI edit range, and dynamic performance range. A downstream service must not use `constraint_range` as a UI slider range; it is only a deprecated alias of `performance_control_range`.
 
@@ -188,9 +191,9 @@ Honda-style landmarks and sinus guides are manually controlled model anchors. Th
 
 The browser preview runs at 44.1 kHz and derives a temporary `area_function_tube_0.2` object. It retains `cross_sections_2_5d` with sagittal height, coronal width, aspect ratio, tongue-groove depth, and lateral-channel activation, then projects each section's total area to the current single-channel tube solver. Its `articulation_target` keeps jaw, oral volume, lip, tongue, and cross-section targets separate; for example, `/o/` expands the middle/front oral cavity and oral aperture while retaining a short terminal lip constriction, rather than reusing the `/u/` mandibular posture. The sole browser backend is a lightweight Kelly-Lochbaum style tube preview. Its tube count follows `round(vocal_tract_length_cm * sample_rate / sound_speed)`, and `tube_distributed_loss_0.1` converts generalized wall, viscothermal, and broadening controls into a tract-length-normalized per-section gain. It also retains provisional vowel-specific area warps, LF-style volume-velocity input, restrained soft-wall compliance, simple side-branch antiresonance coloring, and smoothed lip radiation. Published formant targets remain evaluation/provenance metadata for the tube geometry; they are not a separate formant synthesizer. This browser model is intended for fast design feedback, not as a bit-identical VocalTractLab implementation.
 
-## Irodori-TTS Integration Target
+## External TTS Integration Target
 
-Irodori-TTS should not be coupled to the WebUI directly.
+External TTS engines should not be coupled to the WebUI directly.
 Use a separate core service that accepts either:
 
 - `voice_constraints[*].center` as the character's neutral/baseline design value
@@ -199,7 +202,7 @@ Use a separate core service that accepts either:
 - curated WAV/material paths for cloning or fine-tuning
 - a saved `character_voice_profile.json` as the reproducible experiment record
 
-The WebUI should remain useful even when no external synthesis backend is available. In that mode it exports constraints and uses the browser 2.5D-derived tube preview. Profiles saved by older versions may still contain `formant` or `hybrid` preview selections and hybrid-only controls; version 1.0 ignores those retired fields and exports `preview_synthesis_backend: "tube"`.
+The WebUI should remain useful even when no external synthesis backend is available. In that mode it exports constraints, vowel-specific area/width tuning, local auditory-evaluation records, and synthetic phoneme/syllable datasets using the browser 2.5D-derived tube preview. CV onset generation is experimental scaffolding rather than a validated consonant model; tokens are evaluated individually before a set is accepted. Profiles saved by older versions may still contain `formant` or `hybrid` preview selections and hybrid-only controls; version 1.1 ignores those retired fields and exports `preview_synthesis_backend: "tube"`.
 
 ## Aggregate Reference Data Policy
 
