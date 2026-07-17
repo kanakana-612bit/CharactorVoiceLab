@@ -212,8 +212,9 @@ Inputs:
 
 Outputs:
 
-- `maximum_ventilation_l_min`
-- `respiratory_support`
+- `maximum_ventilation_l_min`, structurally capped by thoracic and abdominal volume estimates
+- `respiratory_support`, defined only as speech-time utilization of available capacity
+- preview `respiratory_drive` combining VC/FVC, FEV1/PEF, maximum ventilation, respiratory pressure, and utilization once
 - `breath_stability`
 - `subglottal_pressure_capacity`
 - `airway_resistance_modifier`
@@ -224,6 +225,7 @@ Rules:
 - ages 10-20: prefer the young Japanese respiratory-function PDF tables/equations
 - adults: use official aggregate lifestyle/body-composition sources plus a conservative respiratory model until a better Japanese adult spirometry table is added
 - smoking and respiratory history should affect damping, noise, and pressure stability more than formant placement
+- thoracic and abdominal volumes act upstream through the maximum-ventilation ceiling and must not be added again inside `respiratory_support`
 
 ### 4. Detailed vocal-fold parameter panel
 
@@ -233,10 +235,12 @@ Add a panel for:
 - spring constant
 - damping
 - baseline muscle tension
-- tension response curve
-- glottal closure
+- read-only F0 derived from the physical source quantities
 - mucosal inflammation/edema
 - airway lumen narrowing
+
+Neurological/autonomic response curves remain a separate future profile and must not be represented by a local vocal-fold multiplier in this panel.
+The retired `glottal_closure` master exists only in one-way pre-0.3 migration code; current projects store explicit LF-style source quantities.
 
 Preview mapping:
 

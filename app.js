@@ -52,11 +52,14 @@ const state = {
   features: {},
   constraints: {},
   constraintOverrides: {},
+  performanceRangeOverrides: {},
   extractionReports: {},
   priorResolution: {},
   calibration: null,
   vocalTractGeometry: null,
   activeTab: "setupTab",
+  appliedImageWeight: null,
+  analysisRevision: 0,
   drag: null,
   cursor: { point: null, target: null },
   profileDrag: null,
@@ -70,6 +73,7 @@ const projectPackage = window.CVL_PROJECT_PACKAGE;
 const landmarkSystem = window.CVL_LANDMARKS;
 const labels = landmarkSystem.labels;
 const featureDefs = referenceData.anthropometricFeaturePriors;
+const APP_VERSION = "1.0";
 const GESTURE_EXECUTION_INPUT_MIN = 0.35;
 const GESTURE_EXECUTION_INPUT_MAX = 1.35;
 const LEGACY_GESTURE_EXECUTION_EFFECTIVE_MAX = 1.45;
@@ -99,65 +103,105 @@ const profileArticulationLandmarks = new Set([
   "profile_menton",
 ]);
 
-const quickControls = [
+const vocalTractProfileControls = [
   { key: "vocal_tract_length_cm", label: "声道長", min: 11, max: 20, step: 0.1, unit: "cm" },
   { key: "mouth_width_relaxed_cm", label: "推定安静口裂幅", min: 2.5, max: 7.5, step: 0.01, unit: "cm" },
   { key: "pharyngeal_length_scale", label: "咽頭長スケール", min: 0.75, max: 1.25, step: 0.01, unit: "x" },
   { key: "pharyngeal_area_scale", label: "咽頭断面スケール", min: 0.7, max: 1.3, step: 0.01, unit: "x" },
   { key: "tracheal_transverse_design_cm", label: "気管横径（設計）", min: 1, max: 2.5, step: 0.01, unit: "cm" },
-  { key: "maximum_ventilation_l_min", label: "最大換気量", min: 40, max: 180, step: 1, unit: "L/min" },
   { key: "nasal_cavity_volume_cm3", label: "鼻腔体積", min: 8, max: 35, step: 0.1, unit: "cm3" },
   { key: "paranasal_sinus_volume_cm3", label: "副鼻腔容積", min: 6, max: 70, step: 0.5, unit: "cm3" },
-  { key: "sinus_coupling", label: "副鼻腔結合", min: 0, max: 1, step: 0.01, unit: "" },
+  { key: "palatal_vault_scale", label: "口蓋高スケール", min: 0.7, max: 1.35, step: 0.01, unit: "x" },
+  { key: "lip_aperture_aspect_scale", label: "口唇開口縦横比", min: 0.65, max: 1.45, step: 0.01, unit: "x" },
+];
+
+const glottalPhysiologyControls = [
+  { key: "f0_mean_hz", label: "推定基本周波数（導出値）", min: 60, max: 350, step: 1, unit: "Hz", readOnly: true },
+  { key: "vocal_fold_spring_constant", label: "声帯ばね定数", min: 0.55, max: 1.65, step: 0.01, unit: "x" },
+  { key: "baseline_muscle_tension", label: "基礎筋緊張", min: 0.35, max: 1.6, step: 0.01, unit: "x" },
+  { key: "glottal_open_quotient", label: "声門開放率", min: 0.35, max: 0.9, step: 0.01, unit: "" },
+  { key: "glottal_speed_quotient", label: "声門速度比", min: 0.8, max: 2.8, step: 0.01, unit: "" },
+  { key: "glottal_return_phase", label: "声門復帰相", min: 0.04, max: 0.32, step: 0.01, unit: "cycle" },
+];
+
+const trunkPhysiologyControls = [
+  { key: "predicted_vc_l", label: "推定肺活量 VC", min: 0.5, max: 8, step: 0.01, unit: "L" },
+  { key: "predicted_fvc_l", label: "推定努力性肺活量 FVC", min: 0.5, max: 8, step: 0.01, unit: "L" },
+  { key: "predicted_fev1_l", label: "推定1秒量 FEV1", min: 0.5, max: 7, step: 0.01, unit: "L" },
+  { key: "predicted_pef_l_s", label: "推定最大呼気流量 PEF", min: 1, max: 14, step: 0.01, unit: "L/s" },
+  { key: "maximum_ventilation_l_min", label: "最大換気量", min: 40, max: 180, step: 1, unit: "L/min" },
   { key: "thoracic_volume_l", label: "胸腔容積", min: 2, max: 9, step: 0.1, unit: "L" },
   { key: "abdominal_volume_l", label: "腹腔容積", min: 2, max: 12, step: 0.1, unit: "L" },
-  { key: "respiratory_support", label: "呼吸支持", min: 0.55, max: 1.45, step: 0.01, unit: "x" },
-  { key: "body_resonance_coupling", label: "身体反響", min: 0, max: 1, step: 0.01, unit: "" },
-  { key: "glottal_closure", label: "声門閉鎖傾向", min: 0, max: 1, step: 0.01, unit: "" },
+  { key: "maximum_respiratory_pressure_pa", label: "推定最大呼吸圧", min: 200, max: 3000, step: 10, unit: "Pa" },
+  { key: "respiratory_support", label: "発話時呼吸支持利用率", min: 0.55, max: 1.45, step: 0.01, unit: "x" },
+];
+
+const executionControls = [
   { key: "articulatory_range_utilization", label: "Gesture execution", min: GESTURE_EXECUTION_INPUT_MIN, max: GESTURE_EXECUTION_INPUT_MAX, step: 0.01, unit: "" },
-  { key: "tongue_dorsum_range_utilization", label: "Tongue dorsum PerformanceControlRange", min: 0.35, max: 1.45, step: 0.01, unit: "" },
-  { key: "labial_transverse_range_utilization", label: "Labial transverse PerformanceControlRange", min: 0.35, max: 1.45, step: 0.01, unit: "" },
+  { key: "tongue_dorsum_range_utilization", label: "Tongue dorsum range availability", min: 0.35, max: 1.45, step: 0.01, unit: "" },
+  { key: "labial_transverse_range_utilization", label: "Labial transverse range availability", min: 0.35, max: 1.45, step: 0.01, unit: "" },
+  { key: "tongue_groove_capacity", label: "Tongue groove range availability", min: 0.35, max: 1.45, step: 0.01, unit: "" },
   { key: "motor_control_precision", label: "Motor control precision", min: 0.25, max: 1.25, step: 0.01, unit: "" },
   { key: "coarticulation_strength", label: "Coarticulation strength", min: 0, max: 1, step: 0.01, unit: "" },
   { key: "motor_control_maturity", label: "Motor control maturity", min: 0.25, max: 1.15, step: 0.01, unit: "" },
   { key: "phonological_contrast_maturity", label: "Phonological contrast maturity", min: 0.25, max: 1.15, step: 0.01, unit: "" },
 ];
 
-const vocalFoldControls = [
-  { key: "vocal_fold_spring_constant", label: "声帯ばね定数", min: 0.55, max: 1.65, step: 0.01, unit: "x" },
-  { key: "baseline_muscle_tension", label: "基礎筋緊張", min: 0.35, max: 1.6, step: 0.01, unit: "x" },
-  { key: "tension_response_curve", label: "緊張応答曲線", min: 0.4, max: 1.8, step: 0.01, unit: "x" },
-  { key: "inflammation_index", label: "炎症・浮腫", min: 0, max: 1, step: 0.01, unit: "" },
-  { key: "airway_lumen_narrowing", label: "内腔狭窄", min: 0, max: 1, step: 0.01, unit: "" },
+const advancedAcousticControls = [
+  { key: "glottal_spectral_tilt_db", label: "声門源スペクトル傾斜", min: 4, max: 28, step: 0.1, unit: "dB" },
+  { key: "glottal_breathiness", label: "声門源気息成分", min: 0, max: 0.6, step: 0.01, unit: "" },
   { key: "glottal_volume_velocity_drive", label: "声門体積速度入力", min: 0, max: 1, step: 0.01, unit: "" },
   { key: "glottal_flow_smoothing", label: "声門流平滑", min: 0, max: 0.9, step: 0.01, unit: "" },
   { key: "glottal_flow_inertance", label: "声門流慣性", min: 0, max: 0.55, step: 0.01, unit: "" },
+  { key: "sinus_coupling", label: "副鼻腔音響結合", min: 0, max: 1, step: 0.01, unit: "" },
+  { key: "body_resonance_frequency_hz", label: "身体反響周波数", min: 120, max: 320, step: 1, unit: "Hz" },
+  { key: "body_resonance_gain_db", label: "身体反響枝ピーク利得", min: 0, max: 10, step: 0.1, unit: "dB" },
+  { key: "body_resonance_coupling", label: "身体反響結合", min: 0, max: 1, step: 0.01, unit: "" },
   { key: "vocal_tract_wall_loss", label: "声道壁損失", min: 0, max: 0.08, step: 0.001, unit: "" },
   { key: "vocal_tract_viscothermal_loss", label: "粘性・熱損失", min: 0, max: 0.06, step: 0.001, unit: "" },
   { key: "vocal_tract_high_frequency_damping", label: "高域減衰", min: 0, max: 0.85, step: 0.01, unit: "" },
   { key: "vocal_tract_wall_compliance", label: "声道壁コンプライアンス", min: 0, max: 0.7, step: 0.01, unit: "" },
   { key: "vocal_tract_resonance_broadening", label: "共鳴帯域拡張", min: 0, max: 0.85, step: 0.01, unit: "" },
   { key: "lip_radiation_smoothing", label: "口唇放射平滑", min: 0, max: 0.85, step: 0.01, unit: "" },
-  { key: "side_branch_loss_coupling", label: "側枝損失全体", min: 0, max: 0.75, step: 0.01, unit: "" },
   { key: "velopharyngeal_loss_coupling", label: "鼻咽腔側枝", min: 0, max: 0.75, step: 0.01, unit: "" },
   { key: "piriform_fossa_loss_coupling", label: "梨状陥凹側枝", min: 0, max: 0.65, step: 0.01, unit: "" },
   { key: "piriform_fossa_frequency_hz", label: "梨状陥凹反共振", min: 2200, max: 5200, step: 10, unit: "Hz" },
   { key: "nasal_branch_damping", label: "鼻腔側枝減衰", min: 0.25, max: 1.4, step: 0.01, unit: "" },
-  { key: "hybrid_side_branch_strength", label: "ハイブリッド側枝反映", min: 0, max: 1, step: 0.01, unit: "" },
-  { key: "hybrid_formant_anchor", label: "ハイブリッド声質保持", min: 0.55, max: 0.98, step: 0.01, unit: "" },
-  { key: "hybrid_tube_texture_mix", label: "ハイブリッド管テクスチャ", min: 0, max: 0.22, step: 0.01, unit: "" },
 ];
 
-const vocalTract2_5DControls = [
-  { key: "palatal_vault_scale", label: "Palatal vault scale", min: 0.7, max: 1.35, step: 0.01, unit: "x" },
-  { key: "lip_aperture_aspect_scale", label: "Lip aperture aspect", min: 0.65, max: 1.45, step: 0.01, unit: "x" },
-  { key: "tongue_groove_capacity", label: "Tongue groove PerformanceControlRange", min: 0.35, max: 1.45, step: 0.01, unit: "" },
-];
+const retiredConstraintKeys = new Set([
+  "hybrid_side_branch_strength",
+  "hybrid_formant_anchor",
+  "hybrid_tube_texture_mix",
+  "tension_response_curve",
+  "glottal_closure",
+  "side_branch_loss_coupling",
+]);
+
+const readOnlyDerivedConstraintKeys = new Set(["f0_mean_hz"]);
+
+const performanceRangeGroups = {
+  glottal: [
+    glottalPhysiologyControls.find((control) => control.key === "vocal_fold_spring_constant"),
+    glottalPhysiologyControls.find((control) => control.key === "baseline_muscle_tension"),
+    glottalPhysiologyControls.find((control) => control.key === "glottal_open_quotient"),
+    glottalPhysiologyControls.find((control) => control.key === "glottal_speed_quotient"),
+    advancedAcousticControls.find((control) => control.key === "glottal_breathiness"),
+  ],
+  vocalTract: [
+    vocalTractProfileControls.find((control) => control.key === "mouth_width_relaxed_cm"),
+    executionControls.find((control) => control.key === "tongue_dorsum_range_utilization"),
+    executionControls.find((control) => control.key === "labial_transverse_range_utilization"),
+    executionControls.find((control) => control.key === "tongue_groove_capacity"),
+  ],
+  trunk: [trunkPhysiologyControls.find((control) => control.key === "respiratory_support")],
+};
 
 const els = {
   projectTitleInput: document.getElementById("projectTitleInput"),
   dataSourceInput: document.getElementById("dataSourceInput"),
   playSampleButton: document.getElementById("playSampleButton"),
+  floatingPreviewDock: document.getElementById("floatingPreviewDock"),
   tabButtons: Array.from(document.querySelectorAll(".tab-button")),
   tabPanels: Array.from(document.querySelectorAll(".tab-panel")),
   bodyImageInput: document.getElementById("bodyImageInput"),
@@ -188,9 +232,9 @@ const els = {
   dietInput: document.getElementById("dietInput"),
   respiratoryHistoryInput: document.getElementById("respiratoryHistoryInput"),
   globalImageWeight: document.getElementById("globalImageWeight"),
-  rangeKInput: document.getElementById("rangeKInput"),
-  glottalClosureInput: document.getElementById("glottalClosureInput"),
-  pressureInput: document.getElementById("pressureInput"),
+  globalImageWeightValue: document.getElementById("globalImageWeightValue"),
+  recalculateBtn: document.getElementById("recalculateBtn"),
+  detailRecalculationStatus: document.getElementById("detailRecalculationStatus"),
   analyzeBtn: document.getElementById("analyzeBtn"),
   saveProjectBtn: document.getElementById("saveProjectBtn"),
   loadProjectBtn: document.getElementById("loadProjectBtn"),
@@ -217,9 +261,14 @@ const els = {
   tractProfileCanvas: document.getElementById("tractProfileCanvas"),
   tractCrossSectionCanvas: document.getElementById("tractCrossSectionCanvas"),
   tractRegionSummary: document.getElementById("tractRegionSummary"),
-  quickSliders: document.getElementById("quickSliders"),
-  vocalFoldSliders: document.getElementById("vocalFoldSliders"),
-  geometrySliders: document.getElementById("geometrySliders"),
+  vocalTractProfileSliders: document.getElementById("vocalTractProfileSliders"),
+  glottalPhysiologySliders: document.getElementById("glottalPhysiologySliders"),
+  trunkPhysiologySliders: document.getElementById("trunkPhysiologySliders"),
+  executionSliders: document.getElementById("executionSliders"),
+  advancedAcousticSliders: document.getElementById("advancedAcousticSliders"),
+  glottalPerformanceRanges: document.getElementById("glottalPerformanceRanges"),
+  vocalTractPerformanceRanges: document.getElementById("vocalTractPerformanceRanges"),
+  trunkPerformanceRanges: document.getElementById("trunkPerformanceRanges"),
   featureTable: document.getElementById("featureTable"),
   calibrationSummary: document.getElementById("calibrationSummary"),
   landmarkReferenceTable: document.getElementById("landmarkReferenceTable"),
@@ -233,12 +282,11 @@ const els = {
   publicationPolicyExclusions: document.getElementById("publicationPolicyExclusions"),
   referenceSourceTable: document.getElementById("referenceSourceTable"),
   vowelSelect: document.getElementById("vowelSelect"),
-  synthesisBackendSelect: document.getElementById("synthesisBackendSelect"),
-  playVowelButton: document.getElementById("playVowelButton"),
   saveWavBtn: document.getElementById("saveWavBtn"),
 };
 
 function num(el, fallback = 0) {
+  if (!el) return fallback;
   const value = Number(el.value);
   return Number.isFinite(value) ? value : fallback;
 }
@@ -269,6 +317,60 @@ function sexClass() {
 function sourceLabel(key) {
   const source = referenceData.sources[key];
   return source ? source.label : key;
+}
+
+function referenceNumber(key) {
+  const index = Object.keys(referenceData.sources).indexOf(key);
+  return index >= 0 ? `R${String(index + 1).padStart(2, "0")}` : null;
+}
+
+function compactSourceLabel(source, key) {
+  const label = source?.citation_label ?? source?.label ?? key;
+  const comma = label.indexOf(",");
+  return comma > 0 ? label.slice(0, comma) : label;
+}
+
+function sourceTooltipText(key) {
+  const source = referenceData.sources[key];
+  if (!source) return "";
+  return [
+    source.use,
+    source.scope_note,
+    source.privacy_note,
+    source.method_warning,
+    source.population_warning,
+    source.publication_use ? `用途区分: ${source.publication_use}` : null,
+    source.public_release_status ? `公開区分: ${source.public_release_status}` : null,
+  ].filter(Boolean).join("\n");
+}
+
+function sourceCitationElement(key) {
+  const source = referenceData.sources[key];
+  const number = referenceNumber(key);
+  if (!source || !number) return null;
+  const citation = document.createElement("span");
+  citation.className = "source-citation";
+  citation.tabIndex = 0;
+  citation.textContent = `${compactSourceLabel(source, key)} [${number}]`;
+  const tooltip = sourceTooltipText(key);
+  citation.title = tooltip;
+  citation.dataset.tooltip = tooltip;
+  citation.setAttribute("aria-label", `${citation.textContent}。${tooltip}`);
+  return citation;
+}
+
+function appendSourceCitation(target, key, extraTooltip = "") {
+  const citation = sourceCitationElement(key);
+  if (!target || !citation) return false;
+  if (extraTooltip) {
+    const tooltip = [citation.dataset.tooltip, extraTooltip].filter(Boolean).join("\n");
+    citation.title = tooltip;
+    citation.dataset.tooltip = tooltip;
+    citation.setAttribute("aria-label", `${citation.textContent}。${tooltip}`);
+  }
+  if (target.childNodes.length) target.appendChild(document.createTextNode(" / "));
+  target.appendChild(citation);
+  return true;
 }
 
 function confidenceFromPoints(points) {
@@ -743,7 +845,7 @@ function drawBodyModel(ctx) {
   ctx.font = "12px Segoe UI";
   ctx.textAlign = "left";
   ctx.fillText(`VTL ${format(c.vocal_tract_length_cm?.center, 1)} cm`, 18, 24);
-  ctx.fillText(`閉鎖 ${format(c.glottal_closure?.center, 2)}`, 18, 42);
+  ctx.fillText(`開放率 ${format(c.glottal_open_quotient?.center, 2)}`, 18, 42);
   ctx.restore();
 }
 
@@ -857,6 +959,9 @@ function buildVocalTractGeometry() {
   const profileCmPerPx = state.calibration?.views?.head_profile?.cm_per_px ?? null;
   const hondaSpace = buildHondaArticulatorySpace(points, profileCmPerPx, direction);
   const sideBranchGuides = buildSideBranchGuides(points, hondaSpace, profileCmPerPx, direction);
+  const pharyngealLengthScale = clamp(state.constraints.pharyngeal_length_scale?.center ?? 1, 0.65, 1.4);
+  const templatePharyngealBoundary = 0.46;
+  const acousticPharyngealBoundary = clamp(templatePharyngealBoundary * pharyngealLengthScale, 0.32, 0.62);
   const pharynxScale = state.constraints.pharyngeal_area_scale?.center ?? 1;
   const palatalVaultScale = state.constraints.palatal_vault_scale?.center ?? 1;
   const lipApertureAspectScale = state.constraints.lip_aperture_aspect_scale?.center ?? 1;
@@ -888,20 +993,26 @@ function buildVocalTractGeometry() {
   ];
   const sections = centerline.map((center, index) => {
     const position = index / (centerline.length - 1);
-    const baseSagittal = interpolatePairs(sagittalAnchors, position);
-    const regionScale = position < 0.46 ? pharynxScale * neckDepthScale : 1;
-    const vaultWeight = Math.exp(-0.5 * Math.pow((position - 0.7) / 0.22, 2));
+    // pharyngeal_length_scale reallocates the fixed total VTL between the
+    // pharyngeal and oral portions; it does not act as a second VTL control.
+    const templatePosition = position <= acousticPharyngealBoundary
+      ? position / acousticPharyngealBoundary * templatePharyngealBoundary
+      : templatePharyngealBoundary
+        + (position - acousticPharyngealBoundary) / (1 - acousticPharyngealBoundary) * (1 - templatePharyngealBoundary);
+    const baseSagittal = interpolatePairs(sagittalAnchors, templatePosition);
+    const regionScale = position < acousticPharyngealBoundary ? pharynxScale * neckDepthScale : 1;
+    const vaultWeight = Math.exp(-0.5 * Math.pow((templatePosition - 0.7) / 0.22, 2));
     const baseSagittalCm = clamp(baseSagittal * Math.sqrt(regionScale) * (1 + (palatalVaultScale - 1) * vaultWeight), 0.35, 4.5);
-    const baseWidthCm = interpolateAnchors(widthAnchors, position);
+    const baseWidthCm = interpolateAnchors(widthAnchors, templatePosition);
     const ellipseShapeFactor = Math.PI / 4;
     const areaCm2 = ellipseShapeFactor * baseSagittalCm * baseWidthCm;
-    const terminalWeight = Math.exp(-0.5 * Math.pow((position - 0.94) / 0.12, 2));
+    const terminalWeight = Math.exp(-0.5 * Math.pow((templatePosition - 0.94) / 0.12, 2));
     const nativeAspectRatio = baseWidthCm / Math.max(0.1, baseSagittalCm);
     const aspectRatio = clamp(nativeAspectRatio * (1 + (lipApertureAspectScale - 1) * terminalWeight), 0.18, 10);
     const equivalentRectangleArea = areaCm2 / ellipseShapeFactor;
     const sagittalCm = Math.sqrt(equivalentRectangleArea / aspectRatio);
     const widthCm = Math.sqrt(equivalentRectangleArea * aspectRatio);
-    const oralWeight = Math.exp(-0.5 * Math.pow((position - 0.72) / 0.24, 2));
+    const oralWeight = Math.exp(-0.5 * Math.pow((templatePosition - 0.72) / 0.24, 2));
     // This is a neutral morphological capacity. PerformanceControlRange limits
     // how much of it a current vowel gesture can recruit, not the template itself.
     const lateralChannelCapacityCm2 = clamp(areaCm2 * (0.02 + oralWeight * 0.16), 0, areaCm2 * 0.36);
@@ -913,6 +1024,7 @@ function buildVocalTractGeometry() {
     return {
       index,
       position: Number(position.toFixed(5)),
+      template_position: Number(templatePosition.toFixed(5)),
       position_cm: Number((position * vtlCm).toFixed(4)),
       center,
       normal,
@@ -934,18 +1046,18 @@ function buildVocalTractGeometry() {
       },
       upper: { x: center.x + normal.x * halfWidthPx, y: center.y + normal.y * halfWidthPx },
       lower: { x: center.x - normal.x * halfWidthPx, y: center.y - normal.y * halfWidthPx },
-      region: regionForPosition(position).key,
+      region: regionForPosition(templatePosition).key,
     };
   });
   const regionSummary = Object.fromEntries(tractRegions.map((region) => {
-    const regionSections = sections.filter((section) => section.position >= region.start && section.position < region.end);
+    const regionSections = sections.filter((section) => section.region === region.key);
     const meanArea = regionSections.reduce((sum, section) => sum + section.area_cm2, 0) / Math.max(1, regionSections.length);
-    const minArea = Math.min(...regionSections.map((section) => section.area_cm2));
+    const minArea = regionSections.length ? Math.min(...regionSections.map((section) => section.area_cm2)) : 0;
     return [region.key, {
       label: region.label,
       mean_area_cm2: Number(meanArea.toFixed(4)),
       minimum_area_cm2: Number(minArea.toFixed(4)),
-      length_cm: Number(((region.end - region.start) * vtlCm).toFixed(4)),
+      length_cm: Number((regionSections.length / sections.length * vtlCm).toFixed(4)),
     }];
   }));
 
@@ -964,6 +1076,8 @@ function buildVocalTractGeometry() {
     width_anchors: widthAnchors,
     cross_section_model: {
       representation: "midsagittal height plus coronal width, elliptical shape factor, and latent lateral-channel capacity",
+      pharyngeal_length_scale: Number(pharyngealLengthScale.toFixed(4)),
+      acoustic_pharyngeal_boundary: Number(acousticPharyngealBoundary.toFixed(4)),
       palatal_vault_scale: Number(palatalVaultScale.toFixed(4)),
       lip_aperture_aspect_scale: Number(lipApertureAspectScale.toFixed(4)),
       tongue_groove_availability: Number(tongueGrooveAvailability.toFixed(4)),
@@ -1978,11 +2092,81 @@ function applyConstraintOverrides() {
   }
 }
 
+function refreshDerivedConstraintCenters(changedKey = null) {
+  const constraints = state.constraints;
+  if (!constraints || !Object.keys(constraints).length) return false;
+  let changed = false;
+  const update = (key, value) => {
+    const item = constraints[key];
+    if (!item || !Number.isFinite(value) || Math.abs(Number(item.center) - value) < 0.0001) return;
+    constraints[key] = recenteredConstraint(item, value);
+    changed = true;
+  };
+
+  update("f0_mean_hz", currentDerivedF0(constraints));
+
+  const volumeChanged = changedKey == null || changedKey === "thoracic_volume_l" || changedKey === "abdominal_volume_l";
+  if (volumeChanged && !Number.isFinite(state.constraintOverrides.maximum_ventilation_l_min)
+    && !constraints.maximum_ventilation_l_min?.user_override) {
+    update("maximum_ventilation_l_min", derivedMaximumVentilationFromVolumes(constraints));
+    const ventilationItem = constraints.maximum_ventilation_l_min;
+    if (ventilationItem?.derivation) {
+      ventilationItem.derivation = {
+        ...ventilationItem.derivation,
+        structural_capacity_ceiling_l_min: Number(structuralVentilationCapacityFromVolumes(constraints, ventilationItem.derivation).toFixed(4)),
+      };
+    }
+  }
+  if ((changedKey == null || changedKey === "thoracic_volume_l")
+    && !Number.isFinite(state.constraintOverrides.body_resonance_frequency_hz)
+    && !constraints.body_resonance_frequency_hz?.user_override) {
+    update("body_resonance_frequency_hz", bodyResonanceFrequencyFromThoracicVolume(constraints));
+  }
+  return changed;
+}
+
+function applyPerformanceRangeOverrides() {
+  for (const [key, override] of Object.entries(state.performanceRangeOverrides)) {
+    const item = state.constraints[key];
+    if (!item || item.center == null || !override) continue;
+    const center = Number(item.center);
+    const min = Number(override.min);
+    const max = Number(override.max);
+    if (!Number.isFinite(center) || !Number.isFinite(min) || !Number.isFinite(max)) continue;
+    const normalized = {
+      min: Number(Math.min(min, center).toFixed(4)),
+      max: Number(Math.max(max, center).toFixed(4)),
+      basis: override.basis ?? "user-defined PerformanceControlRange around the character baseline",
+      user_override: true,
+    };
+    item.performance_control_range = normalized;
+    item.constraint_range = { ...normalized };
+  }
+}
+
+function selectedImageWeight() {
+  return clamp(num(els.globalImageWeight, 0.7), 0, 1);
+}
+
+function renderImageWeightRecalculationState() {
+  const selected = selectedImageWeight();
+  const applied = Number(state.appliedImageWeight);
+  const pending = !Number.isFinite(applied) || Math.abs(selected - applied) >= 0.0001;
+  if (els.globalImageWeightValue) els.globalImageWeightValue.textContent = selected.toFixed(2);
+  if (els.detailRecalculationStatus) {
+    els.detailRecalculationStatus.textContent = pending
+      ? `未反映（寄与 ${selected.toFixed(2)}・再計算が必要）`
+      : `反映済み（寄与 ${selected.toFixed(2)}）`;
+  }
+  els.recalculateBtn?.classList.toggle("pending", pending);
+  return { selected, applied: Number.isFinite(applied) ? applied : null, pending };
+}
+
 function analyze() {
   const calibration = currentImageCalibration();
   state.calibration = calibration;
   const observations = observationFromLandmarks(calibration);
-  const globalWeight = num(els.globalImageWeight, 0.7);
+  const globalWeight = selectedImageWeight();
   const sex = els.sexInput.value;
   const priorContext = currentPriorContext();
   const features = {};
@@ -2024,16 +2208,38 @@ function analyze() {
   state.features = features;
   state.priorResolution = priorResolution;
   state.constraints = mapVoiceConstraints(features);
+  state.constraintOverrides = withoutReadOnlyDerivedOverrides(state.constraintOverrides);
   applyConstraintOverrides();
+  refreshDerivedConstraintCenters();
+  applyPerformanceRangeOverrides();
   state.vocalTractGeometry = buildVocalTractGeometry();
-  renderQuickSliders();
-  renderVocalFoldSliders();
-  renderVocalTract2_5DSliders();
+  state.appliedImageWeight = globalWeight;
+  state.analysisRevision += 1;
+  state.lastWav = null;
+  renderDetailControls();
   renderCompositionGuide();
   renderCalibrationSummary();
   renderFeatureTable();
   renderConstraints();
+  renderImageWeightRecalculationState();
   draw();
+}
+
+function resetConstraintCentersForAnalysis() {
+  // Explicit analysis returns slider centers to the current estimate while
+  // preserving separately edited PerformanceControlRange bounds.
+  state.constraintOverrides = {};
+}
+
+function runBasicAnalysis() {
+  resetConstraintCentersForAnalysis();
+  analyze();
+  setExtractionStatus("解析完了。基本情報と手動特徴点から推定値を更新しました。");
+}
+
+function runDetailRecalculation() {
+  resetConstraintCentersForAnalysis();
+  analyze();
 }
 
 function normalizeReferenceImageStyle(value) {
@@ -2553,9 +2759,9 @@ function renderCompositionGuide() {
   if (els.referenceBmiNote) els.referenceBmiNote.textContent = bmiReference.note;
   if (els.bmiDelta) els.bmiDelta.textContent = bmi != null && bmiReference.value != null ? `${bmi >= bmiReference.value ? "+" : ""}${format(bmi - bmiReference.value, 1)}` : "-";
   if (els.bmiReferenceSource) {
-    els.bmiReferenceSource.textContent = bmiReference.source
-      ? `${sourceLabel(bmiReference.source)} / ${bmiReference.status}`
-      : bmiReference.status;
+    els.bmiReferenceSource.replaceChildren();
+    if (bmiReference.source) appendSourceCitation(els.bmiReferenceSource, bmiReference.source, bmiReference.note);
+    if (!els.bmiReferenceSource.childNodes.length) els.bmiReferenceSource.textContent = bmiReference.status;
   }
 
   if (els.bodyFatGuideBadges) {
@@ -2658,23 +2864,23 @@ function renderCompositionGuide() {
     }
   }
 
-  if (els.bodyFatGuideNote && guide) {
-    const formulaNote = formulaEstimate ? ` ${sourceLabel(formulaEstimate.source)}は分布中央値ではなくBMIベース推定式です。` : "";
-    els.bodyFatGuideNote.textContent = `${sourceLabel(guide.source)}。${guide.sample_note}${formulaNote} 年齢階級別の拡張候補: ${guide.age_band_research_targets.join(" / ")}`;
-  }
   if (els.bodyFatGuideNote) {
-    const extraNotes = [];
+    els.bodyFatGuideNote.replaceChildren();
+    if (guide) appendSourceCitation(els.bodyFatGuideNote, guide.source, `${guide.sample_note}\n${guide.applicability_note}`);
+    if (formulaEstimate) appendSourceCitation(els.bodyFatGuideNote, formulaEstimate.source, "分布中央値ではなく、BMI・年齢・性別に基づく式推定です。");
     if (modelEstimate.japanese_body_composition_reference) {
-      extraNotes.push(`${sourceLabel(modelEstimate.japanese_body_composition_reference.source)} is used as a Japanese public aggregate mean proxy, not a median or clinical norm.`);
+      appendSourceCitation(
+        els.bodyFatGuideNote,
+        modelEstimate.japanese_body_composition_reference.source,
+        "日本人公開集計の平均値プロキシであり、中央値または臨床基準ではありません。",
+      );
     }
     if (modelEstimate.regional_skinfold_estimate) {
-      extraNotes.push(`${sourceLabel(modelEstimate.regional_skinfold_estimate.source)} is used only for relative regional skinfold response; it is not a Japanese population center.`);
-    }
-    if (extraNotes.length) {
-      const existing = guide ? els.bodyFatGuideNote.textContent : "";
-      els.bodyFatGuideNote.textContent = [existing, ...extraNotes].filter(Boolean).join(" ");
-    } else if (!guide) {
-      els.bodyFatGuideNote.textContent = "";
+      appendSourceCitation(
+        els.bodyFatGuideNote,
+        modelEstimate.regional_skinfold_estimate.source,
+        "部位別皮下脂肪厚の相対応答だけに使用し、日本人母集団中心値には使用しません。",
+      );
     }
   }
 }
@@ -2689,7 +2895,7 @@ function mapVoiceConstraints(features) {
   const growthRefs = priorResolver.resolveGrowthReferences(priorContext);
   const youngRespiratory = growthRefs.young_respiratory?.predictions ?? null;
   const youngRespiratoryScale = youngRespiratoryCapacityScale(youngRespiratory, sex);
-  const k = num(els.rangeKInput, 1);
+  const k = 1;
   const voiceSex = sex;
   const voicePriors = referenceData.sources.pisanski2016.extracted_values.voice_table_1[voiceSex];
   const bodyPriors = priorResolver.resolveBodyReference(referenceData, currentPriorContext());
@@ -2722,9 +2928,8 @@ function mapVoiceConstraints(features) {
   const nasal = (sex === "male" ? 22 : sex === "female" ? 18 : 20) * (0.55 * headScale + 0.25 * lowerFaceScale + 0.2 * jawScale);
   const lifestyle = lifestyleRespiratoryModifier();
   const ventilationBase = sex === "male" ? 125 : sex === "female" ? 95 : 110;
-  const ventilation = ventilationBase * (0.5 * heightScale + 0.3 * Math.sqrt(weightScale) + 0.2 * torsoScale) * lifestyle.ventilation * youngRespiratoryScale;
+  const ventilationEstimate = ventilationBase * (0.5 * heightScale + 0.3 * Math.sqrt(weightScale) + 0.2 * torsoScale) * lifestyle.ventilation * youngRespiratoryScale;
   const pressure = num(els.pressureInput, 900);
-  const closure = num(els.glottalClosureInput, 0.5);
   const ageTension = clamp(1.08 - Math.max(0, age - 20) * 0.0025 + (age < 18 ? 0.06 : 0), 0.86, 1.16);
   const respiratoryPenalty = lifestyle.support < 1 ? (1 - lifestyle.support) * 0.26 : 0;
   const inflammation = clamp(
@@ -2734,9 +2939,8 @@ function mapVoiceConstraints(features) {
     0.65
   );
   const lumenNarrowing = clamp(inflammation * 0.42 + respiratoryPenalty, 0, 0.55);
-  const springConstant = clamp(ageTension * (1 + (closure - 0.5) * 0.18) * (1 - inflammation * 0.18), 0.55, 1.65);
-  const baselineTension = clamp(ageTension * (0.92 + closure * 0.22) * (1 - respiratoryPenalty), 0.35, 1.6);
-  const tensionResponse = clamp(0.9 + closure * 0.22 + (lifestyle.support - 1) * 0.24 - inflammation * 0.12, 0.4, 1.8);
+  const springConstant = clamp(ageTension * (1 - inflammation * 0.18), 0.55, 1.65);
+  const baselineTension = clamp(ageTension * 1.03 * (1 - respiratoryPenalty), 0.35, 1.6);
   const sinusBase = sex === "male" ? 32 : sex === "female" ? 24 : 28;
   const thoracicBase = sex === "male" ? 6.0 : sex === "female" ? 4.6 : 5.3;
   const abdominalBase = sex === "male" ? 7.4 : sex === "female" ? 6.3 : 6.85;
@@ -2749,15 +2953,17 @@ function mapVoiceConstraints(features) {
   const sinusVolume = sinusBase * (0.45 * headScale + 0.25 * lowerFaceScale + 0.2 * jawScale + 0.1 * heightScale) * sinusDevelopmentScale;
   const thoracicVolume = thoracicBase * (0.45 * torsoScale + 0.3 * shoulderScale + 0.15 * heightScale + 0.1 * Math.sqrt(weightScale)) * thoracicSoftTissueScale;
   const abdominalVolume = abdominalBase * (0.4 * torsoScale + 0.35 * pelvisScale + 0.25 * Math.sqrt(weightScale)) * abdominalSoftTissueScale;
-  const respiratorySupport = clamp((0.42 * (ventilation / ventilationBase) + 0.34 * (thoracicVolume / thoracicBase) + 0.24 * (abdominalVolume / abdominalBase)) * lifestyle.support * (0.82 + youngRespiratoryScale * 0.18), 0.55, 1.45);
+  const structuralVentilationRatio = 0.62 * (thoracicVolume / thoracicBase) + 0.38 * (abdominalVolume / abdominalBase);
+  const ventilationCapacityCeiling = ventilationBase * youngRespiratoryScale * structuralVentilationRatio;
+  const ventilation = Math.min(ventilationEstimate, ventilationCapacityCeiling);
+  const respiratorySupport = 1;
   const sinusCoupling = clamp(0.18 + (nasal / (sex === "male" ? 22 : sex === "female" ? 18 : 20) - 1) * 0.18 + (sinusVolume / sinusBase - 1) * 0.22, 0.04, 0.55);
-  const sideBranchLossCoupling = clamp(0.12 + sinusCoupling * 0.35 + Math.max(0, sinusDevelopmentScale - 0.55) * 0.06, 0.04, 0.48);
   const velopharyngealLossCoupling = clamp(0.10 + sinusCoupling * 0.24 + (1 - baselineTension) * 0.04, 0.03, 0.42);
   const piriformFossaLossCoupling = clamp(0.12 + (vtl / baseVtl - 1) * 0.08 + (pharynxLen - 1) * 0.06, 0.04, 0.36);
   const piriformFossaFrequency = clamp(3700 * Math.pow(baseVtl / vtl, 0.42), 2600, 4800);
-  const bodyResonanceCoupling = clamp(0.22 + (thoracicVolume / thoracicBase - 1) * 0.24 + (closure - 0.5) * 0.18 + bodyFatDeltaPercent * 0.003 + abdomenSkinfoldDeltaMm * 0.002, 0.04, 0.7);
+  const bodyResonanceCoupling = clamp(0.22 + (thoracicVolume / thoracicBase - 1) * 0.24 + bodyFatDeltaPercent * 0.003 + abdomenSkinfoldDeltaMm * 0.002, 0.04, 0.7);
   const bodyResonanceFrequency = clamp(210 / Math.pow(thoracicVolume / thoracicBase, 0.38), 120, 320);
-  const bodyResonanceGain = 1.5 + bodyResonanceCoupling * 5.5;
+  const bodyResonanceGain = 4;
   const maturity = motorMaturityFromAge(age);
   const gestureExecutionInput = 1;
   const gestureExecutionResponse = gestureExecutionResponseForStyle(referenceImageStyle);
@@ -2767,22 +2973,39 @@ function mapVoiceConstraints(features) {
   const motorControlPrecision = clamp(0.55 + maturity * 0.45 + lifestyle.support * 0.08 - 0.08 - inflammation * 0.18, 0.25, 1.25);
   const coarticulationStrength = clamp(0.58 + (1 - maturity) * 0.22 + (1 - motorControlPrecision) * 0.18 - (gestureExecutionInput - 1) * 0.12, 0, 1);
   const phonologicalContrastMaturity = clamp(0.48 + maturity * 0.52 + (motorControlPrecision - 1) * 0.12, 0.25, 1.15);
-  const glottalOpenQuotient = clamp(0.66 - closure * 0.22 + inflammation * 0.08 + (1 - baselineTension) * 0.04, 0.38, 0.84);
-  const glottalSpeedQuotient = clamp(1.45 + closure * 0.58 + baselineTension * 0.14 - inflammation * 0.16, 0.9, 2.6);
-  const glottalReturnPhase = clamp(0.11 + (1 - closure) * 0.08 + inflammation * 0.04, 0.06, 0.28);
-  const glottalSpectralTiltDb = clamp(10.5 + (1 - closure) * 7.5 + inflammation * 4.5 - baselineTension * 1.2, 6, 24);
-  const glottalBreathiness = clamp((1 - closure) * 0.16 + inflammation * 0.18 + lumenNarrowing * 0.08, 0, 0.48);
-  const glottalVolumeVelocityDrive = clamp(0.86 + (1 - closure) * 0.04 - inflammation * 0.06, 0.62, 0.96);
-  const glottalFlowSmoothing = clamp(0.30 + (1 - closure) * 0.16 + inflammation * 0.10 + lumenNarrowing * 0.06, 0.08, 0.78);
-  const glottalFlowInertance = clamp(0.10 + closure * 0.10 + baselineTension * 0.025 - inflammation * 0.03, 0.02, 0.42);
+  const glottalOpenQuotient = clamp(0.58 + (1 - baselineTension) * 0.06 + inflammation * 0.08, 0.38, 0.84);
+  const glottalSpeedQuotient = clamp(1.72 + (baselineTension - 1) * 0.35 - inflammation * 0.16, 0.9, 2.6);
+  const glottalReturnPhase = clamp(0.15 + (1 - baselineTension) * 0.03 + inflammation * 0.04, 0.06, 0.28);
+  const glottalSpectralTiltDb = clamp(14.2 + inflammation * 4.5 - baselineTension * 1.2, 6, 24);
+  const glottalBreathiness = clamp(0.08 + Math.max(0, 1 - baselineTension) * 0.08 + inflammation * 0.18 + lumenNarrowing * 0.08, 0, 0.48);
+  const glottalVolumeVelocityDrive = clamp(0.88 - inflammation * 0.06, 0.62, 0.96);
+  const glottalFlowSmoothing = clamp(0.37 + inflammation * 0.10 + lumenNarrowing * 0.06, 0.08, 0.78);
+  const glottalFlowInertance = clamp(0.15 + (baselineTension - 1) * 0.025 - inflammation * 0.03, 0.02, 0.42);
   const trachealTransverseDesign = sex === "male" ? 1.8 : sex === "female" ? 1.4 : 1.6;
   const f0Prior = voicePriors.f0_mean_hz;
-  const f0Center = f0Prior.mean * (0.98 + 0.04 * closure);
+  const f0Center = derivedF0FromPhysicalValues(f0Prior.mean, springConstant, baselineTension, inflammation);
+  const maximumVentilationConstraint = {
+    ...range(ventilation, 14 * k, "L/min", "height/weight/torso estimate limited by thoracic and abdominal structural capacity", 0.28, "sourceMap"),
+    derivation: {
+      unconstrained_estimate_l_min: Number(ventilationEstimate.toFixed(4)),
+      structural_capacity_ceiling_l_min: Number(ventilationCapacityCeiling.toFixed(4)),
+      reference_capacity_l_min: Number((ventilationBase * youngRespiratoryScale).toFixed(4)),
+      thoracic_reference_l: thoracicBase,
+      abdominal_reference_l: abdominalBase,
+      thoracic_weight: 0.62,
+      abdominal_weight: 0.38,
+    },
+  };
   const voiceSource = "Pisanski et al. 2016 Table 1; morphology correction is conservative per Pisanski et al. 2014/2016";
 
   return {
     vocal_tract_length_cm: range(vtl, Math.max(0.45, baseVtlSd * k), "cm", voiceSource, 0.72, "pisanski2016"),
-    f0_mean_hz: range(f0Center, f0Prior.sd * k, "Hz", "Pisanski et al. 2016 Table 1 baseline; closure only shifts preview control slightly", 0.65, "pisanski2016"),
+    f0_reference_hz: range(f0Prior.mean, f0Prior.sd * k, "Hz", "Pisanski et al. 2016 Table 1 reference center for the selected sex class", 0.65, "pisanski2016"),
+    f0_mean_hz: {
+      ...range(f0Center, f0Prior.sd * k, "Hz", "derived from the reference center, vocal-fold spring constant, baseline muscle tension, and current inflammation placeholder", 0.65, "pisanski2016"),
+      read_only_derived: true,
+      derived_from: ["f0_reference_hz", "vocal_fold_spring_constant", "baseline_muscle_tension", "inflammation_index"],
+    },
     formant_reference_hz: {
       f1: voicePriors.f1_hz,
       f2: voicePriors.f2_hz,
@@ -2846,12 +3069,11 @@ function mapVoiceConstraints(features) {
     sinus_neck_length_cm: range(1.2 * Math.pow(sinusVolume / sinusBase, 0.12), 0.25 * k, "cm", "Helmholtz side-branch proxy; manual/detail parameter pending", 0.12, "sourceMap"),
     sinus_coupling: editableControl(sinusCoupling, 0, 1, "ratio", "nasal/sinus proxy plus manual slider", 0.22, "sourceMap"),
     sinus_damping: editableControl(0.68, 0.25, 1.2, "ratio", "preview synthesis control; higher values smear sinus effect", 0.1, "sourceMap"),
-    side_branch_loss_coupling: editableControl(sideBranchLossCoupling, 0, 0.75, "ratio", "global side-branch loss amount for the lightweight preview; combines sinus, nasal, and piriform-fossa branches", 0.1, "sourceMap"),
     velopharyngeal_loss_coupling: editableControl(velopharyngealLossCoupling, 0, 0.75, "ratio", "nasal side-branch loss control guided by the manually placed velopharyngeal gap when available", 0.1, "sourceMap"),
     piriform_fossa_loss_coupling: editableControl(piriformFossaLossCoupling, 0, 0.65, "ratio", "piriform-fossa antiresonance preview control; not an image-observed cavity estimate", 0.1, "sourceMap"),
     piriform_fossa_frequency_hz: editableControl(piriformFossaFrequency, 2200, 5200, "Hz", "vocal-tract-length-scaled piriform-fossa antiresonance preview frequency", 0.1, "sourceMap"),
     nasal_branch_damping: editableControl(0.72, 0.25, 1.4, "ratio", "nasal/velopharyngeal side-branch damping control for the lightweight preview", 0.1, "sourceMap"),
-    maximum_ventilation_l_min: range(ventilation, 14 * k, "L/min", "height/weight/torso proxy; respiratory reference table pending", 0.28, "sourceMap"),
+    maximum_ventilation_l_min: maximumVentilationConstraint,
     young_respiratory_capacity_modifier: {
       center: Number(youngRespiratoryScale.toFixed(4)),
       unit: "ratio",
@@ -2872,14 +3094,14 @@ function mapVoiceConstraints(features) {
     predicted_pef_l_s: respiratoryRangeFromPrediction(youngRespiratory?.PEF, k),
     predicted_v50_l_s: respiratoryRangeFromPrediction(youngRespiratory?.V50, k),
     predicted_v25_l_s: respiratoryRangeFromPrediction(youngRespiratory?.V25, k),
-    thoracic_volume_l: range(thoracicVolume, 0.8 * k, "L", "torso/shoulder/height/weight proxy with conservative body-composition soft-tissue modifier; maps to breath support and low-frequency body resonance", 0.22, "komiya1997JapaneseBodyComposition"),
-    abdominal_volume_l: range(abdominalVolume, 0.9 * k, "L", "torso/pelvis/weight proxy with conservative body-fat and abdominal skinfold modifier; maps to pressure stability and breath support", 0.2, "regionalSkinfoldThickness1996"),
+    thoracic_volume_l: range(thoracicVolume, 0.8 * k, "L", "torso/shoulder/height/weight proxy with conservative body-composition soft-tissue modifier; limits maximum ventilation and sets body-resonance frequency", 0.22, "komiya1997JapaneseBodyComposition"),
+    abdominal_volume_l: range(abdominalVolume, 0.9 * k, "L", "torso/pelvis/weight proxy with conservative body-fat and abdominal skinfold modifier; limits maximum ventilation", 0.2, "regionalSkinfoldThickness1996"),
     respiratory_support: editableControl(
       respiratorySupport,
       0.55,
       1.45,
       "ratio",
-      "ventilation, thoracic volume, and abdominal volume proxy",
+      "performance utilization of the available respiratory capacity during speech; structural volumes are applied upstream through maximum ventilation",
       0.24,
       "sourceMap",
       performanceConstraintRange(respiratorySupport, clamp(respiratorySupport * 0.76, 0.55, 1.45), clamp(respiratorySupport * 1.24, 0.55, 1.45), "relaxed-to-supported respiratory performance range")
@@ -2940,7 +3162,7 @@ function mapVoiceConstraints(features) {
       0.25,
       1.25,
       "ratio",
-      "age/maturity and fatigue proxy for how tightly articulators reach their intended targets",
+      "current deterministic preview precision for how tightly the realized tract reaches its intended target; temporal target-arrival variance is reserved for motor_control_maturity in the future TTS layer",
       0.2,
       "sourceMap",
       performanceConstraintRange(motorControlPrecision, clamp(motorControlPrecision * 0.78, 0.2, 1.35), clamp(motorControlPrecision * 1.14, 0.2, 1.35), "unstable-to-precise articulatory motor-control range")
@@ -2960,7 +3182,7 @@ function mapVoiceConstraints(features) {
       0.25,
       1.15,
       "ratio",
-      "age-based articulatory motor maturity proxy; independent of body-size plausibility",
+      "age-based motor-coordination capacity reserved for stochastic target-arrival accuracy in the future temporal TTS layer; isolated-vowel preview remains deterministic",
       0.18,
       "sourceMap",
       staticConstraintRange(Number(maturity.toFixed(4)))
@@ -2989,26 +3211,16 @@ function mapVoiceConstraints(features) {
       inputs: lifestyle.inputs,
       notes: lifestyle.notes,
     },
-    body_resonance_frequency_hz: range(bodyResonanceFrequency, 35 * k, "Hz", "thoracic-volume-derived low-frequency body resonance preview control", 0.18, "sourceMap"),
-    body_resonance_gain_db: range(bodyResonanceGain, 1.5 * k, "dB", "body resonance coupling preview control", 0.16, "sourceMap"),
-    body_resonance_coupling: editableControl(bodyResonanceCoupling, 0, 1, "ratio", "thoracic volume, glottal closure, and conservative body-composition proxy", 0.2, "regionalSkinfoldThickness1996"),
+    body_resonance_frequency_hz: range(bodyResonanceFrequency, 35 * k, "Hz", "initial value derived from thoracic volume; editable value is persisted and used directly by preview synthesis", 0.18, "sourceMap"),
+    body_resonance_gain_db: range(bodyResonanceGain, 1.5 * k, "dB", "independent peak gain of the body-resonance branch before wet/dry coupling", 0.12, "sourceMap"),
+    body_resonance_coupling: editableControl(bodyResonanceCoupling, 0, 1, "ratio", "wet/dry coupling of the body-resonance branch; estimated from thoracic volume and conservative body-composition proxies", 0.2, "regionalSkinfoldThickness1996"),
     maximum_respiratory_pressure_pa: range(pressure, 180 * k, "Pa", "manual setting; maximal pressure reference source pending", 0.2, "sourceMap"),
-    glottal_closure: editableControl(
-      closure,
-      0,
-      1,
-      "ratio",
-      "manual baseline value",
-      0.5,
-      null,
-      performanceConstraintRange(closure, clamp(closure - 0.25, 0, 1), clamp(closure + 0.25, 0, 1), "breathy-to-firm glottal performance range")
-    ),
     glottal_open_quotient: editableControl(
       glottalOpenQuotient,
       0.35,
       0.9,
       "ratio",
-      "LF-style glottal-source open quotient preview control; derived from closure/inflammation until exposed in UI",
+      "LF-style glottal-source open quotient preview control; initialized from baseline tension and the provisional inflammation variable",
       0.12,
       "sourceMap",
       performanceConstraintRange(glottalOpenQuotient, clamp(glottalOpenQuotient - 0.08, 0.2, 0.95), clamp(glottalOpenQuotient + 0.08, 0.2, 0.95), "phonatory open-quotient performance range around the baseline")
@@ -3018,7 +3230,7 @@ function mapVoiceConstraints(features) {
       0.8,
       2.8,
       "ratio",
-      "LF-style opening-to-closing speed quotient preview control; derived from closure/tension until exposed in UI",
+      "LF-style opening-to-closing speed quotient preview control; initialized from baseline tension and the provisional inflammation variable",
       0.12,
       "sourceMap",
       performanceConstraintRange(glottalSpeedQuotient, clamp(glottalSpeedQuotient * 0.88, 0.6, 3.2), clamp(glottalSpeedQuotient * 1.12, 0.6, 3.2), "phonatory speed-quotient performance range around the baseline")
@@ -3028,7 +3240,7 @@ function mapVoiceConstraints(features) {
       0.04,
       0.32,
       "cycle",
-      "LF-style return-phase duration preview control; derived from closure/inflammation until exposed in UI",
+      "LF-style return-phase duration preview control; initialized from baseline tension and the provisional inflammation variable",
       0.12,
       "sourceMap",
       performanceConstraintRange(glottalReturnPhase, clamp(glottalReturnPhase - 0.035, 0.03, 0.38), clamp(glottalReturnPhase + 0.035, 0.03, 0.38), "phonatory return-phase performance range around the baseline")
@@ -3038,7 +3250,7 @@ function mapVoiceConstraints(features) {
       4,
       28,
       "dB",
-      "general human glottal-source spectral tilt preview control; derived from closure/tension/inflammation until exposed in UI",
+      "general human glottal-source spectral tilt preview control; initialized from tension and the provisional inflammation variable",
       0.12,
       "sourceMap",
       performanceConstraintRange(glottalSpectralTiltDb, clamp(glottalSpectralTiltDb - 4, 2, 32), clamp(glottalSpectralTiltDb + 4, 2, 32), "phonatory spectral-tilt performance range around the baseline")
@@ -3048,7 +3260,7 @@ function mapVoiceConstraints(features) {
       0,
       0.6,
       "ratio",
-      "aspiration-noise amount mixed into the glottal source; derived from closure/inflammation until exposed in UI",
+      "aspiration-noise amount mixed into the glottal source; initialized from tension and the provisional inflammation/lumen variables",
       0.12,
       "sourceMap",
       performanceConstraintRange(glottalBreathiness, clamp(glottalBreathiness * 0.65, 0, 0.75), clamp(glottalBreathiness + 0.12, 0, 0.75), "breathiness performance range around the baseline")
@@ -3089,14 +3301,11 @@ function mapVoiceConstraints(features) {
     vocal_tract_wall_compliance: editableControl(0.18, 0, 0.7, "ratio", "soft-wall compliance approximation for broadening raw 1D tube resonances; human-average placeholder", 0.1, "sourceMap"),
     vocal_tract_resonance_broadening: editableControl(0.26, 0, 0.85, "ratio", "frequency-dependent resonance broadening for the raw 1D tube preview; human-average placeholder", 0.1, "sourceMap"),
     lip_radiation_smoothing: editableControl(0.32, 0, 0.85, "ratio", "mouth-radiation smoothing for the lightweight 1D tube preview; human-average placeholder", 0.1, "sourceMap"),
-    hybrid_side_branch_strength: editableControl(0.32, 0, 1, "ratio", "hybrid preview bridge; scales side-branch coloring after the stable formant envelope is built", 0.1, "sourceMap"),
-    hybrid_formant_anchor: editableControl(0.86, 0.55, 0.98, "ratio", "hybrid preview control; higher values keep the voice-like formant envelope dominant over raw tube resonances", 0.1, "sourceMap"),
-    hybrid_tube_texture_mix: editableControl(0.025, 0, 0.22, "ratio", "hybrid preview control; small contribution of the conditioned 1D tube signal for tract texture", 0.1, "sourceMap"),
     vocal_fold_spring_constant: range(
       springConstant,
       0.18 * k,
       "ratio",
-      "age, closure, lifestyle, and inflammation preview proxy; physical core mapping pending",
+      "age, lifestyle, and inflammation preview proxy; physical core mapping pending",
       0.18,
       "sourceMap",
       performanceConstraintRange(springConstant, clamp(springConstant * 0.85, 0.35, 2.0), clamp(springConstant * 1.16, 0.35, 2.0), "relaxed-to-strained vocal-fold stiffness performance range")
@@ -3110,7 +3319,6 @@ function mapVoiceConstraints(features) {
       "sourceMap",
       performanceConstraintRange(baselineTension, clamp(baselineTension * 0.7, 0.2, 2.0), clamp(baselineTension * 1.35, 0.2, 2.0), "maximally relaxed-to-strained muscle-tension performance range")
     ),
-    tension_response_curve: range(tensionResponse, 0.18 * k, "ratio", "preview control for how strongly tension affects F0 and stability", 0.16, "sourceMap"),
     inflammation_index: editableControl(inflammation, 0, 1, "ratio", "smoking/respiratory-history proxy plus manual slider; calibration source not selected", 0.12, "sourceMap"),
     airway_lumen_narrowing: editableControl(lumenNarrowing, 0, 1, "ratio", "inflammation and respiratory-history proxy; calibration source not selected", 0.12, "sourceMap"),
     pediatric_vocal_cord_to_carina_cm: growthRefs.pediatric_airway
@@ -3315,40 +3523,57 @@ function youngRespiratoryCapacityScale(predictions, sex) {
   return clamp(predictions.FVC.center / adolescentAdultReference, 0.65, 1.18);
 }
 
-function renderQuickSliders() {
-  els.quickSliders.innerHTML = "";
-  for (const control of quickControls) {
-    renderConstraintSlider(els.quickSliders, control);
-  }
+function renderDetailControls() {
+  renderSliderGroup(els.vocalTractProfileSliders, vocalTractProfileControls);
+  renderSliderGroup(els.glottalPhysiologySliders, glottalPhysiologyControls);
+  renderSliderGroup(els.trunkPhysiologySliders, trunkPhysiologyControls);
+  renderSliderGroup(els.executionSliders, executionControls);
+  renderSliderGroup(els.advancedAcousticSliders, advancedAcousticControls);
+  renderPerformanceRangeEditors();
 }
 
-function renderVocalFoldSliders() {
-  if (!els.vocalFoldSliders) return;
-  els.vocalFoldSliders.innerHTML = "";
-  for (const control of vocalFoldControls) {
-    renderConstraintSlider(els.vocalFoldSliders, control);
-  }
+function renderPerformanceRangeEditors() {
+  renderPerformanceRangeGroup(els.glottalPerformanceRanges, performanceRangeGroups.glottal);
+  renderPerformanceRangeGroup(els.vocalTractPerformanceRanges, performanceRangeGroups.vocalTract);
+  renderPerformanceRangeGroup(els.trunkPerformanceRanges, performanceRangeGroups.trunk);
 }
 
-function renderVocalTract2_5DSliders() {
-  if (!els.geometrySliders) return;
-  els.geometrySliders.innerHTML = "";
-  for (const control of vocalTract2_5DControls) {
-    renderConstraintSlider(els.geometrySliders, control);
-  }
+function hasPerformanceRangeEditor(key) {
+  return Object.values(performanceRangeGroups).some((controls) => controls.filter(Boolean).some((control) => control.key === key));
+}
+
+function renderSliderGroup(container, controls) {
+  if (!container) return;
+  container.innerHTML = "";
+  for (const control of controls.filter(Boolean)) renderConstraintSlider(container, control);
+}
+
+function renderPerformanceRangeGroup(container, controls) {
+  if (!container) return;
+  container.innerHTML = "";
+  for (const control of controls.filter(Boolean)) renderPerformanceRangeEditor(container, control);
 }
 
 function renderConstraintSlider(container, control) {
   const item = state.constraints[control.key];
   if (!item || item.center == null) return;
   const bounds = sliderBounds(item, control);
-  const row = document.createElement("label");
+  const row = document.createElement("div");
   row.className = "slider-row";
-  const caption = document.createElement("span");
-  caption.textContent = control.label;
+  if (control.readOnly) row.classList.add("derived-readonly-row");
+  const caption = document.createElement("div");
+  caption.className = "slider-caption";
+  const captionLabel = document.createElement("label");
+  const inputId = `constraint-${control.key}`;
+  captionLabel.htmlFor = inputId;
+  captionLabel.textContent = control.label;
+  caption.appendChild(captionLabel);
+  const citation = sourceCitationElement(item.evidence);
+  if (citation) caption.appendChild(citation);
   const sliderCell = document.createElement("div");
   sliderCell.className = "slider-cell";
   const input = document.createElement("input");
+  input.id = inputId;
   input.type = "range";
   input.min = bounds.min;
   input.max = bounds.max;
@@ -3356,6 +3581,8 @@ function renderConstraintSlider(container, control) {
   input.value = clamp(item.center, bounds.min, bounds.max);
   input.className = "sd-range";
   input.title = item.source || "";
+  input.disabled = Boolean(control.readOnly);
+  if (control.readOnly) input.setAttribute("aria-readonly", "true");
   const scale = makeSliderScale(item, bounds, control);
   sliderCell.append(input, scale);
   const output = document.createElement("output");
@@ -3363,27 +3590,161 @@ function renderConstraintSlider(container, control) {
   warning.className = "slider-warning";
   const update = (persistOverride = false) => {
     const value = Number(input.value);
-    state.constraints[control.key].center = value;
-    if (persistOverride) {
+    if (!control.readOnly) state.constraints[control.key].center = value;
+    if (persistOverride && !control.readOnly) {
       state.constraintOverrides[control.key] = value;
       state.constraints[control.key].user_override = true;
+      const performanceRange = state.constraints[control.key].performance_control_range;
+      if (performanceRange) {
+        const nextRange = {
+          ...performanceRange,
+          min: Number(Math.min(Number(performanceRange.min), value).toFixed(4)),
+          max: Number(Math.max(Number(performanceRange.max), value).toFixed(4)),
+        };
+        state.constraints[control.key].performance_control_range = nextRange;
+        state.constraints[control.key].constraint_range = { ...nextRange };
+        if (state.performanceRangeOverrides[control.key]) {
+          state.performanceRangeOverrides[control.key] = { ...nextRange };
+        }
+      }
     }
     state.lastWav = null;
-    if (control.key === "glottal_closure") els.glottalClosureInput.value = String(value);
+    if (!control.readOnly && state.constraints[control.key].resting_anatomical_state) {
+      state.constraints[control.key].resting_anatomical_state.value = value;
+    }
     output.textContent = `${format(value, control.step < 0.1 ? 2 : 1)} ${control.unit}`;
     const z = sliderZ(value, item);
     row.classList.toggle("warn-2sd", Math.abs(z) > 2);
     row.classList.toggle("warn-3sd", Math.abs(z) > 3);
     warning.textContent = Math.abs(z) > 2 ? "!" : "";
     updateSliderScale(scale, value, item, bounds, control);
+    if (persistOverride && !control.readOnly) refreshDerivedConstraintCenters(control.key);
     state.vocalTractGeometry = buildVocalTractGeometry();
     renderConstraints();
     draw();
+    if (persistOverride && hasPerformanceRangeEditor(control.key)) renderPerformanceRangeEditors();
   };
-  input.addEventListener("input", () => update(true));
+  if (!control.readOnly) {
+    input.addEventListener("input", () => update(true));
+    if (["vocal_fold_spring_constant", "baseline_muscle_tension", "inflammation_index", "thoracic_volume_l", "abdominal_volume_l"].includes(control.key)) {
+      input.addEventListener("change", () => {
+        refreshDerivedConstraintCenters(control.key);
+        renderDetailControls();
+        renderConstraints();
+        draw();
+      });
+    }
+  }
   update(false);
   row.append(caption, sliderCell, output, warning);
   container.appendChild(row);
+}
+
+function renderPerformanceRangeEditor(container, control) {
+  const item = state.constraints[control.key];
+  if (!item || item.center == null) return;
+  const center = Number(item.center);
+  const range = item.performance_control_range ?? staticConstraintRange(center);
+  const domain = performanceEditorBounds(item, control, range);
+  const row = document.createElement("div");
+  row.className = "performance-range-row";
+
+  const heading = document.createElement("div");
+  heading.className = "performance-range-heading";
+  const label = document.createElement("strong");
+  label.textContent = control.label;
+  heading.appendChild(label);
+  const citation = sourceCitationElement(item.evidence);
+  if (citation) heading.appendChild(citation);
+
+  const values = document.createElement("div");
+  values.className = "performance-range-values";
+  const minInput = performanceRangeNumberInput("MIN", range.min, domain.min, center, control.step, control.unit);
+  const base = document.createElement("div");
+  base.className = "performance-range-base";
+  base.innerHTML = `<span>BASE</span><strong>${format(center, control.step < 0.1 ? 2 : 1)} ${control.unit}</strong>`;
+  const maxInput = performanceRangeNumberInput("MAX", range.max, center, domain.max, control.step, control.unit);
+  minInput.input.dataset.performanceKey = control.key;
+  minInput.input.dataset.rangeBound = "min";
+  maxInput.input.dataset.performanceKey = control.key;
+  maxInput.input.dataset.rangeBound = "max";
+  values.append(minInput.wrapper, base, maxInput.wrapper);
+
+  const track = document.createElement("div");
+  track.className = "performance-range-track";
+  const fill = document.createElement("span");
+  fill.className = "performance-range-fill";
+  const marker = document.createElement("span");
+  marker.className = "performance-range-center";
+  track.append(fill, marker);
+
+  const update = (persistOverride = true) => {
+    const min = clamp(Number(minInput.input.value), domain.min, center);
+    const max = clamp(Number(maxInput.input.value), center, domain.max);
+    minInput.input.value = String(min);
+    maxInput.input.value = String(max);
+    if (persistOverride) {
+      const next = {
+        min: Number(min.toFixed(4)),
+        max: Number(max.toFixed(4)),
+        basis: "user-defined PerformanceControlRange around the character baseline",
+        user_override: true,
+      };
+      item.performance_control_range = next;
+      item.constraint_range = { ...next };
+      state.performanceRangeOverrides[control.key] = { ...next };
+    }
+    const denominator = Math.max(0.0001, domain.max - domain.min);
+    const start = ((min - domain.min) / denominator) * 100;
+    const end = ((max - domain.min) / denominator) * 100;
+    const centerPercent = ((center - domain.min) / denominator) * 100;
+    fill.style.left = `${start}%`;
+    fill.style.width = `${Math.max(0, end - start)}%`;
+    marker.style.left = `${centerPercent}%`;
+    track.title = `${format(min, 2)} ～ ${format(max, 2)} ${control.unit}; BASE ${format(center, 2)}`;
+    state.lastWav = null;
+    if (persistOverride) renderConstraints();
+  };
+  minInput.input.addEventListener("input", () => update(true));
+  maxInput.input.addEventListener("input", () => update(true));
+  update(false);
+  row.append(heading, values, track);
+  container.appendChild(row);
+}
+
+function performanceRangeNumberInput(labelText, value, min, max, step, unit) {
+  const wrapper = document.createElement("label");
+  wrapper.className = "performance-range-number";
+  const label = document.createElement("span");
+  label.textContent = labelText;
+  const input = document.createElement("input");
+  input.type = "number";
+  input.min = String(min);
+  input.max = String(max);
+  input.step = String(step);
+  input.value = String(value);
+  input.setAttribute("aria-label", `${labelText} ${unit}`.trim());
+  wrapper.append(label, input);
+  return { wrapper, input };
+}
+
+function performanceEditorBounds(item, control, range) {
+  const candidates = [
+    Number(item.design_bounds?.min),
+    Number(item.edit_range?.min),
+    Number(control.min),
+    Number(range.min),
+  ].filter(Number.isFinite);
+  const upperCandidates = [
+    Number(item.design_bounds?.max),
+    Number(item.edit_range?.max),
+    Number(control.max),
+    Number(range.max),
+  ].filter(Number.isFinite);
+  return {
+    min: Math.min(...candidates),
+    max: Math.max(...upperCandidates),
+  };
 }
 
 function sliderBounds(item, control) {
@@ -3513,13 +3874,12 @@ function renderCalibrationSummary() {
     item.append(label, value, note);
     els.calibrationSummary.appendChild(item);
   }
-  const status = document.createElement("p");
-  status.className = `calibration-status ${calibration.cross_view_consistency.status}`;
-  const delta = calibration.cross_view_consistency.max_total_head_height_delta_cm;
-  status.textContent = calibration.cross_view_consistency.status === "reconciled"
-    ? `全頭高は ${calibration.cross_view_consistency.compared_view_count} 画像間で整合済み（最大差 ${format(delta, 4)} cm）。`
-    : "共通全頭高を比較できる画像が不足しています。";
-  els.calibrationSummary.appendChild(status);
+  if (calibration.cross_view_consistency.status !== "reconciled") {
+    const status = document.createElement("p");
+    status.className = `calibration-status ${calibration.cross_view_consistency.status}`;
+    status.textContent = "共通全頭高を比較できる画像が不足しています。";
+    els.calibrationSummary.appendChild(status);
+  }
   if (calibration.warnings.length) {
     const warnings = document.createElement("ul");
     warnings.className = "calibration-warnings";
@@ -3573,14 +3933,30 @@ function renderFeatureTable() {
     const centerTitle = f.statistical_center_kind === "median"
       ? "source median"
       : "median unavailable; mean used as representative center";
-    row.innerHTML = `
-      <td>${f.label}</td>
-      <td>${format(f.integrated, 2)} ${f.unit}</td>
-      <td title="${escapeAttr(centerTitle)}">${format(f.statistical_median, 2)} ${f.unit}</td>
-      <td>${format(f.z_score, 2)}</td>
-      <td>${format(f.image_weight, 2)}</td>
-      <td title="${escapeAttr(f.source_note)}">${f.evidence_level}</td>
-    `;
+    const evidenceCell = document.createElement("td");
+    const citation = sourceCitationElement(f.evidence);
+    if (citation) {
+      const sourceSpecificNote = [sourceTooltipText(f.evidence), f.source_note].filter(Boolean).join("\n");
+      citation.title = sourceSpecificNote;
+      citation.dataset.tooltip = sourceSpecificNote;
+      evidenceCell.appendChild(citation);
+    } else {
+      evidenceCell.textContent = f.evidence_level;
+      evidenceCell.title = f.source_note ?? "";
+    }
+    const cells = [
+      f.label,
+      `${format(f.integrated, 2)} ${f.unit}`,
+      `${format(f.statistical_median, 2)} ${f.unit}`,
+      format(f.z_score, 2),
+      format(f.image_weight, 2),
+    ].map((text) => {
+      const cell = document.createElement("td");
+      cell.textContent = text;
+      return cell;
+    });
+    cells[2].title = centerTitle;
+    row.append(...cells, evidenceCell);
     els.featureTable.appendChild(row);
   }
 }
@@ -3597,27 +3973,30 @@ function renderPublicationReferences() {
   els.referenceSourceTable.innerHTML = "";
   for (const [key, source] of Object.entries(referenceData.sources)) {
     const row = document.createElement("tr");
+    const numberCell = document.createElement("td");
     const labelCell = document.createElement("td");
     const useCell = document.createElement("td");
     const statusCell = document.createElement("td");
     const noteCell = document.createElement("td");
 
-    const title = document.createElement(source.url ? "a" : "span");
+    const href = source.doi ? `https://doi.org/${source.doi}` : source.url;
+    const title = document.createElement(href ? "a" : "span");
     title.textContent = source.label ?? key;
-    if (source.url) {
-      title.href = source.url;
+    if (href) {
+      title.href = href;
       title.target = "_blank";
       title.rel = "noreferrer";
     }
     const keyLine = document.createElement("small");
-    keyLine.textContent = key;
+    keyLine.textContent = source.doi ? `DOI: ${source.doi}` : source.url ? "公式資料・公開ページ" : "DOI未確認";
+    numberCell.textContent = `[${referenceNumber(key)}]`;
     labelCell.append(title, keyLine);
 
     useCell.textContent = source.use ?? "-";
     statusCell.textContent = `${source.publication_use ?? "reference"} / ${source.public_release_status ?? source.evidence_level ?? "unclassified"}`;
     noteCell.textContent = source.privacy_note ?? source.bundle_file ?? source.local_cache ?? source.local_plan ?? "-";
 
-    row.append(labelCell, useCell, statusCell, noteCell);
+    row.append(numberCell, labelCell, useCell, statusCell, noteCell);
     els.referenceSourceTable.appendChild(row);
   }
 }
@@ -3641,6 +4020,24 @@ function overridesFromConstraints(constraints = {}) {
   if (!constraints || typeof constraints !== "object") return overrides;
   for (const [key, item] of Object.entries(constraints)) {
     if (item?.user_override && Number.isFinite(item.center)) overrides[key] = item.center;
+  }
+  return overrides;
+}
+
+function performanceRangeOverridesFromLegacyConstraints(constraints = {}) {
+  const overrides = {};
+  if (!constraints || typeof constraints !== "object") return overrides;
+  for (const [key, item] of Object.entries(constraints)) {
+    const range = item?.performance_control_range ?? item?.constraint_range;
+    const min = Number(range?.min);
+    const max = Number(range?.max);
+    if (!Number.isFinite(min) || !Number.isFinite(max) || Math.abs(max - min) < 0.0001) continue;
+    overrides[key] = {
+      min,
+      max,
+      basis: "migrated per-parameter range from a pre-0.3 profile",
+      user_override: true,
+    };
   }
   return overrides;
 }
@@ -3725,18 +4122,73 @@ function migrateLegacyIllustrationGestureInput(data, savedConstraints, savedOver
   };
 }
 
-function applyLoadedConstraintInputs(savedConstraints = {}, savedOverrides = {}) {
-  const closure = loadedConstraintCenter(savedConstraints, savedOverrides, "glottal_closure");
-  if (closure != null && els.glottalClosureInput) els.glottalClosureInput.value = String(clamp(closure, 0, 1));
-  const pressure = loadedConstraintCenter(savedConstraints, savedOverrides, "maximum_respiratory_pressure_pa");
-  if (pressure != null && els.pressureInput) els.pressureInput.value = String(Math.max(0, pressure));
+function migrateLegacyDevelopmentControls(savedConstraints = {}, savedOverrides = {}) {
+  const migratedConstraints = { ...(savedConstraints ?? {}) };
+  const migratedOverrides = { ...(savedOverrides ?? {}) };
+
+  // DEVELOPMENT/MIGRATION ONLY: glottal_closure was an ambiguous master
+  // control in pre-0.3 projects. It is read once to seed explicit LF-style
+  // source quantities and is never retained in the live schema or synthesis.
+  const legacyClosure = loadedConstraintCenter(savedConstraints, savedOverrides, "glottal_closure");
+  if (Number.isFinite(legacyClosure)) {
+    const legacyParams = legacyGlottalSourceParamsFromClosure(
+      legacyClosure,
+      loadedConstraintCenter(savedConstraints, savedOverrides, "baseline_muscle_tension") ?? 1,
+      loadedConstraintCenter(savedConstraints, savedOverrides, "inflammation_index") ?? 0,
+      loadedConstraintCenter(savedConstraints, savedOverrides, "airway_lumen_narrowing") ?? 0
+    );
+    const updates = {
+      glottal_open_quotient: legacyParams.open_quotient,
+      glottal_speed_quotient: legacyParams.speed_quotient,
+      glottal_return_phase: legacyParams.return_phase,
+      glottal_spectral_tilt_db: legacyParams.spectral_tilt_db,
+      glottal_breathiness: legacyParams.breathiness,
+      glottal_volume_velocity_drive: legacyParams.volume_velocity_drive,
+      glottal_flow_smoothing: legacyParams.flow_smoothing,
+      glottal_flow_inertance: legacyParams.flow_inertance,
+    };
+    for (const [key, value] of Object.entries(updates)) {
+      if (Number.isFinite(loadedConstraintCenter(savedConstraints, savedOverrides, key))) continue;
+      migratedConstraints[key] = {
+        center: Number(value.toFixed(4)),
+        user_override: true,
+        migrated_from_legacy_glottal_closure: true,
+      };
+      migratedOverrides[key] = Number(value.toFixed(4));
+    }
+  }
+
+  // DEVELOPMENT/MIGRATION ONLY: the retired global side-branch control is
+  // distributed to branch-local controls only when an old profile lacks them.
+  const legacySideBranch = loadedConstraintCenter(savedConstraints, savedOverrides, "side_branch_loss_coupling");
+  if (Number.isFinite(legacySideBranch)) {
+    const branchUpdates = {
+      sinus_coupling: clamp(legacySideBranch * 0.9, 0, 1),
+      velopharyngeal_loss_coupling: clamp(legacySideBranch * 0.7, 0, 0.75),
+      piriform_fossa_loss_coupling: clamp(legacySideBranch * 0.55, 0, 0.65),
+    };
+    for (const [key, value] of Object.entries(branchUpdates)) {
+      if (Number.isFinite(loadedConstraintCenter(savedConstraints, savedOverrides, key))) continue;
+      migratedConstraints[key] = {
+        center: Number(value.toFixed(4)),
+        user_override: true,
+        migrated_from_legacy_side_branch_master: true,
+      };
+      migratedOverrides[key] = Number(value.toFixed(4));
+    }
+  }
+
+  return {
+    constraints: withoutRetiredConstraints(migratedConstraints),
+    overrides: withoutReadOnlyDerivedOverrides(withoutRetiredConstraints(migratedOverrides)),
+  };
 }
 
 function mergeLoadedVoiceConstraints(currentConstraints, savedConstraints = {}) {
   if (!savedConstraints || typeof savedConstraints !== "object") return currentConstraints;
-  const savedKeys = new Set(Object.keys(savedConstraints));
   const merged = { ...currentConstraints };
   for (const [key, savedItem] of Object.entries(savedConstraints)) {
+    if (retiredConstraintKeys.has(key) || readOnlyDerivedConstraintKeys.has(key)) continue;
     if (!savedItem || typeof savedItem !== "object") continue;
     const currentItem = merged[key];
     if (!currentItem) {
@@ -3745,7 +4197,6 @@ function mergeLoadedVoiceConstraints(currentConstraints, savedConstraints = {}) 
     }
     merged[key] = mergeConstraintItem(currentItem, savedItem);
   }
-  refreshMigratedSynthesisControls(merged, savedKeys);
   return merged;
 }
 
@@ -3765,56 +4216,12 @@ function mergeConstraintItem(currentItem, savedItem) {
   return merged;
 }
 
-function refreshMigratedSynthesisControls(constraints, savedKeys) {
-  const closure = constraints.glottal_closure?.center ?? 0.5;
-  const inflammation = constraints.inflammation_index?.center ?? 0;
-  const lumenNarrowing = constraints.airway_lumen_narrowing?.center ?? 0;
-  const effectiveClosure = clamp(closure - inflammation * 0.22 - lumenNarrowing * 0.1, 0, 1);
-  const glottalParams = currentGlottalSourceParams(
-    withoutConstraintKeys(constraints, [
-      "glottal_open_quotient",
-      "glottal_speed_quotient",
-      "glottal_return_phase",
-      "glottal_spectral_tilt_db",
-      "glottal_breathiness",
-      "glottal_volume_velocity_drive",
-      "glottal_flow_smoothing",
-      "glottal_flow_inertance",
-    ]),
-    effectiveClosure,
-    constraints.baseline_muscle_tension?.center ?? 1,
-    constraints.tension_response_curve?.center ?? 1,
-    inflammation,
-    lumenNarrowing
-  );
-  const updates = {
-    glottal_open_quotient: glottalParams.open_quotient,
-    glottal_speed_quotient: glottalParams.speed_quotient,
-    glottal_return_phase: glottalParams.return_phase,
-    glottal_spectral_tilt_db: glottalParams.spectral_tilt_db,
-    glottal_breathiness: glottalParams.breathiness,
-    glottal_volume_velocity_drive: glottalParams.volume_velocity_drive,
-    glottal_flow_smoothing: glottalParams.flow_smoothing,
-    glottal_flow_inertance: glottalParams.flow_inertance,
-  };
-  for (const [key, value] of Object.entries(updates)) {
-    if (savedKeys.has(key)) continue;
-    constraints[key] = recenteredConstraint(constraints[key], value);
-  }
-}
-
-function withoutConstraintKeys(constraints, keys) {
-  const copy = { ...constraints };
-  for (const key of keys) delete copy[key];
-  return copy;
-}
-
 function recenteredConstraint(item, center) {
   if (!item || !Number.isFinite(center)) return item;
   const next = {
     ...item,
     center: Number(center.toFixed(4)),
-    migrated_default_from_current_model: true,
+    derived_center_refreshed: true,
   };
   const sd = Number(next.statistics?.sd);
   if (Number.isFinite(sd) && sd > 0) {
@@ -3837,10 +4244,10 @@ function recenteredConstraint(item, center) {
 
 function buildExport() {
   return {
-    schema_version: "character_voice_lab_mvp_0.2",
-    app_version: "0.2",
+    schema_version: "character_voice_lab_mvp_0.3",
+    app_version: APP_VERSION,
     project: {
-      title: els.projectTitleInput.value.trim() || "character-voice",
+      title: els.projectTitleInput.value.trim() || "voice_profile",
       updated_at: new Date().toISOString(),
     },
     inputs: {
@@ -3862,7 +4269,8 @@ function buildExport() {
       exercise_habit: els.exerciseInput.value,
       diet_habit: els.dietInput.value,
       respiratory_history: els.respiratoryHistoryInput.value,
-      preview_synthesis_backend: normalizeSynthesisBackend(els.synthesisBackendSelect?.value),
+      image_analysis_weight: Number((state.appliedImageWeight ?? selectedImageWeight()).toFixed(4)),
+      preview_synthesis_backend: "tube",
     },
     landmark_schema: landmarkSystem.schema,
     landmarks: state.landmarks,
@@ -3873,8 +4281,16 @@ function buildExport() {
     body_composition_summary: buildBodyCompositionSummary(),
     phonetic_target: currentPhoneticTargetSummary(),
     vocal_tract_geometry: state.vocalTractGeometry,
-    voice_constraints: state.constraints,
-    constraint_overrides: state.constraintOverrides,
+    voice_constraints: withoutRetiredConstraints(state.constraints),
+    constraint_overrides: withoutReadOnlyDerivedOverrides(withoutRetiredConstraints(state.constraintOverrides)),
+    performance_range_overrides: withoutReadOnlyDerivedOverrides(withoutRetiredConstraints(state.performanceRangeOverrides)),
+    range_semantics: {
+      baseline: "resting/no-phonation character design value",
+      morphological_plausibility_range: "anatomically plausible design interval",
+      performance_control_range: "dynamic interval reachable from the baseline during performance",
+      constraint_range: "deprecated compatibility alias of performance_control_range",
+      global_range_k: "retired; ranges are edited per physical parameter",
+    },
     publication_policy: referenceData.publicationPolicy,
     reference_sources: referenceData.sources,
     notes: [
@@ -3893,7 +4309,13 @@ function buildExport() {
       "Frontal width anchors are linearly interpolated and combined with sagittal diameter using an explicit elliptical cross-section approximation.",
       "Primary language, phonetic target profile, and morphology reference population are separate settings. The phonetic target profile selects aggregate language/variety targets and is never an ancestry or ethnicity selector.",
       "The Japanese phonetic profile embeds only published aggregate F1/F2 targets. Its provisional F3/F4 extension remains explicitly source-labeled and should be replaced when an appropriate public aggregate Japanese F3/F4 table is approved.",
-      "Generated vowel previews use the browser hybrid/formant/tube preview with LF-style volume-velocity source input and simple side-branch losses, not VocalTractLab.",
+      "Generated vowel previews use only the browser 2.5D-derived area-function tube model with LF-style volume-velocity source input and simple side-branch losses, not VocalTractLab.",
+      "Legacy formant/hybrid preview selections, hybrid-only controls, and tension_response_curve are ignored when older profiles are loaded.",
+      "ConstraintRangeK was retired before app 1.0. Statistical edit ranges and PerformanceControlRange values are now independent per parameter.",
+      "Legacy glottal_closure and side_branch_loss_coupling values are read only during one-way project migration and are never retained in the live schema or synthesis path.",
+      "F0 is a read-only value derived from the reference center, vocal-fold spring constant, baseline muscle tension, and the current provisional inflammation mapping.",
+      "Thoracic and abdominal volumes limit estimated maximum ventilation; VC/FVC/FEV1/PEF, ventilation, respiratory pressure, and speech-support utilization feed the preview respiratory drive once.",
+      "Body-resonance frequency starts from thoracic volume, remains user-editable, and is persisted as the frequency used by preview synthesis.",
     ],
   };
 }
@@ -3915,6 +4337,7 @@ function setActiveTab(tabId) {
     panel.classList.toggle("active", active);
     panel.hidden = !active;
   }
+  if (els.floatingPreviewDock) els.floatingPreviewDock.hidden = tabId !== "detailTab";
   draw();
 }
 
@@ -3979,6 +4402,16 @@ function lifestyleRespiratoryModifier() {
 
 function escapeAttr(value) {
   return String(value ?? "").replaceAll("&", "&amp;").replaceAll('"', "&quot;").replaceAll("<", "&lt;");
+}
+
+function withoutRetiredConstraints(record) {
+  if (!record || typeof record !== "object" || Array.isArray(record)) return record;
+  return Object.fromEntries(Object.entries(record).filter(([key]) => !retiredConstraintKeys.has(key)));
+}
+
+function withoutReadOnlyDerivedOverrides(record) {
+  if (!record || typeof record !== "object" || Array.isArray(record)) return record;
+  return Object.fromEntries(Object.entries(record).filter(([key]) => !readOnlyDerivedConstraintKeys.has(key)));
 }
 
 const vowelFormants = {
@@ -4091,26 +4524,13 @@ function currentPhoneticTargetSummary() {
 
 const PREVIEW_REFERENCE_SAMPLE_RATE = 22050;
 const PREVIEW_SAMPLE_RATE = 44100;
-const FORMANT_ASPIRATION_NOISE_SCALE = 0.5;
-// The hybrid path gives aspiration noise one owner, rather than mixing two independently filtered noise sources.
-const HYBRID_FORMANT_ASPIRATION_NOISE_SCALE = 0.32;
-const HYBRID_TUBE_ASPIRATION_NOISE_SCALE = 0;
 
 function selectedVowel() {
   return vowelFormants[els.vowelSelect.value] ? els.vowelSelect.value : "a";
 }
 
 function synthesizeVowel(vowel = selectedVowel()) {
-  const backend = normalizeSynthesisBackend(els.synthesisBackendSelect?.value);
-  if (backend === "formant") return synthesizeFormantVowel(vowel);
-  if (backend === "tube") return synthesizeTubeVowel(vowel);
-  return synthesizeHybridVowel(vowel);
-}
-
-function normalizeSynthesisBackend(value) {
-  if (value === "formant" || value === "tube" || value === "hybrid") return value;
-  if (value === "area_function_tube") return "tube";
-  return "tube";
+  return synthesizeTubeVowel(vowel);
 }
 
 function constraintCenter(constraints, key, fallback) {
@@ -4118,23 +4538,63 @@ function constraintCenter(constraints, key, fallback) {
   return Number.isFinite(value) ? value : fallback;
 }
 
-function currentGlottalSourceParams(constraints, effectiveClosure, tension, tensionResponse, inflammation, lumenNarrowing) {
-  const closure = clamp(effectiveClosure ?? constraintCenter(constraints, "glottal_closure", 0.5), 0, 1);
+function derivedF0FromPhysicalValues(referenceHz, springConstant, baselineTension, inflammation = 0) {
+  return clamp(
+    referenceHz
+      * Math.sqrt(clamp(springConstant, 0.35, 2))
+      * Math.pow(clamp(baselineTension, 0.2, 2), 0.18)
+      * (1 - clamp(inflammation, 0, 1) * 0.08),
+    45,
+    520
+  );
+}
+
+function currentDerivedF0(constraints) {
+  return derivedF0FromPhysicalValues(
+    constraintCenter(constraints, "f0_reference_hz", constraintCenter(constraints, "f0_mean_hz", 165)),
+    constraintCenter(constraints, "vocal_fold_spring_constant", 1),
+    constraintCenter(constraints, "baseline_muscle_tension", 1),
+    constraintCenter(constraints, "inflammation_index", 0)
+  );
+}
+
+function currentGlottalSourceParams(constraints, tension, inflammation, lumenNarrowing) {
   const baseTension = clamp(tension ?? constraintCenter(constraints, "baseline_muscle_tension", 1), 0.25, 2);
-  const response = clamp(tensionResponse ?? constraintCenter(constraints, "tension_response_curve", 1), 0.2, 2.4);
   const swelling = clamp(inflammation ?? constraintCenter(constraints, "inflammation_index", 0), 0, 1);
   const narrowing = clamp(lumenNarrowing ?? constraintCenter(constraints, "airway_lumen_narrowing", 0), 0, 1);
   return {
-    open_quotient: clamp(constraintCenter(constraints, "glottal_open_quotient", 0.66 - closure * 0.22 + swelling * 0.08 + (1 - baseTension) * 0.04), 0.32, 0.9),
-    speed_quotient: clamp(constraintCenter(constraints, "glottal_speed_quotient", 1.45 + closure * 0.58 + baseTension * 0.14 - swelling * 0.16), 0.75, 3.2),
-    return_phase: clamp(constraintCenter(constraints, "glottal_return_phase", 0.11 + (1 - closure) * 0.08 + swelling * 0.04), 0.04, 0.36),
-    spectral_tilt_db: clamp(constraintCenter(constraints, "glottal_spectral_tilt_db", 10.5 + (1 - closure) * 7.5 + swelling * 4.5 - baseTension * 1.2), 3, 32),
-    breathiness: clamp(constraintCenter(constraints, "glottal_breathiness", (1 - closure) * 0.16 + swelling * 0.18 + narrowing * 0.08), 0, 0.75),
-    volume_velocity_drive: clamp(constraintCenter(constraints, "glottal_volume_velocity_drive", 0.86 + (1 - closure) * 0.04 - swelling * 0.06), 0, 1),
-    flow_smoothing: clamp(constraintCenter(constraints, "glottal_flow_smoothing", 0.30 + (1 - closure) * 0.16 + swelling * 0.10 + narrowing * 0.06), 0, 0.95),
-    flow_inertance: clamp(constraintCenter(constraints, "glottal_flow_inertance", 0.10 + closure * 0.10 + baseTension * 0.025 - swelling * 0.03), 0, 0.65),
-    tension_response: response,
+    open_quotient: clamp(constraintCenter(constraints, "glottal_open_quotient", 0.58 + (1 - baseTension) * 0.06 + swelling * 0.08), 0.32, 0.9),
+    speed_quotient: clamp(constraintCenter(constraints, "glottal_speed_quotient", 1.72 + (baseTension - 1) * 0.35 - swelling * 0.16), 0.75, 3.2),
+    return_phase: clamp(constraintCenter(constraints, "glottal_return_phase", 0.15 + (1 - baseTension) * 0.03 + swelling * 0.04), 0.04, 0.36),
+    spectral_tilt_db: clamp(constraintCenter(constraints, "glottal_spectral_tilt_db", 14.2 + swelling * 4.5 - baseTension * 1.2), 3, 32),
+    breathiness: clamp(constraintCenter(constraints, "glottal_breathiness", 0.08 + Math.max(0, 1 - baseTension) * 0.08 + swelling * 0.18 + narrowing * 0.08), 0, 0.75),
+    volume_velocity_drive: clamp(constraintCenter(constraints, "glottal_volume_velocity_drive", 0.88 - swelling * 0.06), 0, 1),
+    flow_smoothing: clamp(constraintCenter(constraints, "glottal_flow_smoothing", 0.37 + swelling * 0.10 + narrowing * 0.06), 0, 0.95),
+    flow_inertance: clamp(constraintCenter(constraints, "glottal_flow_inertance", 0.15 + (baseTension - 1) * 0.025 - swelling * 0.03), 0, 0.65),
   };
+}
+
+// DEVELOPMENT/MIGRATION ONLY. This reproduces the pre-0.3 master-control
+// mapping so old projects can be converted once to explicit source variables.
+function legacyGlottalSourceParamsFromClosure(legacyClosure, tension = 1, inflammation = 0, lumenNarrowing = 0) {
+  const swelling = clamp(inflammation, 0, 1);
+  const narrowing = clamp(lumenNarrowing, 0, 1);
+  const baseTension = clamp(tension, 0.25, 2);
+  const closure = clamp(legacyClosure - swelling * 0.22 - narrowing * 0.1, 0, 1);
+  return {
+    open_quotient: clamp(0.66 - closure * 0.22 + swelling * 0.08 + (1 - baseTension) * 0.04, 0.32, 0.9),
+    speed_quotient: clamp(1.45 + closure * 0.58 + baseTension * 0.14 - swelling * 0.16, 0.75, 3.2),
+    return_phase: clamp(0.11 + (1 - closure) * 0.08 + swelling * 0.04, 0.04, 0.36),
+    spectral_tilt_db: clamp(10.5 + (1 - closure) * 7.5 + swelling * 4.5 - baseTension * 1.2, 3, 32),
+    breathiness: clamp((1 - closure) * 0.16 + swelling * 0.18 + narrowing * 0.08, 0, 0.75),
+    volume_velocity_drive: clamp(0.86 + (1 - closure) * 0.04 - swelling * 0.06, 0, 1),
+    flow_smoothing: clamp(0.30 + (1 - closure) * 0.16 + swelling * 0.10 + narrowing * 0.06, 0, 0.95),
+    flow_inertance: clamp(0.10 + closure * 0.10 + baseTension * 0.025 - swelling * 0.03, 0, 0.65),
+  };
+}
+
+function glottalClosureProxyFromOpenQuotient(openQuotient) {
+  return clamp((0.9 - openQuotient) / 0.55, 0, 1);
 }
 
 function currentTubeLossParams(constraints, lumenNarrowing = 0, inflammation = 0) {
@@ -4197,54 +4657,6 @@ function glottalVolumeVelocitySample(glottalFlow, sourceState, params, effective
   return volumeVelocity * velocityDrive + pressureLike * (1 - velocityDrive) + inertiveKick + noise;
 }
 
-function defaultFormantSpec(vowel, vtl, effectiveClosure, inflammation, lumenNarrowing) {
-  const reference = currentVowelReference(vowel, vtl);
-  return reference.target_formants_hz.map((frequency, index) => ({
-    f: frequency,
-    bw: reference.bandwidths_hz[index] + (index === 0 ? (1 - effectiveClosure) * 45 : 0) + inflammation * 90 + lumenNarrowing * 55,
-    source: index < 2 ? reference.sources.f1_f2 : reference.sources.f3_f4,
-  }));
-}
-
-function hybridFormantProfileFromAreaFunction(vowel, areaFunction, vtl, constraints, effectiveClosure, inflammation, lumenNarrowing) {
-  const base = defaultFormantSpec(vowel, vtl, effectiveClosure, inflammation, lumenNarrowing);
-  const descriptor = areaFunctionDescriptor(areaFunction);
-  const formantAnchor = clamp(constraints.hybrid_formant_anchor?.center ?? 0.82, 0.55, 0.98);
-  const geometryWeight = 1 - formantAnchor;
-  const pharyngealNarrow = clamp((1.45 - descriptor.pharyngeal.min) / 1.45, -0.25, 0.85);
-  const backOralNarrow = clamp((1.35 - descriptor.back_oral.min) / 1.35, -0.25, 0.9);
-  const frontOralNarrow = clamp((1.15 - descriptor.front_oral.min) / 1.15, -0.25, 0.9);
-  const lipRounding = clamp((1.25 - descriptor.labial.mean) / 1.25, -0.35, 0.9);
-  const oralBalance = clamp((descriptor.front_oral.mean - descriptor.back_oral.mean) / Math.max(0.1, descriptor.front_oral.mean + descriptor.back_oral.mean), -0.6, 0.6);
-  const constrictionContrast = clamp((descriptor.global.mean / Math.max(0.08, descriptor.global.min) - 1) / 5, 0, 1);
-  const geometryGains = [
-    1 + pharyngealNarrow * 0.22 - frontOralNarrow * 0.10 - lipRounding * 0.06,
-    1 + frontOralNarrow * 0.24 - backOralNarrow * 0.20 - lipRounding * 0.14 + oralBalance * 0.10,
-    1 + frontOralNarrow * 0.08 - lipRounding * 0.05 + constrictionContrast * 0.04,
-    1 + frontOralNarrow * 0.05 - lipRounding * 0.03 + constrictionContrast * 0.03,
-  ];
-  const formants = base.map((formant, index) => {
-    const gain = 1 + ((geometryGains[index] ?? 1) - 1) * geometryWeight;
-    const bandwidthGain = 1 + constrictionContrast * 0.32 + (index === 0 ? pharyngealNarrow * 0.18 : 0) + lipRounding * 0.08;
-    const lower = [180, 450, 900, 1300][index] ?? 1300;
-    const upper = [1200, 4200, 5000, 6000][index] ?? 6000;
-    const bandwidthUpper = index >= 3 ? 720 : 520;
-    return {
-      f: clamp(formant.f * gain, lower, upper),
-      bw: clamp(formant.bw * bandwidthGain, 45, bandwidthUpper),
-      source: "hybrid_area_function_guided_formant",
-    };
-  });
-  return {
-    schema_version: "hybrid_formant_profile_0.1",
-    formant_anchor: Number(formantAnchor.toFixed(4)),
-    geometry_weight: Number(geometryWeight.toFixed(4)),
-    descriptor,
-    formants,
-    note: "Stable vowel-reference formants are nudged by the 2D-derived area function; the raw 1D tube remains a texture/reference layer.",
-  };
-}
-
 function areaFunctionDescriptor(areaFunction) {
   const areas = areaFunction?.areas_cm2?.length ? areaFunction.areas_cm2 : [1.5];
   return {
@@ -4274,205 +4686,25 @@ function areaStats(areas, start, end) {
   };
 }
 
-function synthesizeFormantVowel(vowel = selectedVowel(), options = {}) {
-  const sampleRate = PREVIEW_SAMPLE_RATE;
-  const constraints = state.constraints;
-  const vtl = constraints.vocal_tract_length_cm?.center ?? 15.5;
-  const closure = constraints.glottal_closure?.center ?? 0.5;
-  const pressure = constraints.maximum_respiratory_pressure_pa?.center ?? num(els.pressureInput, 900);
-  const spring = constraints.vocal_fold_spring_constant?.center ?? 1;
-  const tension = constraints.baseline_muscle_tension?.center ?? 1;
-  const tensionResponse = constraints.tension_response_curve?.center ?? 1;
-  const inflammation = constraints.inflammation_index?.center ?? 0;
-  const lumenNarrowing = constraints.airway_lumen_narrowing?.center ?? 0;
-  const effectiveClosure = clamp(closure - inflammation * 0.22 - lumenNarrowing * 0.1, 0, 1);
-  const respiratorySupport = currentRespiratorySupport(constraints);
-  const duration = 1.05 + clamp(respiratorySupport, 0.55, 1.45) * 0.34;
-  const n = Math.floor(sampleRate * duration);
-  const f0 = (constraints.f0_mean_hz?.center ?? 165)
-    * Math.pow(15.5 / vtl, 0.18)
-    * Math.sqrt(clamp(spring, 0.4, 1.8))
-    * Math.pow(clamp(tension, 0.35, 1.8), 0.18 * tensionResponse)
-    * (1 - inflammation * 0.08);
-  const vowelReference = currentVowelReference(vowel, vtl);
-  const formants = options.formants ?? defaultFormantSpec(vowel, vtl, effectiveClosure, inflammation, lumenNarrowing);
-  const resonators = formants.map((f) => makeResonator(f.f, f.bw, sampleRate));
-  const out = new Float32Array(n);
-  const glottalParams = currentGlottalSourceParams(constraints, effectiveClosure, tension, tensionResponse, inflammation, lumenNarrowing);
-  const tiltAlpha = glottalTiltAlpha(sampleRate, glottalParams.spectral_tilt_db);
-  const aspirationNoiseScale = clamp(options.aspirationNoiseScale ?? FORMANT_ASPIRATION_NOISE_SCALE, 0, 1);
-  const sampleRateNoiseScale = Math.sqrt(PREVIEW_REFERENCE_SAMPLE_RATE / sampleRate);
-  let phase = 0;
-  let seed = 1;
-  const glottalSourceState = { lastRawFlow: 0, smoothedFlow: 0, lastSmoothedFlow: 0 };
-  let glottalTiltState = 0;
-  for (let i = 0; i < n; i++) {
-    const t = i / sampleRate;
-    const env = Math.min(1, t / 0.08, (duration - t) / (0.10 + respiratorySupport * 0.05));
-    const instability = Math.abs(1 - tensionResponse) * 0.002 + inflammation * 0.004;
-    const jitterFraction = Math.sin(Math.PI * 2 * t * (4.1 + tension * 1.7)) * instability;
-    phase += (f0 * (1 + jitterFraction)) / sampleRate;
-    phase -= Math.floor(phase);
-    const glottalFlow = lfLikeGlottalFlow(phase, glottalParams);
-    seed = (seed * 1664525 + 1013904223) >>> 0;
-    const noise = ((seed / 0xffffffff) * 2 - 1)
-      * (glottalParams.breathiness + (1 - effectiveClosure) * 0.04 + inflammation * 0.04)
-      * sampleRateNoiseScale
-      * aspirationNoiseScale;
-    const pressureDrive = Math.min(1.35, (pressure / 900) * (0.86 + respiratorySupport * 0.14) * (1 - lumenNarrowing * 0.18));
-    const sourceSample = glottalVolumeVelocitySample(
-      glottalFlow,
-      glottalSourceState,
-      glottalParams,
-      effectiveClosure,
-      noise,
-      0.72,
-      { velocityDrive: 0, flowSmoothing: 0.22, flowInertance: 0.08, sampleRate }
-    );
-    glottalTiltState += tiltAlpha * (sourceSample - glottalTiltState);
-    let sample = glottalTiltState * env * pressureDrive;
-    for (const resonator of resonators) sample = resonator(sample);
-    out[i] = sample * 0.18 * vowelReference.amplitude;
-  }
-  const geometry = options.geometry ?? state.vocalTractGeometry ?? buildVocalTractGeometry();
-  let sideBranchLossModel = null;
-  if (!options.skipPostFilters) {
-    sideBranchLossModel = applySideBranchLosses(out, sampleRate, constraints, vowel, geometry, options.areaFunction, { strength: options.sideBranchStrength ?? 0.65 });
-    applyBodyResonance(out, sampleRate, constraints);
-    normalize(out, 0.92);
-  }
-  return {
-    sampleRate,
-    samples: out,
-    vowel,
-    formants,
-    formant_reference: vowelReference,
-    backend: options.backend ?? "formant",
-    area_function: options.areaFunction,
-    hybrid_profile: options.hybridProfile,
-    side_branch_loss_model: sideBranchLossModel,
-    source_noise_model: {
-      schema_version: "formant_source_noise_0.1",
-      aspiration_noise_scale: Number(aspirationNoiseScale.toFixed(4)),
-      injection: "formant_glottal_source",
-    },
-  };
-}
-
-function synthesizeHybridVowel(vowel = selectedVowel()) {
+function synthesizeTubeVowel(vowel = selectedVowel()) {
   const sampleRate = PREVIEW_SAMPLE_RATE;
   const constraints = state.constraints;
   const geometry = state.vocalTractGeometry ?? buildVocalTractGeometry();
   const vtl = geometry?.vocal_tract_length_cm ?? constraints.vocal_tract_length_cm?.center ?? 15.5;
-  const closure = constraints.glottal_closure?.center ?? 0.5;
-  const inflammation = constraints.inflammation_index?.center ?? 0;
-  const lumenNarrowing = constraints.airway_lumen_narrowing?.center ?? 0;
-  const effectiveClosure = clamp(closure - inflammation * 0.22 - lumenNarrowing * 0.1, 0, 1);
-  const motorProfile = currentArticulationMotorProfile(constraints);
-  const areaFunction = buildTubeAreaFunction(geometry, vowel, sampleRate, motorProfile);
-  const hybridProfile = hybridFormantProfileFromAreaFunction(vowel, areaFunction, vtl, constraints, effectiveClosure, inflammation, lumenNarrowing);
-  const hybridFormantAspirationNoiseScale = HYBRID_FORMANT_ASPIRATION_NOISE_SCALE;
-  const hybridTubeAspirationNoiseScale = HYBRID_TUBE_ASPIRATION_NOISE_SCALE;
-  const voice = synthesizeFormantVowel(vowel, {
-    formants: hybridProfile.formants,
-    backend: "hybrid_formant_guided_tube",
-    areaFunction,
-    hybridProfile,
-    geometry,
-    skipPostFilters: true,
-    aspirationNoiseScale: hybridFormantAspirationNoiseScale,
-  });
-  const tube = synthesizeTubeVowel(vowel, {
-    skipPostFilters: true,
-    aspirationNoiseScale: hybridTubeAspirationNoiseScale,
-  });
-  const tubeTexture = prepareHybridTubeTexture(tube.samples, tube.sampleRate, constraints);
-  const tubeMix = clamp(constraints.hybrid_tube_texture_mix?.center ?? 0.025, 0, 0.35);
-  const formantMix = 1 - tubeMix;
-  const n = Math.min(voice.samples.length, tube.samples.length);
-  const analysisStart = Math.min(n, Math.floor(sampleRate * 0.14));
-  const analysisEnd = Math.max(analysisStart + 1, n - Math.floor(sampleRate * 0.12));
-  const formantRms = signalRms(voice.samples, analysisStart, analysisEnd);
-  const tubeRms = signalRms(tubeTexture, analysisStart, analysisEnd);
-  const tubeLevelMatchGain = formantRms > 1e-12 && tubeRms > 1e-12
-    ? clamp(formantRms / tubeRms, 1e-8, 1e4)
-    : 1;
-  const formantContributionRms = formantRms * formantMix;
-  const preMatchTubeContributionRms = tubeRms * tubeMix;
-  const tubeContributionRms = tubeRms * tubeLevelMatchGain * tubeMix;
-  const preMatchTextureFraction = preMatchTubeContributionRms
-    / Math.max(1e-12, formantContributionRms + preMatchTubeContributionRms);
-  const effectiveTextureFraction = tubeContributionRms
-    / Math.max(1e-12, formantContributionRms + tubeContributionRms);
-  for (let index = 0; index < n; index++) {
-    voice.samples[index] = voice.samples[index] * formantMix + tubeTexture[index] * tubeLevelMatchGain * tubeMix;
-  }
-  const hybridSideBranchStrength = clamp(constraints.hybrid_side_branch_strength?.center ?? 0.32, 0, 1);
-  const sideBranchLossModel = applySideBranchLosses(voice.samples, sampleRate, constraints, vowel, geometry, areaFunction, { strength: hybridSideBranchStrength });
-  applyBodyResonance(voice.samples, sampleRate, constraints);
-  normalize(voice.samples, 0.92);
-  voice.tube_reference = {
-    backend: tube.backend,
-    texture_mix: tubeMix,
-    level_matched: true,
-    formant_rms_before_mix: Number(formantRms.toExponential(6)),
-    tube_rms_before_match: Number(tubeRms.toExponential(6)),
-    tube_level_match_gain: Number(tubeLevelMatchGain.toExponential(6)),
-    tube_level_match_gain_db: Number((20 * Math.log10(Math.max(1e-12, tubeLevelMatchGain))).toFixed(3)),
-    pre_match_effective_texture_fraction: Number(preMatchTextureFraction.toFixed(4)),
-    effective_texture_fraction: Number(effectiveTextureFraction.toFixed(4)),
-    side_branch_strength: Number(hybridSideBranchStrength.toFixed(4)),
-    conditioned_for_hybrid: true,
-  };
-  voice.source_noise_model = {
-    schema_version: "hybrid_source_noise_routing_0.1",
-    aspiration_noise_owner: "formant_layer",
-    formant_aspiration_noise_scale: Number(hybridFormantAspirationNoiseScale.toFixed(4)),
-    tube_aspiration_noise_scale: Number(hybridTubeAspirationNoiseScale.toFixed(4)),
-    note: "The tube texture shares the periodic glottal behavior but contributes no independent aspiration-noise layer.",
-  };
-  voice.side_branch_loss_model = sideBranchLossModel;
-  return voice;
-}
-
-function prepareHybridTubeTexture(samples, sampleRate, constraints) {
-  const texture = new Float32Array(samples);
-  const highDamping = clamp(constraints.vocal_tract_high_frequency_damping?.center ?? 0.28, 0, 1);
-  const wallCompliance = clamp(constraints.vocal_tract_wall_compliance?.center ?? 0.18, 0, 1);
-  const broadening = clamp(constraints.vocal_tract_resonance_broadening?.center ?? 0.26, 0, 1);
-  const mix = clamp(0.48 + highDamping * 0.18 + wallCompliance * 0.18 + broadening * 0.16, 0.35, 0.86);
-  const cutoff = clamp(3600 - highDamping * 900 - broadening * 700, 1800, 4200);
-  applyOnePoleLowpassBlend(texture, sampleRate, cutoff, mix);
-  applyOnePoleLowpassBlend(texture, sampleRate, 1100, clamp(wallCompliance * 0.08 + broadening * 0.06, 0, 0.16));
-  normalize(texture, 0.55);
-  return texture;
-}
-
-function synthesizeTubeVowel(vowel = selectedVowel(), options = {}) {
-  const sampleRate = PREVIEW_SAMPLE_RATE;
-  const constraints = state.constraints;
-  const geometry = state.vocalTractGeometry ?? buildVocalTractGeometry();
-  const vtl = geometry?.vocal_tract_length_cm ?? constraints.vocal_tract_length_cm?.center ?? 15.5;
-  const closure = constraints.glottal_closure?.center ?? 0.5;
-  const pressure = constraints.maximum_respiratory_pressure_pa?.center ?? num(els.pressureInput, 900);
-  const spring = constraints.vocal_fold_spring_constant?.center ?? 1;
   const tension = constraints.baseline_muscle_tension?.center ?? 1;
-  const tensionResponse = constraints.tension_response_curve?.center ?? 1;
   const inflammation = constraints.inflammation_index?.center ?? 0;
   const lumenNarrowing = constraints.airway_lumen_narrowing?.center ?? 0;
-  const effectiveClosure = clamp(closure - inflammation * 0.22 - lumenNarrowing * 0.1, 0, 1);
-  const respiratorySupport = currentRespiratorySupport(constraints);
-  const duration = 1.05 + clamp(respiratorySupport, 0.55, 1.45) * 0.34;
+  const respiratoryProfile = currentRespiratoryProfile(constraints);
+  const respiratorySupport = respiratoryProfile.effective_support;
+  const pressure = respiratoryProfile.effective_pressure_pa;
+  const duration = (1.05 + clamp(respiratorySupport, 0.55, 1.45) * 0.34) * respiratoryProfile.duration_ratio;
   const n = Math.floor(sampleRate * duration);
-  const f0 = (constraints.f0_mean_hz?.center ?? 165)
-    * Math.pow(15.5 / vtl, 0.16)
-    * Math.sqrt(clamp(spring, 0.4, 1.8))
-    * Math.pow(clamp(tension, 0.35, 1.8), 0.18 * tensionResponse)
-    * (1 - inflammation * 0.08);
+  const f0 = currentDerivedF0(constraints);
   const motorProfile = currentArticulationMotorProfile(constraints);
   const areaFunction = buildTubeAreaFunction(geometry, vowel, sampleRate, motorProfile);
-  const glottalParams = currentGlottalSourceParams(constraints, effectiveClosure, tension, tensionResponse, inflammation, lumenNarrowing);
-  const aspirationNoiseScale = clamp(options.aspirationNoiseScale ?? 1, 0, 1);
+  const glottalParams = currentGlottalSourceParams(constraints, tension, inflammation, lumenNarrowing);
+  const effectiveClosure = glottalClosureProxyFromOpenQuotient(glottalParams.open_quotient);
+  const aspirationNoiseScale = 1;
   const lossParams = currentTubeLossParams(constraints, lumenNarrowing, inflammation);
   const tubeLossModel = buildTubeDistributedLossModel(lossParams, sampleRate, areaFunction.areas_cm2.length);
   const out = synthesizeKellyLochbaumTube(areaFunction.areas_cm2, {
@@ -4483,7 +4715,6 @@ function synthesizeTubeVowel(vowel = selectedVowel(), options = {}) {
     effectiveClosure,
     respiratorySupport,
     tension,
-    tensionResponse,
     inflammation,
     lumenNarrowing,
     amplitude: currentVowelReference(vowel, vtl).amplitude,
@@ -4493,22 +4724,21 @@ function synthesizeTubeVowel(vowel = selectedVowel(), options = {}) {
     lossParams,
     lossModel: tubeLossModel,
   });
-  let sideBranchLossModel = null;
-  if (!options.skipPostFilters) {
-    sideBranchLossModel = applySideBranchLosses(out, sampleRate, constraints, vowel, geometry, areaFunction, { strength: 1 });
-    applyBodyResonance(out, sampleRate, constraints);
-    normalize(out, 0.92);
-  }
+  const sideBranchLossModel = applySideBranchLosses(out, sampleRate, constraints, vowel, geometry, areaFunction, { strength: 1 });
+  const bodyResonanceModel = applyBodyResonance(out, sampleRate, constraints);
+  normalize(out, 0.92);
   return {
     sampleRate,
     samples: out,
     vowel,
-    formants: [],
     formant_reference: currentVowelReference(vowel, vtl),
     backend: "area_function_tube",
     area_function: areaFunction,
     distributed_loss_model: tubeLossModel,
     side_branch_loss_model: sideBranchLossModel,
+    body_resonance_model: bodyResonanceModel,
+    respiratory_drive: respiratoryProfile,
+    derived_f0_hz: Number(f0.toFixed(4)),
     source_noise_model: {
       schema_version: "tube_source_noise_0.1",
       aspiration_noise_scale: Number(aspirationNoiseScale.toFixed(4)),
@@ -4545,6 +4775,8 @@ function currentArticulationMotorProfile(constraints) {
     labial_transverse_range_utilization: clamp(labialTransverseRange, 0.2, 1),
     motor_control_precision: clamp(precision, 0.15, 1.4),
     coarticulation_strength: clamp(coarticulation, 0, 1),
+    // Reserved for stochastic target-arrival error in the future temporal TTS
+    // motion layer. The isolated-vowel preview remains deterministic.
     motor_control_maturity: clamp(maturity, 0.2, 1.2),
     phonological_contrast_maturity: clamp(contrast, 0.2, 1.2),
   };
@@ -4930,7 +5162,7 @@ function synthesizeKellyLochbaumTube(areas, options) {
   const lipArea = areas[count - 1] ?? 1;
   const lipReflection = clamp(-0.92 + Math.min(0.2, lipArea * 0.022), -0.93, -0.66);
   const glottalReflection = clamp(0.64 + options.effectiveClosure * 0.3 - options.inflammation * 0.06, 0.52, 0.96);
-  const glottalParams = options.glottalParams ?? currentGlottalSourceParams({}, options.effectiveClosure, options.tension, options.tensionResponse, options.inflammation, options.lumenNarrowing);
+  const glottalParams = options.glottalParams ?? currentGlottalSourceParams({}, options.tension, options.inflammation, options.lumenNarrowing);
   const aspirationNoiseScale = clamp(options.aspirationNoiseScale ?? 1, 0, 1);
   const lossParams = options.lossParams ?? currentTubeLossParams({}, options.lumenNarrowing, options.inflammation);
   const lossModel = options.lossModel ?? buildTubeDistributedLossModel(lossParams, sampleRate, count);
@@ -4963,7 +5195,7 @@ function synthesizeKellyLochbaumTube(areas, options) {
     } else {
       const t = sampleIndex / sampleRate;
       const env = Math.min(1, t / 0.08, (sampleCount / sampleRate - t) / (0.1 + options.respiratorySupport * 0.05));
-      const instability = Math.abs(1 - options.tensionResponse) * 0.002 + options.inflammation * 0.004 + Math.max(0, 1 - precision) * 0.006;
+      const instability = options.inflammation * 0.004 + Math.max(0, 1 - precision) * 0.006;
       const jitterFraction = Math.sin(Math.PI * 2 * t * (4.1 + options.tension * 1.7)) * instability;
       phase += (options.f0 * (1 + jitterFraction)) / sampleRate;
       phase -= Math.floor(phase);
@@ -5044,10 +5276,10 @@ function analyzeTubeTransfer(vowel = selectedVowel(), options = {}) {
   const geometry = options.geometry ?? state.vocalTractGeometry ?? buildVocalTractGeometry();
   const motorProfile = options.motorProfile ?? currentArticulationMotorProfile(constraints);
   const areaFunction = options.areaFunction ?? buildTubeAreaFunction(geometry, vowel, sampleRate, motorProfile);
-  const closure = constraints.glottal_closure?.center ?? 0.5;
   const inflammation = constraints.inflammation_index?.center ?? 0;
   const lumenNarrowing = constraints.airway_lumen_narrowing?.center ?? 0;
-  const effectiveClosure = clamp(closure - inflammation * 0.22 - lumenNarrowing * 0.1, 0, 1);
+  const glottalParams = currentGlottalSourceParams(constraints, 1, inflammation, lumenNarrowing);
+  const effectiveClosure = glottalClosureProxyFromOpenQuotient(glottalParams.open_quotient);
   const lossParams = currentTubeLossParams(constraints, lumenNarrowing, inflammation);
   const distributedLossModel = buildTubeDistributedLossModel(lossParams, sampleRate, areaFunction.areas_cm2.length);
   const impulse = synthesizeKellyLochbaumTube(areaFunction.areas_cm2, {
@@ -5060,12 +5292,11 @@ function analyzeTubeTransfer(vowel = selectedVowel(), options = {}) {
     effectiveClosure,
     respiratorySupport: 1,
     tension: 1,
-    tensionResponse: 1,
     inflammation,
     lumenNarrowing,
     amplitude: 1,
     motorControlPrecision: motorProfile.motor_control_precision,
-    glottalParams: currentGlottalSourceParams(constraints, effectiveClosure, 1, 1, inflammation, lumenNarrowing),
+    glottalParams,
     lossParams,
     lossModel: distributedLossModel,
   });
@@ -5184,8 +5415,6 @@ function buildSideBranchLossModel(constraints, vowel, geometry = null, areaFunct
   const neckLength = constraints.sinus_neck_length_cm?.center ?? 1.2;
   const sinusCoupling = clamp(constraints.sinus_coupling?.center ?? 0, 0, 1);
   const damping = constraints.sinus_damping?.center ?? 0.68;
-  const globalCoupling = clamp(constraints.side_branch_loss_coupling?.center ?? 0.18, 0, 0.75);
-  const globalGain = clamp(0.55 + globalCoupling * 1.1, 0, 1.35);
   const vowelNasalFactor = vowel === "i" || vowel === "u" ? 0.72 : 1;
   const nasalVolume = clamp(constraints.nasal_cavity_volume_cm3?.center ?? 20, 5, 50);
   const nasalDamping = clamp(constraints.nasal_branch_damping?.center ?? 0.72, 0.2, 1.6);
@@ -5206,7 +5435,7 @@ function buildSideBranchLossModel(constraints, vowel, geometry = null, areaFunct
     const notchFrequency = clamp(helmholtz, 380, 1450);
     const peakFrequency = clamp(notchFrequency * 1.55, 700, 2600);
     const q = clamp(3.8 / damping, 1.2, 8);
-    const effectiveCoupling = clamp(sinusCoupling * globalGain * vowelNasalFactor, 0, 1);
+    const effectiveCoupling = clamp(sinusCoupling * vowelNasalFactor, 0, 1);
     branches.push({
       key: "paranasal_sinus_peak",
       branch: "paranasal_sinus",
@@ -5227,7 +5456,7 @@ function buildSideBranchLossModel(constraints, vowel, geometry = null, areaFunct
     });
   }
 
-  const vpCoupling = clamp(vpControl * (0.55 + vpGapHint * 0.75) * globalGain * vowelNasalFactor, 0, 0.75);
+  const vpCoupling = clamp(vpControl * (0.55 + vpGapHint * 0.75) * vowelNasalFactor, 0, 0.75);
   if (vpCoupling >= 0.01) {
     const nasalAntiresonance = clamp(310 + nasalVolume * 10.5 + (vpGapCm ?? 0.14) * 260, 340, 1050);
     const nasalMurmur = clamp(nasalAntiresonance * 0.58, 180, 620);
@@ -5260,7 +5489,7 @@ function buildSideBranchLossModel(constraints, vowel, geometry = null, areaFunct
     });
   }
 
-  const piriformCoupling = clamp(piriformControl * (0.86 + laryngealNarrowness * 0.38) * globalGain, 0, 0.7);
+  const piriformCoupling = clamp(piriformControl * (0.86 + laryngealNarrowness * 0.38), 0, 0.7);
   if (piriformCoupling >= 0.01) {
     branches.push({
       key: "piriform_fossa_antiresonance",
@@ -5277,7 +5506,6 @@ function buildSideBranchLossModel(constraints, vowel, geometry = null, areaFunct
     schema_version: "side_branch_loss_model_0.1",
     source_role: "lightweight browser-preview coloring; not a subject-specific anatomical side-branch solver",
     controls: {
-      global_coupling: roundMetric(globalCoupling, 4),
       sinus_coupling: roundMetric(sinusCoupling, 4),
       velopharyngeal_coupling: roundMetric(vpControl, 4),
       piriform_fossa_coupling: roundMetric(piriformControl, 4),
@@ -5307,45 +5535,107 @@ function applySideBranchLosses(samples, sampleRate, constraints, vowel, geometry
 }
 
 function applyBodyResonance(samples, sampleRate, constraints) {
-  const coupling = constraints.body_resonance_coupling?.center ?? 0;
-  if (coupling < 0.01) return;
+  const coupling = clamp(constraints.body_resonance_coupling?.center ?? 0, 0, 1);
   const frequency = currentBodyResonanceFrequency(constraints);
-  const gainDb = constraints.body_resonance_gain_db?.center ?? 3;
-  const q = 0.85 + coupling * 1.35;
-  applyBiquadInPlace(samples, makeBiquad("peaking", frequency, q, gainDb * coupling, sampleRate));
+  const gainDb = clamp(constraints.body_resonance_gain_db?.center ?? 4, 0, 12);
+  const q = 1.3;
+  if (coupling < 0.01 || gainDb < 0.01) return { frequency_hz: frequency, gain_db: gainDb, coupling, q };
+  const wet = Float32Array.from(samples);
+  applyBiquadInPlace(wet, makeBiquad("peaking", frequency, q, gainDb, sampleRate));
+  for (let index = 0; index < samples.length; index++) {
+    samples[index] = samples[index] * (1 - coupling) + wet[index] * coupling;
+  }
+  return { frequency_hz: frequency, gain_db: gainDb, coupling, q, topology: "parallel_wet_dry_branch" };
+}
+
+function constraintRatioToReference(constraints, key) {
+  const item = constraints?.[key];
+  const center = Number(item?.center);
+  const reference = Number(item?.statistics?.reference_center);
+  if (!Number.isFinite(center) || !Number.isFinite(reference) || Math.abs(reference) < 0.0001) return null;
+  return clamp(center / reference, 0.35, 2.5);
+}
+
+function meanAvailable(values, fallback = 1) {
+  const available = values.filter(Number.isFinite);
+  if (!available.length) return fallback;
+  return available.reduce((sum, value) => sum + value, 0) / available.length;
+}
+
+function structuralVentilationCapacityFromVolumes(constraints, derivation) {
+  const thoracic = constraintCenter(constraints, "thoracic_volume_l", derivation.thoracic_reference_l);
+  const abdominal = constraintCenter(constraints, "abdominal_volume_l", derivation.abdominal_reference_l);
+  const structuralRatio = derivation.thoracic_weight * thoracic / derivation.thoracic_reference_l
+    + derivation.abdominal_weight * abdominal / derivation.abdominal_reference_l;
+  return derivation.reference_capacity_l_min * structuralRatio;
+}
+
+function derivedMaximumVentilationFromVolumes(constraints) {
+  const item = constraints?.maximum_ventilation_l_min;
+  const derivation = item?.derivation;
+  if (!derivation) return constraintCenter(constraints, "maximum_ventilation_l_min", 100);
+  const structuralCeiling = structuralVentilationCapacityFromVolumes(constraints, derivation);
+  return clamp(Math.min(derivation.unconstrained_estimate_l_min, structuralCeiling), 20, 260);
+}
+
+function effectiveMaximumVentilation(constraints) {
+  const item = constraints?.maximum_ventilation_l_min;
+  return item?.user_override
+    ? clamp(Number(item.center), 20, 260)
+    : derivedMaximumVentilationFromVolumes(constraints);
+}
+
+function currentRespiratoryProfile(constraints) {
+  const maximumVentilation = effectiveMaximumVentilation(constraints);
+  const ventilationItem = constraints?.maximum_ventilation_l_min;
+  const ventilationReference = Number(ventilationItem?.derivation?.reference_capacity_l_min)
+    || Number(ventilationItem?.statistics?.reference_center)
+    || maximumVentilation;
+  const ventilationRatio = clamp(maximumVentilation / Math.max(1, ventilationReference), 0.45, 1.8);
+  const volumeRatio = meanAvailable([
+    constraintRatioToReference(constraints, "predicted_vc_l"),
+    constraintRatioToReference(constraints, "predicted_fvc_l"),
+  ]);
+  const airflowRatio = meanAvailable([
+    constraintRatioToReference(constraints, "predicted_fev1_l"),
+    constraintRatioToReference(constraints, "predicted_pef_l_s"),
+  ]);
+  const utilization = clamp(constraintCenter(constraints, "respiratory_support", 1), 0.4, 1.6);
+  const capacityRatio = clamp(ventilationRatio * 0.45 + volumeRatio * 0.25 + airflowRatio * 0.30, 0.5, 1.55);
+  const effectiveSupport = clamp(utilization * capacityRatio, 0.45, 1.65);
+  const maximumPressure = clamp(constraintCenter(constraints, "maximum_respiratory_pressure_pa", 900), 100, 5000);
+  const effectivePressure = maximumPressure
+    * clamp(0.84 + airflowRatio * 0.16, 0.7, 1.2)
+    * clamp(0.85 + utilization * 0.15, 0.75, 1.2);
+  const durationRatio = clamp(0.72 + volumeRatio * 0.18 + ventilationRatio * 0.10, 0.72, 1.25);
+  return {
+    schema_version: "respiratory_drive_0.1",
+    maximum_ventilation_l_min: Number(maximumVentilation.toFixed(4)),
+    ventilation_ratio: Number(ventilationRatio.toFixed(4)),
+    volume_ratio: Number(volumeRatio.toFixed(4)),
+    airflow_ratio: Number(airflowRatio.toFixed(4)),
+    capacity_ratio: Number(capacityRatio.toFixed(4)),
+    support_utilization: Number(utilization.toFixed(4)),
+    effective_support: Number(effectiveSupport.toFixed(4)),
+    maximum_pressure_pa: Number(maximumPressure.toFixed(4)),
+    effective_pressure_pa: Number(effectivePressure.toFixed(4)),
+    duration_ratio: Number(durationRatio.toFixed(4)),
+  };
 }
 
 function currentRespiratorySupport(constraints) {
-  const sex = sexClass();
-  const thoracicBase = sex === "male" ? 6.0 : sex === "female" ? 4.6 : 5.3;
-  const abdominalBase = sex === "male" ? 7.4 : sex === "female" ? 6.3 : 6.85;
-  const thoracicRatio = (constraints.thoracic_volume_l?.center ?? thoracicBase) / thoracicBase;
-  const abdominalRatio = (constraints.abdominal_volume_l?.center ?? abdominalBase) / abdominalBase;
-  const support = constraints.respiratory_support?.center ?? 1;
-  return clamp(support * 0.6 + thoracicRatio * 0.22 + abdominalRatio * 0.18, 0.55, 1.45);
+  return currentRespiratoryProfile(constraints).effective_support;
 }
 
-function currentBodyResonanceFrequency(constraints) {
+function bodyResonanceFrequencyFromThoracicVolume(constraints) {
   const sex = sexClass();
   const thoracicBase = sex === "male" ? 6.0 : sex === "female" ? 4.6 : 5.3;
   const thoracic = constraints.thoracic_volume_l?.center ?? thoracicBase;
   return clamp(210 / Math.pow(thoracic / thoracicBase, 0.38), 120, 320);
 }
 
-function makeResonator(freq, bandwidth, sampleRate) {
-  const r = Math.exp(-Math.PI * bandwidth / sampleRate);
-  const theta = 2 * Math.PI * freq / sampleRate;
-  const a1 = 2 * r * Math.cos(theta);
-  const a2 = -r * r;
-  const b0 = 1 - r;
-  let y1 = 0;
-  let y2 = 0;
-  return (x) => {
-    const y = b0 * x + a1 * y1 + a2 * y2;
-    y2 = y1;
-    y1 = y;
-    return y;
-  };
+function currentBodyResonanceFrequency(constraints) {
+  return clamp(constraintCenter(constraints, "body_resonance_frequency_hz", bodyResonanceFrequencyFromThoracicVolume(constraints)), 120, 320);
 }
 
 function makeBiquad(type, frequency, q, gainDb, sampleRate) {
@@ -5419,17 +5709,6 @@ function normalize(samples, peak) {
   for (let i = 0; i < samples.length; i++) samples[i] *= gain;
 }
 
-function signalRms(samples, startIndex = 0, endIndex = samples.length) {
-  const start = clamp(Math.floor(startIndex), 0, samples.length);
-  const end = clamp(Math.floor(endIndex), start, samples.length);
-  if (end <= start) return 0;
-  let sumSquares = 0;
-  for (let index = start; index < end; index++) {
-    sumSquares += samples[index] * samples[index];
-  }
-  return Math.sqrt(sumSquares / (end - start));
-}
-
 async function playVowel() {
   if (!Object.keys(state.constraints).length) analyze();
   const audio = synthesizeVowel();
@@ -5491,7 +5770,7 @@ function saveJson() {
 
 async function saveProject() {
   if (!Object.keys(state.constraints).length) analyze();
-  const title = els.projectTitleInput.value.trim() || "character-voice";
+  const title = els.projectTitleInput.value.trim() || "voice_profile";
   const imageEntries = [];
   const imageManifest = {};
   const names = {
@@ -5509,7 +5788,7 @@ async function saveProject() {
   }
   const manifest = {
     schema_version: "character_voice_lab_project_0.2",
-    app_version: "0.2",
+    app_version: APP_VERSION,
     title,
     saved_at: new Date().toISOString(),
     profile: "profile.json",
@@ -5563,17 +5842,24 @@ function normalizeLoadedVocalTractGeometry(savedGeometry) {
       && firstSection?.cross_section
       && Number.isFinite(firstSection.cross_section.sagittal_height_cm)
       && Number.isFinite(firstSection.cross_section.coronal_width_cm)
+      && Number.isFinite(savedGeometry.cross_section_model?.pharyngeal_length_scale)
   );
   return has2_5DSections ? savedGeometry : buildVocalTractGeometry();
 }
 
 function applyProfile(data) {
   if (data.project?.title) els.projectTitleInput.value = data.project.title;
-  const initialSavedConstraints = data.voice_constraints ?? null;
-  const initialSavedOverrides = data.constraint_overrides ?? overridesFromConstraints(initialSavedConstraints);
+  const rawSavedConstraints = data.voice_constraints ?? null;
+  const rawSavedOverrides = data.constraint_overrides ?? overridesFromConstraints(rawSavedConstraints);
+  const migratedDevelopmentControls = migrateLegacyDevelopmentControls(rawSavedConstraints, rawSavedOverrides);
+  const initialSavedConstraints = migratedDevelopmentControls.constraints;
+  const initialSavedOverrides = migratedDevelopmentControls.overrides;
   const migratedGesture = migrateLegacyIllustrationGestureInput(data, initialSavedConstraints, initialSavedOverrides);
   const savedConstraints = migratedGesture.constraints;
   const savedOverrides = migratedGesture.overrides;
+  const savedPerformanceRangeOverrides = withoutReadOnlyDerivedOverrides(withoutRetiredConstraints(
+    data.performance_range_overrides ?? performanceRangeOverridesFromLegacyConstraints(savedConstraints)
+  ));
   if (data.inputs) {
     els.ageInput.value = data.inputs.age ?? els.ageInput.value;
     els.sexInput.value = data.inputs.sex_reference_class ?? els.sexInput.value;
@@ -5593,7 +5879,10 @@ function applyProfile(data) {
     els.exerciseInput.value = data.inputs.exercise_habit ?? els.exerciseInput.value;
     els.dietInput.value = data.inputs.diet_habit ?? els.dietInput.value;
     els.respiratoryHistoryInput.value = data.inputs.respiratory_history ?? els.respiratoryHistoryInput.value;
-    if (els.synthesisBackendSelect) els.synthesisBackendSelect.value = normalizeSynthesisBackend(data.inputs.preview_synthesis_backend ?? els.synthesisBackendSelect.value);
+    const savedImageWeight = Number(data.inputs.image_analysis_weight ?? data.inputs.global_image_weight);
+    if (els.globalImageWeight) {
+      els.globalImageWeight.value = Number.isFinite(savedImageWeight) ? clamp(savedImageWeight, 0, 1) : 0.7;
+    }
   }
   if (data.landmarks) {
     state.landmarks = {
@@ -5604,16 +5893,16 @@ function applyProfile(data) {
   }
   if (data.landmark_extraction) state.extractionReports = data.landmark_extraction;
   state.constraintOverrides = savedOverrides;
-  applyLoadedConstraintInputs(savedConstraints, savedOverrides);
+  state.performanceRangeOverrides = savedPerformanceRangeOverrides;
   analyze();
   if (data.integrated_features) state.features = data.integrated_features;
   if (data.prior_resolution) state.priorResolution = data.prior_resolution;
   if (savedConstraints) state.constraints = mergeLoadedVoiceConstraints(state.constraints, savedConstraints);
   if (savedConstraints && !data.constraint_overrides) state.constraintOverrides = overridesFromConstraints(state.constraints);
+  state.constraintOverrides = withoutReadOnlyDerivedOverrides(withoutRetiredConstraints(state.constraintOverrides));
+  refreshDerivedConstraintCenters();
   state.vocalTractGeometry = normalizeLoadedVocalTractGeometry(data.vocal_tract_geometry);
-  renderQuickSliders();
-  renderVocalFoldSliders();
-  renderVocalTract2_5DSliders();
+  renderDetailControls();
   renderFeatureTable();
   renderConstraints();
   draw();
@@ -5624,8 +5913,8 @@ function localDateStamp(date = new Date()) {
 }
 
 function safeFilePart(value) {
-  const cleaned = String(value || "character-voice").trim().replace(/[<>:"/\\|?*\u0000-\u001f]/g, "-").replace(/\s+/g, "-").replace(/-+/g, "-");
-  return cleaned.slice(0, 64) || "character-voice";
+  const cleaned = String(value || "voice_profile").trim().replace(/[<>:"/\\|?*\u0000-\u001f]/g, "-").replace(/\s+/g, "-").replace(/-+/g, "-");
+  return cleaned.slice(0, 64) || "voice_profile";
 }
 
 function imageExtension(name, mimeType) {
@@ -5646,8 +5935,6 @@ function init() {
   mountCompositionGuide();
   renderLandmarkReference();
   renderPublicationReferences();
-  renderQuickSliders();
-  renderVocalTract2_5DSliders();
   analyze();
   for (const button of els.tabButtons) {
     button.addEventListener("click", () => setActiveTab(button.dataset.tabTarget));
@@ -5674,13 +5961,10 @@ function init() {
   els.profileImageCanvas.addEventListener("pointerup", handleProfilePointerUp);
   els.profileImageCanvas.addEventListener("pointercancel", handleProfilePointerUp);
   els.profileImageCanvas.addEventListener("pointerleave", handleProfilePointerLeave);
-  for (const el of [els.ageInput, els.sexInput, els.heightInput, els.weightInput, els.bodyFatInput, els.primaryLanguageInput, els.phoneticTargetProfileInput, els.populationInput, els.referenceImageStyleInput, els.dataSourceInput, els.smokingInput, els.exerciseInput, els.dietInput, els.respiratoryHistoryInput, els.globalImageWeight, els.rangeKInput, els.pressureInput]) {
+  for (const el of [els.ageInput, els.sexInput, els.heightInput, els.weightInput, els.bodyFatInput, els.primaryLanguageInput, els.phoneticTargetProfileInput, els.populationInput, els.referenceImageStyleInput, els.dataSourceInput, els.smokingInput, els.exerciseInput, els.dietInput, els.respiratoryHistoryInput].filter(Boolean)) {
     el.addEventListener("input", analyze);
   }
-  els.glottalClosureInput.addEventListener("input", () => {
-    state.constraintOverrides.glottal_closure = num(els.glottalClosureInput, 0.5);
-    analyze();
-  });
+  els.globalImageWeight?.addEventListener("input", renderImageWeightRecalculationState);
   els.projectTitleInput.addEventListener("input", renderConstraints);
   els.profileDirectionInput.addEventListener("input", analyze);
   for (const toggle of [
@@ -5693,16 +5977,12 @@ function init() {
   ]) {
     toggle?.addEventListener("change", draw);
   }
-  els.analyzeBtn.addEventListener("click", analyze);
-  els.playVowelButton.addEventListener("click", playVowel);
+  els.analyzeBtn.addEventListener("click", runBasicAnalysis);
+  els.recalculateBtn?.addEventListener("click", runDetailRecalculation);
   els.playSampleButton.addEventListener("click", playVowel);
   els.vowelSelect.addEventListener("input", () => {
     state.lastWav = null;
     draw();
-  });
-  els.synthesisBackendSelect?.addEventListener("input", () => {
-    state.lastWav = null;
-    renderConstraints();
   });
   els.saveWavBtn.addEventListener("click", () => {
     const vowel = selectedVowel();

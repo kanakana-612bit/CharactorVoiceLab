@@ -63,6 +63,17 @@ button.primary:hover {
   background: var(--surface);
 }
 
+.header-leading {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  min-width: 0;
+}
+
+.header-leading > button {
+  flex: 0 0 auto;
+}
+
 .app-header h1 {
   margin: 0;
   display: flex;
@@ -103,6 +114,10 @@ button.primary:hover {
   flex-wrap: wrap;
 }
 
+.header-actions {
+  justify-content: flex-end;
+}
+
 .header-field {
   min-width: 190px;
 }
@@ -122,7 +137,9 @@ button.primary:hover {
   z-index: 90;
   display: grid;
   gap: 8px;
-  width: 156px;
+  grid-template-columns: 108px minmax(138px, 1fr);
+  align-items: end;
+  width: 272px;
   padding: 8px;
   border: 1px solid var(--line);
   border-radius: 8px;
@@ -131,17 +148,31 @@ button.primary:hover {
   backdrop-filter: blur(8px);
 }
 
+.floating-action-dock[hidden] {
+  display: none;
+}
+
 .floating-action-dock button {
   width: 100%;
   min-height: 44px;
 }
 
-.compact-select {
-  width: 92px;
+.floating-phoneme-select {
+  display: grid;
+  gap: 3px;
+  color: var(--muted);
+  font-size: 11px;
 }
 
-.synthesis-select {
-  width: 156px;
+.floating-phoneme-select select {
+  min-height: 44px;
+  font-size: 15px;
+  font-weight: 650;
+  text-align: center;
+}
+
+.compact-select {
+  width: 92px;
 }
 
 .workspace {
@@ -181,16 +212,12 @@ button.primary:hover {
   grid-template-columns: minmax(280px, 340px) minmax(560px, 1fr);
 }
 
-#initialTab {
+#detailTab {
   grid-template-columns: minmax(640px, 1fr);
 }
 
-#detailTab {
-  grid-template-columns: minmax(260px, 360px) minmax(420px, 1fr) minmax(320px, 420px);
-}
-
 #outputTab {
-  grid-template-columns: minmax(280px, 420px) minmax(420px, 1fr);
+  grid-template-columns: minmax(320px, 1fr);
 }
 
 #referenceTab {
@@ -214,6 +241,142 @@ button.primary:hover {
 .pane h3 {
   margin: 18px 0 8px;
   font-size: 14px;
+}
+
+.section-heading {
+  margin-top: 22px !important;
+  padding-top: 16px;
+  border-top: 1px solid var(--line);
+}
+
+.inline-actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-top: 14px;
+}
+
+.inline-actions .status-line {
+  min-width: 0;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+#analyzeBtn {
+  flex: 0 0 auto;
+  min-width: 64px;
+  white-space: nowrap;
+  writing-mode: horizontal-tb;
+}
+
+.detail-full {
+  width: 100%;
+}
+
+.inline-range-control {
+  display: grid;
+  grid-template-columns: auto minmax(180px, 280px);
+  align-items: center;
+  gap: 10px;
+  min-width: min(380px, 100%);
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.detail-recalculation-controls {
+  display: grid;
+  grid-template-columns: minmax(300px, 1fr) 44px auto;
+  align-items: center;
+  gap: 6px 10px;
+  min-width: min(520px, 100%);
+}
+
+.detail-recalculation-controls output {
+  color: var(--ink);
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+
+.detail-recalculation-controls .status-line {
+  grid-column: 1 / -1;
+  color: var(--muted);
+  font-size: 11px;
+  text-align: right;
+}
+
+#recalculateBtn.pending {
+  border-color: var(--warn);
+  box-shadow: 0 0 0 2px rgba(155, 92, 32, 0.14);
+}
+
+.domain-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 22px;
+}
+
+.performance-domain-grid {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.domain-section {
+  min-width: 0;
+  padding-left: 14px;
+  border-left: 3px solid var(--line);
+}
+
+.domain-section h3 {
+  margin-top: 0;
+}
+
+.subsection-heading {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  margin-top: 22px;
+  padding-top: 14px;
+  border-top: 1px solid var(--line);
+}
+
+.subsection-heading h3 {
+  margin: 0;
+}
+
+.subsection-heading span {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.advanced-settings > summary {
+  cursor: pointer;
+  font-size: 15px;
+  font-weight: 650;
+}
+
+.preview-export-actions {
+  margin: 14px 0;
+}
+
+.output-placeholder {
+  min-height: 240px;
+  display: grid;
+  align-content: center;
+  justify-items: center;
+  text-align: center;
+}
+
+.output-placeholder p {
+  max-width: 620px;
+  margin: 0;
+  color: var(--muted);
+}
+
+.section-kicker {
+  color: var(--accent);
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
 }
 
 .pane-head {
@@ -566,6 +729,133 @@ summary {
   align-items: center;
 }
 
+.slider-caption {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+
+.slider-caption label {
+  overflow-wrap: anywhere;
+}
+
+.source-citation {
+  position: relative;
+  display: inline-block;
+  width: fit-content;
+  max-width: 100%;
+  color: var(--accent-strong);
+  font-size: 10px;
+  line-height: 1.3;
+  cursor: help;
+  overflow-wrap: anywhere;
+}
+
+.source-citation:hover::after,
+.source-citation:focus::after {
+  content: attr(data-tooltip);
+  position: absolute;
+  left: 0;
+  bottom: calc(100% + 7px);
+  z-index: 120;
+  width: min(360px, calc(100vw - 40px));
+  padding: 9px 10px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: #202522;
+  color: #f7f7f2;
+  box-shadow: var(--shadow);
+  font-size: 11px;
+  font-weight: 400;
+  line-height: 1.45;
+  white-space: pre-line;
+}
+
+.performance-range-list {
+  display: grid;
+  gap: 14px;
+}
+
+.performance-range-row {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--line);
+}
+
+.performance-range-heading {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+
+.performance-range-heading strong {
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+
+.performance-range-values {
+  display: grid;
+  grid-template-columns: minmax(72px, 1fr) minmax(86px, auto) minmax(72px, 1fr);
+  gap: 6px;
+  align-items: end;
+}
+
+.performance-range-number,
+.performance-range-base {
+  display: grid;
+  gap: 2px;
+}
+
+.performance-range-number span,
+.performance-range-base span {
+  color: var(--muted);
+  font-size: 9px;
+  font-weight: 700;
+}
+
+.performance-range-number input {
+  width: 100%;
+  min-height: 34px;
+  padding: 5px 6px;
+}
+
+.performance-range-base {
+  justify-items: center;
+  padding-bottom: 7px;
+  text-align: center;
+}
+
+.performance-range-base strong {
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+
+.performance-range-track {
+  position: relative;
+  height: 8px;
+  border-radius: 4px;
+  background: #d9d7cf;
+}
+
+.performance-range-fill {
+  position: absolute;
+  top: 0;
+  height: 100%;
+  border-radius: inherit;
+  background: #3f8773;
+}
+
+.performance-range-center {
+  position: absolute;
+  top: -3px;
+  width: 3px;
+  height: 14px;
+  transform: translateX(-50%);
+  background: var(--ink);
+}
+
 .slider-cell {
   display: grid;
   gap: 5px;
@@ -573,6 +863,16 @@ summary {
 
 .slider-row input[type="range"] {
   accent-color: var(--accent);
+}
+
+.derived-readonly-row input[type="range"]:disabled {
+  cursor: default;
+  opacity: 0.72;
+}
+
+.slider-row.derived-readonly-row output {
+  color: var(--ink);
+  font-weight: 700;
 }
 
 .slider-row output {
@@ -832,11 +1132,11 @@ summary {
   max-height: 520px;
 }
 
-.references-pane td:first-child {
+.references-pane td:nth-child(2) {
   min-width: 180px;
 }
 
-.references-pane td:first-child small {
+.references-pane td:nth-child(2) small {
   display: block;
   margin-top: 4px;
   color: var(--muted);
@@ -916,12 +1216,20 @@ pre {
   .calibration-summary {
     grid-template-columns: repeat(2, minmax(150px, 1fr));
   }
+
+  .performance-domain-grid {
+    grid-template-columns: 1fr;
+  }
 }
 
 @media (max-width: 640px) {
   .app-header {
     align-items: stretch;
     flex-direction: column;
+  }
+
+  .header-leading {
+    align-items: flex-start;
   }
 
   .header-actions {
@@ -945,6 +1253,33 @@ pre {
 
   .form-grid {
     grid-template-columns: 1fr;
+  }
+
+  .domain-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .inline-range-control {
+    grid-template-columns: 1fr;
+    min-width: 0;
+    width: 100%;
+  }
+
+  .detail-recalculation-controls {
+    grid-template-columns: 1fr auto auto;
+    min-width: 0;
+    width: 100%;
+  }
+
+  .detail-recalculation-controls .inline-range-control {
+    grid-column: 1 / -1;
+  }
+
+  .inline-actions,
+  .pane-head,
+  .subsection-heading {
+    align-items: stretch;
+    flex-direction: column;
   }
 
   .composition-metrics {

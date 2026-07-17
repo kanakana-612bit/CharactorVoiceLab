@@ -1,6 +1,6 @@
 # Character Voice Lab
 
-Current prototype version: Ver 0.2
+Current release version: Ver 1.0
 
 This is a dependency-free MVP for the character-oriented voice design experiment.
 
@@ -20,8 +20,20 @@ Terminology:
 - `edit_range`: WebUI-only range for editing the baseline value.
 - `statistics`: reference center and SD metadata for plausibility display.
 
+`ConstraintRangeK` is retired in Ver 0.3. Statistical edit ranges and dynamic performance ranges are adjusted per physical parameter; a single multiplier no longer changes both concepts at once.
+
+The legacy `tension_response_curve` preview control is also retired. It conflated local phonatory tension scaling with the separately planned neurological/autonomic response profile, which remains unimplemented.
+
+The former `glottal_closure` and `side_branch_loss_coupling` master controls are also retired from the live model. They remain named only in one-way development migration code so older projects can be converted to explicit glottal-source and branch-local controls.
+
 Implemented:
 
+- publication-oriented four-tab workflow: basic information, detailed settings, reserved speech-output settings, and references/publication policy
+- header-level profile load, `voice_profile` naming, and reproducible package save
+- detailed-setting classification by design role and anatomical domain: baseline vocal tract, glottal physiology, trunk/respiration, PerformanceControlRange, execution control, and advanced acoustic preview
+- per-parameter `PerformanceControlRange` editors with independently stored minimum, baseline, and maximum values
+- detail-tab-only floating phoneme selector and sample playback action
+- numbered inline source citations with hover/focus scope notes and DOI links in the reference table
 - full-body, face-front, and head-neck profile image loading
 - manual body/face/profile landmark placement on uploaded images or built-in schematic defaults
 - direct landmark dragging with a precision crosshair and hover/drag definition panel
@@ -30,22 +42,26 @@ Implemented:
 - stature-first image calibration: body height sets the full-body scale, then body-image total head height calibrates both head-front and head-profile images
 - basic measurements converted to cm from height or interpupillary prior
 - source-tagged cohort priors, z-scores, image/statistical fusion
+- explicit basic `解析` and detail `再計算` actions; detail image-weight edits remain pending until recalculation, manual center-slider overrides return to the new estimates on either explicit action, and the last applied weight is saved in the profile
 - a deformable synthetic 2.5D vocal-tract design template over the profile preview
 - landmark-calibrated midsagittal height, coronal width, elliptical section shape, and latent lateral-channel capacity per tract section
-- hybrid vowel preview that uses the 2.5D-derived `A(x)` as an analysis layer, then nudges a stable formant envelope, applies attenuated side-branch coloring, and mixes a small conditioned 1D-tube texture component
-- 44.1 kHz lightweight raw 1D acoustic-tube vowel preview derived by projecting the 2.5D geometry to total `A(x)`, using length-correct Kelly-Lochbaum discretization, separate jaw-opening/oral-volume/lip-rounding vowel targets, an LF-style volume-velocity glottal input, tract-length-normalized distributed losses, simple nasal/sinus/piriform side-branch losses, and restrained soft-wall compliance
+- pharyngeal-length scaling connected to the 2.5D longitudinal area-function allocation rather than only to schematic drawing
+- 44.1 kHz 2.5D-derived acoustic-tube vowel preview that projects the designed cross sections to total `A(x)`, using length-correct Kelly-Lochbaum discretization, separate jaw-opening/oral-volume/lip-rounding vowel targets, an LF-style volume-velocity glottal input, tract-length-normalized distributed losses, simple nasal/sinus/piriform side-branch losses, and restrained soft-wall compliance
+- read-only F0 derived from the reference center, vocal-fold spring constant, baseline muscle tension, and the currently provisional inflammation mapping
+- respiratory source drive using VC/FVC, FEV1/PEF, maximum ventilation, maximum respiratory pressure, and speech-time support utilization; thoracic and abdominal volumes constrain maximum ventilation upstream
+- body resonance implemented as an independent parallel branch whose thoracic-volume-derived frequency, peak gain, and wet/dry coupling are stored separately
 - articulatory-control modifiers that separate phoneme gesture execution from tongue-dorsum, lip/cheek transverse, and tongue-groove PerformanceControlRange availability; availability limits a current gesture without redefining the neutral 2.5D anatomy, alongside motor precision, coarticulation strength, motor maturity, and phonological contrast maturity
 - Honda-style profile anchors for ANS, PNS, Menton, posterior pharyngeal wall, soft-palate hinge, and velum tip
 - morphological articulation-space guides exporting OCL, LFH, soft-palate length, velopharyngeal gap, and schematic paranasal sinus side branches
 - external neck-root breadth tracking, kept independent from the tracheal internal-diameter design parameter
 - optional smoking, exercise, diet, and respiratory-history inputs as conservative respiratory modifiers
 - low-poly inferred body model
-- baseline voice-parameter, UI edit-range, and performance constraint-range export and reload
+- baseline voice-parameter, UI edit-range, per-parameter performance-range override export, and reload
 - reproducible project ZIP packages containing `manifest.json`, `profile.json`, and the selected reference images
 - separate primary-language, phonetic-target-profile, and morphology-reference-population metadata; a phonetic profile is a language/variety target and is never an ancestry or ethnicity selector
 - jaw-conditioned relaxed mouth-width inference that treats a stylized commissure distance as a pursed/lower-bound proxy, then supplies vowel-specific `/i/ > /e/ > /o/ > /u/` transverse targets within a PerformanceControlRange
 - reference-image style selection (`illustration` by default, or `photo_realistic`) so stylized images use broader latent anatomy/articulation inference while realistic images retain more direct measurement weight
-- `/a i u e o/` previews using the 44.1 kHz 1D acoustic-tube model by default, with hybrid and formant-only comparison modes; the selected phonetic target supplies four-formant targets, Japanese aggregate F1/F2 centers, and vowel-specific 1D articulation cues, while the comparison paths use bounded F0 jitter and reduced aspiration-noise injection
+- `/a i u e o/` previews using only the 44.1 kHz 2.5D-derived acoustic-tube model; the selected phonetic target supplies Japanese aggregate F1/F2 evaluation targets, higher-resonance engineering references, and vowel-specific articulation cues
 - WAV export
 - local PDF-derived growth and pediatric airway prior scaffold
 - BMI calculation with age-band reference display, Japanese public aggregate body-composition guidance, formula fallback, and conservative regional skinfold-response metadata
@@ -96,7 +112,6 @@ Reference status:
 - Glottal-source shape, volume-velocity source-input controls, side-branch loss controls, and vocal-tract loss controls are engineering preview parameters. They use conservative human-general defaults until aggregate acoustic/biomechanical calibration sources are selected.
 - Soft-wall compliance and resonance broadening are lightweight approximations used to reduce narrow, instrument-like tube peaks. They are not a substitute for a calibrated vocal-tract wall model.
 - The side-branch loss model is a light output-coloring layer for paranasal sinus, velopharyngeal/nasal, and piriform-fossa antiresonance cues. It is not a measured internal anatomy solver.
-- The hybrid preview is an engineering bridge: the conditioned tube and side-branch model provide area-function-dependent color, while RMS level matching makes the tube-texture control represent its intended contribution and keeps the formant envelope dominant enough for character-voice design.
 - The 2.5D layer separates midsagittal height, coronal width, section aspect, and a latent tongue-groove/lateral-channel capacity before deriving `A(x)`. The current acoustic solver still receives only total area, so multi-channel propagation and full 3D acoustics remain future work.
 
 Do not treat placeholder head/face/body priors as validated research data. Replace them with the selected source table before publication-grade analysis.

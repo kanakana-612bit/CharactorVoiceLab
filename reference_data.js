@@ -16,6 +16,7 @@ window.CVL_REFERENCE = {
   sources: {
     pisanski2014: {
       label: "Pisanski et al. 2014, Vocal indicators of body size in men and women: a meta-analysis",
+      doi: "10.1016/j.anbehav.2014.06.011",
       bundle_file: "01_Pisanski_2014_Vocal_indicators_of_body_size_meta_analysis.pdf",
       use: "Justifies weak/conservative body-to-voice mapping and range-based estimates.",
       publication_use: "formula_or_aggregate_reference",
@@ -30,6 +31,7 @@ window.CVL_REFERENCE = {
     },
     pisanski2016: {
       label: "Pisanski et al. 2016, Voice parameters predict sex-specific body morphology in men and women",
+      doi: "10.1016/j.anbehav.2015.11.008",
       bundle_file: "02_Pisanski_2016_Voice_parameters_and_body_morphology.pdf",
       use: "Provides adult sex-class voice priors used for preview synthesis and vocal-tract-length ranges.",
       publication_use: "formula_or_aggregate_reference",
@@ -96,6 +98,7 @@ window.CVL_REFERENCE = {
     },
     dediu2022: {
       label: "Dediu et al. 2022, MRI vocal-tract structures in Dutch twins",
+      doi: "10.1007/s00439-022-02469-2",
       bundle_file: "03_Dediu_2022_Heritability_of_vocal_tract_structures_MRI.pdf",
       use: "Supports keeping skull, face, mandible, hyoid/larynx, cervical and vocal-tract variables separate.",
       publication_use: "parameter_schema_support",
@@ -103,6 +106,7 @@ window.CVL_REFERENCE = {
     },
     baer1991: {
       label: "Baer et al. 1991, Analysis of vocal tract shape and dimensions using MRI: vowels",
+      doi: "10.1121/1.401949",
       url: "https://pubmed.ncbi.nlm.nih.gov/1939886/",
       use: "Supports deriving a cross-sectional area function from midsagittal dimensions; numeric subject-level mappings are not embedded.",
       publication_use: "methodological_support_only",
@@ -111,6 +115,7 @@ window.CVL_REFERENCE = {
     },
     aistHql2003: {
       label: "AIST/HQL 3D Anthropometric Database 2003, public aggregate statistics",
+      citation_label: "AIST/HQL 2003",
       url: "https://www.airc.aist.go.jp/dhrt/fbodydb/2003_Statistics.pdf",
       use: "Provides public aggregate median and SD for frontal neck-root breadth in young Japanese adults.",
       publication_use: "public_aggregate_anthropometric_prior",
@@ -126,6 +131,7 @@ window.CVL_REFERENCE = {
     },
     aistAnthropometryManual: {
       label: "AIST Human Body Dimensions Database 1991-92, anthropometry manual",
+      citation_label: "AIST人体計測マニュアル",
       url: "https://www.airc.aist.go.jp/dhrt/91-92/fig/91-92_anthrop_manual.pdf",
       use: "Defines the canonical Japanese anatomical landmark names and cross-view measurement endpoints used by the WebUI.",
       publication_use: "terminology_and_measurement_definition",
@@ -134,6 +140,7 @@ window.CVL_REFERENCE = {
     },
     japaneseTracheaUhrct2023: {
       label: "Miyamoto et al. 2023, Japanese tracheal size and shape using ultra-high-resolution CT",
+      citation_label: "Miyamoto et al. 2023",
       bundle_file: "超高精細CTを用いた日本人の気管の大きさと.pdf",
       use: "Plausibility check for adult tracheal transverse and anteroposterior design values; never used to infer a character from neck width.",
       publication_use: "clinical_aggregate_validity_check_only",
@@ -149,6 +156,7 @@ window.CVL_REFERENCE = {
     },
     sourceMap: {
       label: "DIMENSION_ESTIMATION_SOURCE_MAP.md",
+      citation_label: "推定ソースマップ",
       bundle_file: "DIMENSION_ESTIMATION_SOURCE_MAP.md",
       use: "Defines which dimensions are image-priority and which are statistical-prior-priority in the MVP.",
       publication_use: "internal_design_document",
@@ -156,6 +164,7 @@ window.CVL_REFERENCE = {
     },
     pendingAist: {
       label: "AIST Japanese Head Dimensions Database 2001",
+      citation_label: "AIST頭部寸法DB 2001",
       bundle_file: "DATASET_AND_SOURCE_LINKS.md only; numeric table not bundled",
       use: "Planned source for Japanese head and face priors. Not numerically embedded until the table is provided.",
       publication_use: "planned_public_reference_dataset",
@@ -163,6 +172,7 @@ window.CVL_REFERENCE = {
     },
     localPdfGrowthPriors: {
       label: "Local PDF-derived Japanese growth and pediatric airway priors",
+      citation_label: "PDF由来成長基準",
       local_cache: "local_pdf_growth_priors.js",
       use: "Provides manually extracted aggregate references for school-age head growth, pediatric airway length, pediatric sinus development, and young respiratory-function metadata.",
       privacy_note: "Aggregate/manual-extract values only. No participant-level records.",
@@ -172,6 +182,7 @@ window.CVL_REFERENCE = {
     },
     yumigeta2019BodyFatDistribution: {
       label: "Yumigeta et al. 2019, Characteristics of body fat distribution based on somatotype in Japanese young women",
+      doi: "10.3861/kenko.85.5_157",
       bundle_file: "日本人若年女性における体型からみた体脂肪分布の特徴.pdf",
       use: "Provides aggregate young-female BMI/body-fat somatotype groups and regional fat-distribution ratios for setting guidance.",
       privacy_note: "Published aggregate group summaries only. No participant-level records, images, or IDs are used.",
@@ -217,6 +228,7 @@ window.CVL_REFERENCE = {
     },
     regionalSkinfoldThickness1996: {
       label: "Regional subcutaneous fat thickness distribution by percent body fat, 1996",
+      citation_label: "部位別皮下脂肪厚 1996",
       bundle_file: "体脂肪率からみた部位別皮下脂肪厚の分布.pdf",
       use: "Provides aggregate sex-specific regional skinfold means and regression slopes per 1 percent body fat. Used only as a relative site-response guide.",
       privacy_note: "Published aggregate means/regression slopes only. No participant-level records, images, or IDs are used.",

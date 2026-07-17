@@ -26,7 +26,7 @@ This list tracks parameters that are currently implemented as placeholders, weak
 | Japanese `/a i u e o/` F1/F2 targets | Kagomiya 2015 published adult sex-stratified aggregate values; VTL normalization is an engineering mapping | Public aggregate targets by age, speech style, region/variety, and carefully documented vowel context. Do not use audio, token, frame, or speaker records. |
 | Japanese F3/F4 targets | Pisanski 2016 public general sex-class F3/F4 baselines with provisional vowel-shape factors | A suitable public Japanese aggregate F3/F4/B1-B4 table with compatible scope. Current values are not Japanese measurements. |
 | `area_function_tube_0.2.articulation_target` Japanese `/u/` lip compression / reduced rounding | Public phonetic description plus an engineering 2.5D-to-1D projection; improves /u/-/o/ separation but is not motion capture | Public aggregate articulography, ultrasound, MRI, or generalized Japanese area-function data that can be used without individual-subject coefficients. |
-| `pharyngeal_length_scale` | Morphology proxy | MRI/CT vocal tract length and pharyngeal subdivision data by age/sex/body size. |
+| `pharyngeal_length_scale` | Morphology proxy connected to longitudinal reallocation of the fixed-VTL 2.5D pharyngeal/oral template | MRI/CT vocal tract length and pharyngeal subdivision data by age/sex/body size. |
 | `pharyngeal_area_scale` | Jaw/shoulder/pelvis proxy | Imaging-derived pharyngeal cross-section or acoustic tube area-function references. |
 | `larynx_height_offset_mm` | Age/sex heuristic | Japanese or pediatric/adult larynx height / hyoid / vocal-fold position references. |
 | `nasal_cavity_volume_cm3` | Head/lower-face/jaw proxy | Nasal cavity volume by age/sex, preferably CT/MRI-based. |
@@ -35,7 +35,6 @@ This list tracks parameters that are currently implemented as placeholders, weak
 | `sinus_neck_length_cm` | Helmholtz side-branch proxy | Same as above; current value is only a synthesis control. |
 | `sinus_coupling` | Nasal/sinus proxy plus manual slider | Acoustic coupling estimates between nasal cavity, sinuses, and vocal tract. |
 | `sinus_damping` | Preview control | Acoustic damping/Q factor data or perceptual calibration. |
-| `side_branch_loss_coupling` | Global preview control for side-branch coloring | Lightweight side-branch model calibration across nasal, sinus, and piriform-fossa losses. |
 | `velopharyngeal_loss_coupling` | Manual/design proxy guided by velopharyngeal gap handles | Aggregate velopharyngeal coupling or nasal-leak acoustic references that do not rely on identifiable clinical cases. |
 | `piriform_fossa_loss_coupling` | Preview antiresonance control | Generalized piriform-fossa side-branch acoustic models and perceptual calibration. |
 | `piriform_fossa_frequency_hz` | Vocal-tract-length-scaled preview frequency | Aggregate or model-derived piriform-fossa antiresonance frequency ranges. |
@@ -47,10 +46,6 @@ This list tracks parameters that are currently implemented as placeholders, weak
 | `vocal_tract_wall_compliance` | Soft-wall preview approximation | Wall compliance / yielding-wall acoustic models suitable for a lightweight 1D tube. |
 | `vocal_tract_resonance_broadening` | Frequency-dependent preview broadening | Calibration for how much narrow tube resonances should be broadened before the sound becomes voice-like. |
 | `lip_radiation_smoothing` | Human-general preview default | Lip-radiation model calibration by aperture, protrusion, and tract termination. |
-| `hybrid_side_branch_strength` | Engineering preview bridge | Perceptual calibration for how much side-branch coloring can be applied before the hybrid preview becomes instrument-like. |
-| `hybrid_formant_anchor` | Engineering preview bridge | Perceptual calibration for how strongly formant-envelope anchoring should dominate raw tube resonances. |
-| `hybrid_tube_texture_mix` | Engineering preview bridge | Perceptual calibration for raw tube texture audibility before it becomes oboe-like. |
-| `hybrid_source_noise_routing_0.1` | Engineering source-routing rule: reduced aspiration noise is owned by the formant layer; the tube texture receives none | Perceptual calibration of breathiness and HNR across formant/tube mix ratios. The rule prevents duplicated noise but is not a physical source-filter coupling model. |
 | `vocal_tract_geometry_0.2.sections[*].sagittal_diameter_cm` | Synthetic vowel-neutral midsagittal template scaled by profile landmarks and a manual palatal-vault design control | Reusable generalized or aggregate midsagittal/area-function templates, preferably vowel- and age-conditioned. Single-subject coefficients are not acceptable for the public prototype. |
 | `vocal_tract_geometry_0.2.sections[*].frontal_width_cm` | Independent tracheal design anchor plus neck/jaw/mouth proxies with linear interpolation | Direct reusable width or area-function evidence and uncertainty by tract region. External neck width must remain separate from internal tracheal size. |
 | `vocal_tract_geometry_0.2.sections[*].cross_section` | Synthetic 2.5D section with sagittal height, coronal width, ellipse factor, aspect ratio, and latent lateral-channel capacity | Public aggregate or generalized cross-sectional shape statistics. Do not use participant MRI/CT meshes, speaker coefficients, or raw image volumes. |
@@ -65,32 +60,42 @@ This list tracks parameters that are currently implemented as placeholders, weak
 | Shoulder/acromion and trochanter landmarks | Manual schematic handles mapped to canonical anatomical names | A standardized manual placement protocol; visible contour extrema are not necessarily the underlying bony landmarks. |
 | Cross-view total-head-height calibration | Deterministic reconciliation using body-image stature and vertex-to-gnathion height | Evaluation on matched front/profile images, especially stylized characters with inconsistent projections or cropped hair/head boundaries. |
 
+### Loss-control consolidation review
+
+The five internal controls should not be collapsed into one physical variable at this stage:
+
+- `vocal_tract_wall_loss` and `vocal_tract_viscothermal_loss` determine distributed propagation attenuation.
+- `vocal_tract_wall_compliance` adds wall memory and can shift or soften resonances, not merely reduce level.
+- `vocal_tract_resonance_broadening` controls resonance Q/bandwidth.
+- `vocal_tract_high_frequency_damping` primarily shapes the upper spectrum; `lip_radiation_smoothing` remains a termination/output effect.
+
+A later UI may expose one calibrated `overall_vocal_tract_loss` macro that moves these internal quantities in fixed, literature-supported proportions, with an advanced expansion for independent editing. Replacing all internal values with one coefficient now would make the solver less identifiable physically and would prevent separate impulse-response validation. The consolidation decision therefore remains pending loss-model calibration rather than being implemented as a destructive schema change.
+
 ## Respiratory And Body Resonance
 
 | Parameter | Current state | Needed evidence |
 | --- | --- | --- |
-| `maximum_ventilation_l_min` | Height/weight/torso proxy; young respiratory equations now partly inform ages 10-20 | Adult Japanese MVV or ventilation table by age/sex/height; child table outside 10-20. |
-| `thoracic_volume_l` | Torso/shoulder/height/weight proxy with a very small body-composition soft-tissue modifier | Chest cavity / thoracic volume or chest circumference/depth table by age/sex. Current Komiya/body-fat values do not directly measure thoracic cavity volume. |
-| `abdominal_volume_l` | Torso/pelvis/weight proxy with conservative body-fat and abdominal-skinfold modifier | Abdominal cavity volume or waist/abdominal depth/circumference references. Regional skinfold response is only a surface soft-tissue guide. |
-| `respiratory_support` | Composite preview control | Validation against spirometry, pressure, phonation duration, or singing/speech breath-support data. |
-| `body_resonance_frequency_hz` | Thoracic-volume-derived preview control | Body/chest wall resonance acoustic references. |
-| `body_resonance_gain_db` | Preview gain control | Perceptual/acoustic calibration for body-resonance audibility. |
-| `body_resonance_coupling` | Thoracic volume, closure, and conservative body-composition proxy | Coupling data between source, airway, body composition, and body/chest resonance. Current skinfold data only supports directionality. |
+| `maximum_ventilation_l_min` | Height/weight/torso estimate capped by a thoracic/abdominal structural-capacity function; young respiratory equations partly inform ages 10-20 | Adult Japanese MVV or ventilation table by age/sex/height; child table outside 10-20; validation of the structural ceiling mapping. |
+| `thoracic_volume_l` | Torso/shoulder/height/weight proxy that limits maximum ventilation and initializes body-resonance frequency | Chest cavity / thoracic volume or chest circumference/depth table by age/sex. Current Komiya/body-fat values do not directly measure thoracic cavity volume. |
+| `abdominal_volume_l` | Torso/pelvis/weight proxy that contributes to the maximum-ventilation structural ceiling | Abdominal cavity volume or waist/abdominal depth/circumference references. Regional skinfold response is only a surface soft-tissue guide. |
+| `respiratory_support` | Speech-time utilization of available respiratory capacity; structural volumes are not reapplied here | Validation against spirometry, pressure, phonation duration, or singing/speech breath-support data. |
+| `body_resonance_frequency_hz` | Thoracic-volume-derived initial value; user edits are persisted and used directly | Body/chest wall resonance acoustic references. |
+| `body_resonance_gain_db` | Independent peak gain inside the body-resonance branch | Perceptual/acoustic calibration for body-resonance audibility. |
+| `body_resonance_coupling` | Independent parallel wet/dry coupling estimated from thoracic volume and conservative body-composition proxies | Coupling data between source, airway, body composition, and body/chest resonance. Current skinfold data only supports directionality. |
 | `maximum_respiratory_pressure_pa` | Manual setting | Maximal inspiratory/expiratory pressure or subglottal pressure references by age/sex. |
 
 ## Vocal Fold And Pathophysiology
 
 | Parameter | Current state | Needed evidence |
 | --- | --- | --- |
+| `f0_mean_hz` | Read-only result derived from sex-class reference F0, vocal-fold spring constant, baseline muscle tension, and provisional inflammation mapping | A physically calibrated mapping from tissue stiffness, effective mass, longitudinal tension, and phonatory state to F0. |
 | `vocal_fold_spring_constant` | Age/lifestyle/inflammation preview proxy | Vocal-fold biomechanical stiffness data by age/sex/pathology. |
 | `baseline_muscle_tension` | Preview proxy | Laryngeal muscle tension / phonation threshold pressure references. |
-| `tension_response_curve` | Preview control | Data linking cricothyroid/thyroarytenoid tension changes to F0 and stability. |
-| `inflammation_index` | Smoking/respiratory-history proxy | Edema/inflammation effects on vocal-fold mass, damping, closure, and acoustic noise. |
-| `airway_lumen_narrowing` | Inflammation/history proxy | Airway narrowing effects on turbulence, resistance, and phonation stability. |
-| `glottal_closure` | Manual slider | Needs mapping to measured open quotient / closed quotient if used physically. |
-| `glottal_open_quotient` | LF-style preview control derived from closure/inflammation | Aggregate acoustic or laryngographic open-quotient ranges by phonation mode, age, and sex. |
-| `glottal_speed_quotient` | LF-style preview control derived from closure/tension | Source-model references linking speed quotient to perceived pressed/breathy quality. |
-| `glottal_return_phase` | LF-style preview control derived from closure/inflammation | Return-phase calibration for the simplified LF-style source. |
+| `inflammation_index` | Provisional internal proxy; removed from the 1.0 UI until its physical meaning and mapping can be explained | Edema/inflammation effects on vocal-fold mass, damping, closure, and acoustic noise. |
+| `airway_lumen_narrowing` | Provisional internal proxy; removed from the 1.0 UI until its physical meaning and mapping can be explained | Airway narrowing effects on turbulence, resistance, and phonation stability. |
+| `glottal_open_quotient` | Explicit LF-style preview control initialized from tension and provisional inflammation mapping | Aggregate acoustic or laryngographic open-quotient ranges by phonation mode, age, and sex. |
+| `glottal_speed_quotient` | Explicit LF-style preview control initialized from tension and provisional inflammation mapping | Source-model references linking speed quotient to perceived pressed/breathy quality. |
+| `glottal_return_phase` | Explicit LF-style preview control initialized from tension and provisional inflammation mapping | Return-phase calibration for the simplified LF-style source. |
 | `glottal_spectral_tilt_db` | Preview spectral-tilt control | Voice-source spectral tilt references by phonation type and speaker class. |
 | `glottal_breathiness` | Aspiration-noise preview control | Breathiness/noise calibration against HNR or perceptual ratings. |
 | `glottal_volume_velocity_drive` | Preview source-input blend | Source-filter references for volume-velocity injection into a lightweight 1D tube model. |
@@ -113,6 +118,6 @@ This list tracks parameters that are currently implemented as placeholders, weak
 
 | Parameter | Current support | Remaining gap |
 | --- | --- | --- |
-| `predicted_vc_l`, `predicted_fvc_l`, `predicted_fev1_l`, `predicted_pef_l_s`, `predicted_v50_l_s`, `predicted_v25_l_s` | Local PDF Table 4 equations for Japanese ages 10-20 | Adult and under-10 references; direct mapping to phonation capacity still needs validation. |
+| `predicted_vc_l`, `predicted_fvc_l`, `predicted_fev1_l`, `predicted_pef_l_s`, `predicted_v50_l_s`, `predicted_v25_l_s` | Local PDF Table 4 equations for Japanese ages 10-20; VC/FVC and FEV1/PEF now feed the engineering respiratory-drive layer | Adult and under-10 references; the mapping weights to phonation duration, airflow, and pressure still need validation. |
 | `pediatric_vocal_cord_to_carina_cm` | Local pediatric airway PDF height equation | Voice relevance is indirect; use only as airway-length/safety proxy. |
 | school-age head growth | Local PDF endpoints for ages 6 and 11 | Need full table/SDs and connection to face/mandible dimensions. |

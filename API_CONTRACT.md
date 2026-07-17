@@ -26,6 +26,8 @@ This project follows the paper's layer split:
 - `edit_range` is a WebUI-only range for adjusting the baseline value during detailed analysis.
 - `statistics` stores reference-center, SD, z-score support, and plausibility-display metadata. It is not a performance range.
 
+There is no global `ConstraintRangeK` in schema 0.3. Each dynamic range is stored and edited independently. `tension_response_curve` is retired because it conflated a local preview multiplier with the separately planned neurological/autonomic response profile. `glottal_closure` is not part of the live schema: pre-0.3 values are read only by one-way migration code and converted to explicit open quotient, speed quotient, return phase, spectral tilt, breathiness, flow smoothing, and flow inertance.
+
 In other words, `constraint_range` is not the slider's UI range. For a muscle-tension parameter, `performance_control_range` represents the relaxed-to-strained range that the character can dynamically express around the baseline.
 
 Articulatory-control modifiers include:
@@ -33,21 +35,28 @@ Articulatory-control modifiers include:
 - `articulatory_range_utilization`: phoneme-gesture execution, or how much of the available PerformanceControlRange is used for the current speech target.
 - `tongue_dorsum_range_utilization` and `labial_transverse_range_utilization`: available tongue and labial PerformanceControlRange. Values below neutral limit a gesture; values above neutral expand future availability but do not amplify a fixed vowel target.
 - `tongue_groove_capacity`: available tongue-groove and lateral-channel PerformanceControlRange for the 2.5D design layer. It limits lateral-channel activation for the current gesture and does not change the neutral geometry.
-- `motor_control_precision`: how tightly articulators reach target positions.
+- `motor_control_precision`: deterministic precision of the current preview target; it smooths or sharpens the realized tract without creating temporal errors.
 - `coarticulation_strength`: how strongly adjacent sounds pull the current target.
-- `motor_control_maturity`: age/maturity proxy for motor coordination.
-- `phonological_contrast_maturity`: maturity of phonological target separation.
+- `motor_control_maturity`: age/maturity proxy for trial-to-trial target-arrival accuracy. A future TTS motion layer should use it for unstable articulation associated with infancy, fatigue, or intoxication; the isolated-vowel preview does not yet synthesize stochastic target errors.
+- `phonological_contrast_maturity`: maturity of phonological target separation. It remains available for future TTS sequencing as well as the current target-separation preview.
 - `mouth_width_relaxed_cm`: jaw-conditioned relaxed commissure-width estimate. Its `performance_control_range` spans a depicted/stylized pursed proxy to an engineering estimate of maximal lip spreading; `/i/`, `/e/`, `/o/`, and `/u/` select different positions within that range.
 
 `inputs.reference_image_style` is either `illustration` (default) or `photo_realistic`. Illustration mode treats small depicted soft-tissue features as potentially stylized lower-bound signals and permits a wider latent articulatory range; photo/realistic mode gives the observed dimensions more weight.
 
+`inputs.image_analysis_weight` stores the image/statistical fusion weight that was last applied by analysis. Moving the detail-tab slider changes only the pending UI value; the integrated features, constraints, and vocal-tract geometry are regenerated only by the explicit `再計算` action. The basic-information `解析` action performs the same complete analytical regeneration from the current inputs and manual landmarks. Both explicit actions clear user-edited constraint-center slider overrides so the controls return to the new analytical centers; separately edited `performance_range_overrides` remain intact.
+
 Preview source/acoustic-loss controls include:
 
-- `glottal_open_quotient`, `glottal_speed_quotient`, `glottal_return_phase`, `glottal_spectral_tilt_db`, and `glottal_breathiness`: LF-style glottal-source approximation controls derived from closure, tension, and inflammation.
+- `f0_mean_hz`: read-only output derived from `f0_reference_hz`, vocal-fold spring constant, baseline muscle tension, and the provisional inflammation mapping. It is not an independent design slider.
+- `glottal_open_quotient`, `glottal_speed_quotient`, `glottal_return_phase`, `glottal_spectral_tilt_db`, and `glottal_breathiness`: explicit LF-style glottal-source approximation controls initialized from tension and provisional inflammation/lumen mappings.
 - `glottal_volume_velocity_drive`, `glottal_flow_smoothing`, and `glottal_flow_inertance`: preview controls that blend the tube excitation toward a smoothed glottal volume-velocity input.
 - `vocal_tract_wall_loss`, `vocal_tract_viscothermal_loss`, `vocal_tract_high_frequency_damping`, `vocal_tract_wall_compliance`, `vocal_tract_resonance_broadening`, and `lip_radiation_smoothing`: generalized human-default loss/compliance controls for the lightweight 1D tube preview.
-- `side_branch_loss_coupling`, `velopharyngeal_loss_coupling`, `piriform_fossa_loss_coupling`, `piriform_fossa_frequency_hz`, and `nasal_branch_damping`: simple side-branch loss controls for paranasal sinus, velopharyngeal/nasal, and piriform-fossa coloring.
-- `hybrid_side_branch_strength`, `hybrid_formant_anchor`, and `hybrid_tube_texture_mix`: browser-preview bridge controls. The side-branch strength scales physical coloring in the hybrid backend, the formant anchor keeps a stable voice-like envelope dominant, and the tube texture mix adds a small amount of conditioned 1D tube texture.
+- `sinus_coupling`, `velopharyngeal_loss_coupling`, `piriform_fossa_loss_coupling`, `piriform_fossa_frequency_hz`, and `nasal_branch_damping`: independent side-branch controls for paranasal sinus, velopharyngeal/nasal, and piriform-fossa coloring. The former global `side_branch_loss_coupling` master is migration-only.
+- `body_resonance_frequency_hz`, `body_resonance_gain_db`, and `body_resonance_coupling`: respectively the stored branch frequency, branch peak gain, and parallel wet/dry coupling. Frequency is initially derived from thoracic volume but becomes an explicit persisted override when edited.
+
+`inflammation_index` and `airway_lumen_narrowing` are not exposed as editable controls in the 1.0 UI. Their provisional internal mappings remain under review and must not be interpreted as validated medical quantities.
+
+Respiratory flow is ordered as follows: thoracic and abdominal volumes limit the initial maximum-ventilation estimate; VC/FVC, FEV1/PEF, maximum ventilation, and maximum respiratory pressure define available source capacity; `respiratory_support` specifies how much of that capacity is used during the current speech performance. Structural volumes are therefore not reapplied directly to `respiratory_support`.
 
 These controls are preview metadata, not validated clinical estimates. A downstream physical core may replace their implementation while preserving the exported baseline values and source labels.
 
@@ -70,6 +79,11 @@ Request:
         "basis": "reference_center ± 3SD; UI design-value editing range"
       },
       "constraint_range": {
+        "min": 0.714,
+        "max": 1.377,
+        "basis": "maximally relaxed-to-strained muscle-tension performance range"
+      },
+      "performance_control_range": {
         "min": 0.714,
         "max": 1.377,
         "basis": "maximally relaxed-to-strained muscle-tension performance range"
@@ -113,7 +127,10 @@ The profile includes three intentionally separate metadata fields:
 - `primary_language`: linguistic/phoneme-planning context only
 - `phonetic_target_profile`: aggregate language/variety target for vowel formants and provisional articulation cues; it is not an ancestry, ethnicity, or anatomical-prior selector
 - `morphology_reference_population`: selection of an approved aggregate anthropometric prior; `General` is the default
-- `constraint_overrides`: user-edited baseline constraint centers that should be re-applied after analytical regeneration
+- `constraint_overrides`: user-edited baseline constraint centers re-applied during profile loading and automatic regeneration; explicit user-triggered `解析` / `再計算` intentionally clears them
+- `performance_range_overrides`: user-edited per-parameter dynamic minima and maxima that should be re-applied after analytical regeneration
+
+`range_semantics` documents the distinction among baseline, morphological plausibility, WebUI edit range, and dynamic performance range. A downstream service must not use `constraint_range` as a UI slider range; it is only a deprecated alias of `performance_control_range`.
 
 Changing `primary_language` or `phonetic_target_profile` must never silently change anatomical priors. Legacy profiles without `phonetic_target_profile` select a compatible default from `primary_language` during load.
 
@@ -169,7 +186,7 @@ The built-in loader accepts packages generated by this application and legacy JS
 The current `vocal_tract_geometry_0.2` schema is a synthetic 2.5D design geometry. A downstream physical core must preserve its assumptions and confidence metadata and must not relabel it as image-observed anatomy. Older `vocal_tract_geometry_0.1` profiles are rebuilt from their landmarks and constraints on load.
 Honda-style landmarks and sinus guides are manually controlled model anchors. They may guide later physical synthesis, but they must not be treated as measured internal anatomy from an uploaded character image.
 
-The browser preview runs at 44.1 kHz and derives a temporary `area_function_tube_0.2` object. It retains `cross_sections_2_5d` with sagittal height, coronal width, aspect ratio, tongue-groove depth, and lateral-channel activation, then projects each section's total area to the current single-channel tube solver. Its `articulation_target` keeps jaw, oral volume, lip, tongue, and cross-section targets separate; for example, `/o/` expands the middle/front oral cavity and oral aperture while retaining a short terminal lip constriction, rather than reusing the `/u/` mandibular posture. The default `tube` backend remains a lightweight Kelly-Lochbaum style 1D preview. Its tube count follows `round(vocal_tract_length_cm * sample_rate / sound_speed)`, and `tube_distributed_loss_0.1` converts generalized wall, viscothermal, and broadening controls into a tract-length-normalized per-section gain. It also retains provisional vowel-specific area warps, LF-style volume-velocity input, restrained soft-wall compliance, simple side-branch antiresonance coloring, and smoothed lip radiation. The optional `hybrid` backend uses the area function as an analysis layer, nudges a stable formant envelope with the derived geometry, applies `side_branch_loss_model_0.1`, and mixes a small conditioned tube texture component after matching its steady-state RMS to the formant layer. `hybrid_source_noise_routing_0.1` keeps aspiration-noise ownership in the formant layer so the tube texture does not double the noise floor. These browser backends are intended for fast design feedback, not as bit-identical VocalTractLab implementations.
+The browser preview runs at 44.1 kHz and derives a temporary `area_function_tube_0.2` object. It retains `cross_sections_2_5d` with sagittal height, coronal width, aspect ratio, tongue-groove depth, and lateral-channel activation, then projects each section's total area to the current single-channel tube solver. Its `articulation_target` keeps jaw, oral volume, lip, tongue, and cross-section targets separate; for example, `/o/` expands the middle/front oral cavity and oral aperture while retaining a short terminal lip constriction, rather than reusing the `/u/` mandibular posture. The sole browser backend is a lightweight Kelly-Lochbaum style tube preview. Its tube count follows `round(vocal_tract_length_cm * sample_rate / sound_speed)`, and `tube_distributed_loss_0.1` converts generalized wall, viscothermal, and broadening controls into a tract-length-normalized per-section gain. It also retains provisional vowel-specific area warps, LF-style volume-velocity input, restrained soft-wall compliance, simple side-branch antiresonance coloring, and smoothed lip radiation. Published formant targets remain evaluation/provenance metadata for the tube geometry; they are not a separate formant synthesizer. This browser model is intended for fast design feedback, not as a bit-identical VocalTractLab implementation.
 
 ## Irodori-TTS Integration Target
 
@@ -182,7 +199,7 @@ Use a separate core service that accepts either:
 - curated WAV/material paths for cloning or fine-tuning
 - a saved `character_voice_profile.json` as the reproducible experiment record
 
-The WebUI should remain useful even when no external synthesis backend is available. In that mode it exports constraints and uses the browser 1D-tube preview by default, with hybrid/formant comparison modes retained for diagnostics.
+The WebUI should remain useful even when no external synthesis backend is available. In that mode it exports constraints and uses the browser 2.5D-derived tube preview. Profiles saved by older versions may still contain `formant` or `hybrid` preview selections and hybrid-only controls; version 1.0 ignores those retired fields and exports `preview_synthesis_backend: "tube"`.
 
 ## Aggregate Reference Data Policy
 

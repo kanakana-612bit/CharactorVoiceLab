@@ -8,41 +8,34 @@
   </head>
   <body>
     <header class="app-header">
-      <div>
-        <h1>Character Voice Lab <span class="version-badge">Ver 0.3</span></h1>
-        <p>身体推定値と統計事前分布から音声制約を作る実験UI</p>
+      <div class="header-leading">
+        <button id="loadProjectBtn" type="button">プロファイル読込</button>
+        <div>
+          <h1>Character Voice Lab <span class="version-badge">Ver 1.0</span></h1>
+          <p>身体推定値と統計事前分布から音声制約を作る実験UI</p>
+        </div>
       </div>
       <div class="header-actions">
         <label class="header-field project-title-field">
-          プロジェクト名
-          <input id="projectTitleInput" type="text" value="character-voice" maxlength="80" />
-        </label>
-        <label class="header-field">
-          データソース
-          <select id="dataSourceInput">
-            <option value="current_mvp">MVP priors</option>
-            <option value="japanese_age_band_planned">日本人年齢階級 priors</option>
-            <option value="manual_design">Manual design</option>
-          </select>
+          名称
+          <input id="projectTitleInput" type="text" value="voice_profile" maxlength="80" />
         </label>
         <button id="saveProjectBtn">プロフィール保存</button>
-        <button id="loadProjectBtn">プロフィール読込</button>
         <input id="loadProjectInput" type="file" accept=".zip,.json,application/zip,application/json" hidden />
       </div>
     </header>
 
     <nav class="tabbar" aria-label="解析タブ">
-      <button class="tab-button active" data-tab-target="setupTab">入力・特徴点</button>
-      <button class="tab-button" data-tab-target="initialTab">初期解析</button>
-      <button class="tab-button" data-tab-target="detailTab">詳細解析と設定</button>
-      <button class="tab-button" data-tab-target="outputTab">音素出力・書出し</button>
+      <button class="tab-button active" data-tab-target="setupTab">基本情報</button>
+      <button class="tab-button" data-tab-target="detailTab">詳細設定</button>
+      <button class="tab-button" data-tab-target="outputTab">TTS設定</button>
       <button class="tab-button" data-tab-target="referenceTab">参考文献・公開方針</button>
     </nav>
 
     <main class="workspace">
-      <section id="setupTab" class="tab-panel active" aria-label="入力・特徴点">
-        <section class="pane input-pane" aria-label="基礎入力">
-          <h2>基礎入力</h2>
+      <section id="setupTab" class="tab-panel active" aria-label="基本情報">
+        <section class="pane input-pane" aria-label="基本情報">
+          <h2>参照画像</h2>
 
           <div class="upload-grid">
             <label class="drop-zone">
@@ -59,6 +52,7 @@
             </label>
           </div>
 
+          <h2 class="section-heading">基本プロファイル</h2>
           <div class="form-grid">
             <label>
               年齢
@@ -113,6 +107,58 @@
                 <option value="photo_realistic">写真／写実的表現</option>
               </select>
             </label>
+            <label>
+              推定データソース
+              <select id="dataSourceInput">
+                <option value="current_mvp">MVP priors</option>
+                <option value="japanese_age_band_planned">日本人年齢階級 priors</option>
+                <option value="manual_design">Manual design</option>
+              </select>
+            </label>
+          </div>
+
+          <h2 class="section-heading">生活習慣・呼吸器情報</h2>
+          <div class="form-grid">
+            <label>
+              喫煙歴
+              <select id="smokingInput">
+                <option value="unknown">unknown</option>
+                <option value="never">never</option>
+                <option value="past">past</option>
+                <option value="current">current</option>
+              </select>
+            </label>
+            <label>
+              運動習慣
+              <select id="exerciseInput">
+                <option value="unknown">unknown</option>
+                <option value="low">low</option>
+                <option value="moderate">moderate</option>
+                <option value="high">high</option>
+              </select>
+            </label>
+            <label>
+              食事習慣
+              <select id="dietInput">
+                <option value="unknown">unknown</option>
+                <option value="balanced">balanced</option>
+                <option value="irregular">irregular</option>
+                <option value="high_salt_or_alcohol">high salt/alcohol</option>
+              </select>
+            </label>
+            <label>
+              呼吸器既往
+              <select id="respiratoryHistoryInput">
+                <option value="unknown">unknown</option>
+                <option value="none">none</option>
+                <option value="asthma">asthma</option>
+                <option value="copd_or_chronic">COPD/chronic</option>
+              </select>
+            </label>
+          </div>
+          <div class="inline-actions">
+            <button id="analyzeBtn" class="primary" type="button">解析</button>
+            <span id="extractionStatus" class="status-line">初期点はシェーマ上の仮配置です。各点を直接つかんで調整してください。</span>
           </div>
 
           <section class="composition-guide" aria-label="BMIと体脂肪率設定ガイド">
@@ -176,7 +222,6 @@
                 <option value="left">左向き</option>
               </select>
             </label>
-            <p id="extractionStatus" class="status-line">初期点はシェーマ上の仮配置です。各点を直接つかんで調整してください。</p>
             <p class="note">点を直接ドラッグできます。空いている場所を押すと選択中の点を配置します。</p>
           </div>
         </section>
@@ -240,9 +285,20 @@
         </section>
       </section>
 
-      <section id="initialTab" class="tab-panel" aria-label="初期解析" hidden>
-        <section class="pane analysis-pane" aria-label="統計比較">
-          <h2>解析寸法と統計値の比較</h2>
+      <section id="detailTab" class="tab-panel" aria-label="詳細設定" hidden>
+        <section class="pane analysis-pane detail-full" aria-label="推定概要">
+          <div class="pane-head">
+            <h2>推定概要</h2>
+            <div class="detail-recalculation-controls">
+              <label class="inline-range-control">
+                画像推定の寄与
+                <input id="globalImageWeight" type="range" min="0" max="1" step="0.01" value="0.7" />
+              </label>
+              <output id="globalImageWeightValue" for="globalImageWeight">0.70</output>
+              <button id="recalculateBtn" class="primary" type="button">再計算</button>
+              <span id="detailRecalculationStatus" class="status-line" aria-live="polite">反映済み（寄与 0.70）</span>
+            </div>
+          </div>
           <section class="calibration-section" aria-labelledby="calibrationHeading">
             <div class="pane-head">
               <h3 id="calibrationHeading">画像スケール基準</h3>
@@ -285,6 +341,14 @@
               </table>
             </div>
           </section>
+        </section>
+
+        <section class="pane detail-full">
+          <div class="pane-head">
+            <h2>声道プロファイル</h2>
+            <span>安静・無発声時を基準とする物理形状</span>
+          </div>
+          <div class="slider-list compact-list" id="vocalTractProfileSliders"></div>
           <section class="tract-analysis">
             <div class="pane-head">
               <h3>声道断面積関数 A(x)</h3>
@@ -297,122 +361,68 @@
             <div id="tractRegionSummary" class="tract-region-summary"></div>
           </section>
         </section>
-      </section>
 
-      <section id="detailTab" class="tab-panel" aria-label="詳細解析と設定" hidden>
-        <section class="pane">
-          <h2>生活習慣・呼吸器既往</h2>
-          <div class="form-grid">
-            <label>
-              喫煙歴
-              <select id="smokingInput">
-                <option value="unknown">unknown</option>
-                <option value="never">never</option>
-                <option value="past">past</option>
-                <option value="current">current</option>
-              </select>
-            </label>
-            <label>
-              運動習慣
-              <select id="exerciseInput">
-                <option value="unknown">unknown</option>
-                <option value="low">low</option>
-                <option value="moderate">moderate</option>
-                <option value="high">high</option>
-              </select>
-            </label>
-            <label>
-              食事習慣
-              <select id="dietInput">
-                <option value="unknown">unknown</option>
-                <option value="balanced">balanced</option>
-                <option value="irregular">irregular</option>
-                <option value="high_salt_or_alcohol">high salt/alcohol</option>
-              </select>
-            </label>
-            <label>
-              呼吸器既往
-              <select id="respiratoryHistoryInput">
-                <option value="unknown">unknown</option>
-                <option value="none">none</option>
-                <option value="asthma">asthma</option>
-                <option value="copd_or_chronic">COPD/chronic</option>
-              </select>
-            </label>
-          </div>
-        </section>
-
-        <section class="pane">
-          <h2>推定値の詳細と調整</h2>
-          <div class="form-grid detail-grid">
-            <label>
-              画像優先度
-              <input id="globalImageWeight" type="range" min="0" max="1" step="0.01" value="0.7" />
-            </label>
-            <label>
-              Constraint幅 k
-              <input id="rangeKInput" type="range" min="1" max="3" step="0.1" value="1" />
-            </label>
-            <label>
-              声門閉鎖傾向
-              <input id="glottalClosureInput" type="range" min="0" max="1" step="0.01" value="0.5" />
-            </label>
-            <label>
-              最大呼吸圧 Pa
-              <input id="pressureInput" type="number" min="200" max="3000" step="10" value="900" />
-            </label>
-          </div>
-          <div class="slider-list" id="quickSliders"></div>
-        </section>
-
-        <section class="pane">
-          <h2>声帯・声道詳細</h2>
-          <div class="slider-list compact-list" id="vocalFoldSliders"></div>
-          <p class="note">ばね定数、筋緊張、炎症、内腔容積変化はプレビュー用パラメータとして追加し、後で物理コアへ接続します。</p>
-        </section>
-
-        <section class="pane geometry-detail-pane">
+        <section class="pane detail-full">
           <div class="pane-head">
-            <h2>2.5D声道形状</h2>
-            <span>外部ランドマークで校正した合成断面テンプレート</span>
+            <h2>生理学的プロファイル</h2>
+            <span>基準物理量と推定された機能量</span>
           </div>
-          <div class="slider-list compact-list" id="geometrySliders"></div>
-          <p class="note">硬口蓋・舌・口唇の内部形状は画像から直接推定せず、公開集計値と設計値で制約した潜在形状として扱います。</p>
+          <div class="domain-grid">
+            <section class="domain-section">
+              <h3>声門</h3>
+              <div class="slider-list compact-list" id="glottalPhysiologySliders"></div>
+            </section>
+            <section class="domain-section">
+              <h3>体幹・呼吸</h3>
+              <div class="slider-list compact-list" id="trunkPhysiologySliders"></div>
+            </section>
+          </div>
+        </section>
+
+        <section class="pane detail-full">
+          <div class="pane-head">
+            <h2>運動範囲</h2>
+            <span>基準状態から発話運動によって取り得る PerformanceControlRange</span>
+          </div>
+          <div class="domain-grid performance-domain-grid">
+            <section class="domain-section">
+              <h3>声門</h3>
+              <div class="performance-range-list" id="glottalPerformanceRanges"></div>
+            </section>
+            <section class="domain-section">
+              <h3>声道</h3>
+              <div class="performance-range-list" id="vocalTractPerformanceRanges"></div>
+            </section>
+            <section class="domain-section">
+              <h3>体幹</h3>
+              <div class="performance-range-list" id="trunkPerformanceRanges"></div>
+            </section>
+          </div>
+          <div class="subsection-heading">
+            <h3>試聴時の発話運動</h3>
+            <span>可動範囲のうち、現在の発話で使用する量</span>
+          </div>
+          <div class="slider-list compact-list" id="executionSliders"></div>
+        </section>
+
+        <section class="pane detail-full">
+          <details class="advanced-settings">
+            <summary>2.5D音響管・出力詳細</summary>
+            <div class="audio-actions preview-export-actions">
+              <button id="saveWavBtn" type="button">WAV保存</button>
+              <button id="saveJsonBtn" type="button">JSON保存</button>
+            </div>
+            <div class="slider-list compact-list" id="advancedAcousticSliders"></div>
+            <pre id="constraintOutput"></pre>
+          </details>
         </section>
       </section>
 
-      <section id="outputTab" class="tab-panel" aria-label="音素出力・書出し" hidden>
-        <section class="pane analysis-pane">
-          <h2>音素プレビュー</h2>
-
-          <div class="audio-actions">
-            <label class="compact-select">
-              母音
-              <select id="vowelSelect">
-                <option value="a">/a/</option>
-                <option value="i">/i/</option>
-                <option value="u">/u/</option>
-                <option value="e">/e/</option>
-                <option value="o">/o/</option>
-              </select>
-            </label>
-            <label class="compact-select synthesis-select">
-              合成モデル
-              <select id="synthesisBackendSelect">
-                <option value="tube" selected>1D音響管</option>
-                <option value="hybrid">ハイブリッド</option>
-                <option value="formant">フォルマント</option>
-              </select>
-            </label>
-            <button id="playVowelButton" class="primary">母音を再生</button>
-            <button id="saveWavBtn">WAV保存</button>
-            <button id="saveJsonBtn">JSON保存</button>
-          </div>
-        </section>
-
-        <section class="pane export-pane">
-          <h2>設計値・制約JSON</h2>
-          <pre id="constraintOutput"></pre>
+      <section id="outputTab" class="tab-panel" aria-label="TTS設定" hidden>
+        <section class="pane output-placeholder">
+          <span class="section-kicker">TTS layer</span>
+          <h2>TTS設定</h2>
+          <p>出力言語、読み上げテキスト、抑揚、ブレス、運動周期および外力入力を接続する予約領域です。</p>
         </section>
       </section>
 
@@ -441,6 +451,7 @@
             <table>
               <thead>
                 <tr>
+                  <th>No.</th>
                   <th>出典</th>
                   <th>使用方法</th>
                   <th>公開版での扱い</th>
@@ -454,9 +465,18 @@
       </section>
     </main>
 
-    <aside class="floating-action-dock" aria-label="常時操作">
-      <button id="playSampleButton" type="button">サンプル再生</button>
-      <button id="analyzeBtn" class="primary" type="button">解析開始</button>
+    <aside id="floatingPreviewDock" class="floating-action-dock" aria-label="音素プレビュー" hidden>
+      <label class="floating-phoneme-select">
+        発音記号
+        <select id="vowelSelect">
+          <option value="a">/a/</option>
+          <option value="i">/i/</option>
+          <option value="u">/u/</option>
+          <option value="e">/e/</option>
+          <option value="o">/o/</option>
+        </select>
+      </label>
+      <button id="playSampleButton" class="primary" type="button">▶ サンプル再生</button>
     </aside>
 
     <script src="./reference_data.js"></script>
