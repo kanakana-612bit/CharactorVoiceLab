@@ -28,11 +28,11 @@ The former `glottal_closure` and `side_branch_loss_coupling` master controls are
 
 Implemented:
 
-- publication-oriented four-tab workflow: basic information, detailed settings, reserved speech-output settings, and references/publication policy
+- publication-oriented six-tab workflow: basic information, detailed settings, vowel calibration, consonant calibration, reserved TTS settings, and references/publication policy
 - header-level profile load, `voice_profile` naming, and reproducible package save
 - detailed-setting classification by design role and anatomical domain: baseline vocal tract, glottal physiology, trunk/respiration, PerformanceControlRange, execution control, and advanced acoustic preview
 - per-parameter `PerformanceControlRange` editors with independently stored minimum, baseline, and maximum values
-- detail-tab-only floating phoneme selector and sample playback action
+- vowel-tab-only floating phoneme selector and sample playback action
 - numbered inline source citations with hover/focus scope notes and DOI links in the reference table
 - full-body, face-front, and head-neck profile image loading
 - manual body/face/profile landmark placement on uploaded images or built-in schematic defaults
@@ -49,7 +49,8 @@ Implemented:
 - 44.1 kHz 2.5D-derived acoustic-tube vowel preview that projects the designed cross sections to total `A(x)`, using length-correct Kelly-Lochbaum discretization, separate jaw-opening/oral-volume/lip-rounding vowel targets, an LF-style volume-velocity glottal input, tract-length-normalized distributed losses, simple nasal/sinus/piriform side-branch losses, and restrained soft-wall compliance
 - vowel-specific direct editing of total area `A(x)` and coronal width `W(x)`; width edits preserve sagittal height and recompute the projected tube area
 - auditory calibration workflow with untuned/tuned A/B playback, phoneme-clarity and target-match ratings, notes, and profile-persisted evaluation history
-- engine-independent vowel/CV dataset export; CV onsets remain explicitly experimental and can be selected and evaluated one token at a time
+- dedicated nasal calibration for `/m/`, `/n/`, and moraic `/N/`, including oral-closure position/area/width, velopharyngeal opening, nasal-radiation contribution/path damping, hold/transition timing, direct closure-graph editing, A/B playback, and profile-persisted evaluation history
+- engine-independent vowel/CV dataset export; nasal tokens use the dedicated oral/nasal path model, while non-nasal consonant onsets remain explicitly experimental placeholders
 - read-only F0 derived from the reference center, vocal-fold spring constant, baseline muscle tension, and the currently provisional inflammation mapping
 - respiratory source drive using VC/FVC, FEV1/PEF, maximum ventilation, maximum respiratory pressure, and speech-time support utilization; thoracic and abdominal volumes constrain maximum ventilation upstream
 - body resonance implemented as an independent parallel branch whose thoracic-volume-derived frequency, peak gain, and wet/dry coupling are stored separately
@@ -115,6 +116,7 @@ Reference status:
 - Glottal-source shape, volume-velocity source-input controls, side-branch loss controls, and vocal-tract loss controls are engineering preview parameters. They use conservative human-general defaults until aggregate acoustic/biomechanical calibration sources are selected.
 - Soft-wall compliance and resonance broadening are lightweight approximations used to reduce narrow, instrument-like tube peaks. They are not a substitute for a calibrated vocal-tract wall model.
 - The side-branch loss model is a light output-coloring layer for paranasal sinus, velopharyngeal/nasal, and piriform-fossa antiresonance cues. It is not a measured internal anatomy solver.
+- `/m/` and `/n/` now use one pressure-coupled pharyngeal/oral/nasal waveguide. A lossy three-port junction propagates one glottal source through the continuously changing oral area function and velopharyngeal-port area. `/m/` keeps a neutral tongue posture behind a bilabial end closure; `/n/` derives a tongue-blade dome and a short residual alveolar constriction from the selected contact position, so its place cue persists into the voiced vowel transition without a separate source or injected burst. Oral and nasal terminal volume velocities are radiated and summed once, with no independent path normalization or explicit post-hoc nasal pole/zero filter. Velopharyngeal opening controls branch admittance, while the separate nasal-radiation control changes nostril radiation efficiency monotonically without resizing the branch. Playback reports hold/vowel balance, short-time F0-period continuity, low/high-energy balance, and manner-drift warnings so calibration does not depend on auditory adaptation alone. Moraic `/N/` retains its terminal hold model. All nasal and coronal geometry is synthetic character-design geometry rather than participant-derived internal anatomy.
 - The 2.5D layer separates midsagittal height, coronal width, section aspect, and a latent tongue-groove/lateral-channel capacity before deriving `A(x)`. The current acoustic solver still receives only total area, so multi-channel propagation and full 3D acoustics remain future work.
 
 Do not treat placeholder head/face/body priors as validated research data. Replace them with the selected source table before publication-grade analysis.

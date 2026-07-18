@@ -216,6 +216,21 @@ button.primary:hover {
   grid-template-columns: minmax(640px, 1fr);
 }
 
+#vowelTab,
+#consonantTab {
+  grid-template-columns: minmax(640px, 1fr);
+}
+
+.articulation-workspace .tract-analysis {
+  margin-top: 0;
+  padding-top: 0;
+  border-top: 0;
+}
+
+.execution-controls-section .subsection-heading {
+  margin-top: 0;
+}
+
 #outputTab {
   grid-template-columns: minmax(320px, 1fr);
 }
@@ -1198,6 +1213,106 @@ summary {
   border-top: 1px solid var(--line);
 }
 
+.nasal-calibration {
+  margin-top: 18px;
+  padding-top: 14px;
+  border-top: 1px solid var(--line);
+}
+
+.nasal-heading {
+  align-items: end;
+  margin-top: 0;
+}
+
+.nasal-heading > div,
+.nasal-heading label {
+  display: grid;
+  gap: 5px;
+}
+
+.nasal-heading h3 {
+  margin: 0;
+}
+
+.nasal-heading select {
+  min-width: 180px;
+}
+
+.nasal-visual-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.45fr) minmax(250px, 0.55fr);
+  gap: 10px;
+  margin-top: 10px;
+}
+
+#nasalProfileCanvas {
+  display: block;
+  width: 100%;
+  height: auto;
+  aspect-ratio: 38 / 13;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface);
+  cursor: crosshair;
+  touch-action: none;
+}
+
+.nasal-parameter-summary {
+  display: grid;
+  align-content: start;
+  gap: 7px;
+}
+
+.nasal-summary-item {
+  display: grid;
+  gap: 2px;
+  padding: 8px;
+  border-left: 3px solid #36648c;
+  background: #f1efe7;
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.nasal-summary-item strong {
+  color: var(--ink);
+  font-size: 12px;
+}
+
+.nasal-summary-item.warning {
+  border-left-color: #b74636;
+  background: #fff0ed;
+}
+
+.nasal-summary-item.ok {
+  border-left-color: #3f7a55;
+  background: #edf6ef;
+}
+
+.nasal-control-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(150px, 1fr));
+  gap: 10px;
+  margin-top: 12px;
+}
+
+.nasal-control-grid label {
+  display: grid;
+  gap: 5px;
+}
+
+.nasal-control-grid output {
+  color: var(--muted);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+
+.nasal-action-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 12px 0;
+}
+
 .auditory-calibration .subsection-heading {
   margin-top: 0;
 }
@@ -1257,6 +1372,15 @@ summary {
     grid-template-columns: 1fr 1fr;
   }
 
+  .nasal-visual-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .nasal-parameter-summary,
+  .nasal-control-grid {
+    grid-template-columns: repeat(2, minmax(150px, 1fr));
+  }
+
   .tract-edit-toolbar > span,
   .auditory-note-field {
     grid-column: 1 / -1;
@@ -1266,7 +1390,9 @@ summary {
 @media (max-width: 640px) {
   .tract-edit-toolbar,
   .auditory-rating-grid,
-  .auditory-evaluation-entry {
+  .auditory-evaluation-entry,
+  .nasal-control-grid,
+  .nasal-parameter-summary {
     grid-template-columns: 1fr;
   }
 
@@ -1352,6 +1478,8 @@ pre {
   .tab-panel,
   #setupTab,
   #detailTab,
+  #vowelTab,
+  #consonantTab,
   #outputTab,
   #referenceTab,
   .body-preview-row,

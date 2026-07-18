@@ -72,6 +72,10 @@ const state = {
   selectedTractTuningHandle: null,
   selectedSyllableToken: "a",
   auditoryEvaluationLog: [],
+  nasalTuning: {},
+  nasalEvaluationLog: [],
+  nasalPreviewDiagnostics: {},
+  nasalProfileDrag: null,
 };
 
 const referenceData = window.CVL_REFERENCE;
@@ -154,6 +158,20 @@ const executionControls = [
   { key: "phonological_contrast_maturity", label: "Phonological contrast maturity", min: 0.25, max: 1.15, step: 0.01, unit: "" },
 ];
 
+const vowelExecutionControls = executionControls.filter((control) => [
+  "articulatory_range_utilization",
+  "tongue_dorsum_range_utilization",
+  "labial_transverse_range_utilization",
+  "tongue_groove_capacity",
+].includes(control.key));
+
+const consonantExecutionControls = executionControls.filter((control) => [
+  "motor_control_precision",
+  "coarticulation_strength",
+  "motor_control_maturity",
+  "phonological_contrast_maturity",
+].includes(control.key));
+
 const advancedAcousticControls = [
   { key: "glottal_spectral_tilt_db", label: "声門源スペクトル傾斜", min: 4, max: 28, step: 0.1, unit: "dB" },
   { key: "glottal_breathiness", label: "声門源気息成分", min: 0, max: 0.6, step: 0.01, unit: "" },
@@ -234,6 +252,10 @@ const els = {
   bodyFatGuideTable: document.getElementById("bodyFatGuideTable"),
   bodyFatGuideNote: document.getElementById("bodyFatGuideNote"),
   compositionGuideMount: document.getElementById("compositionGuideMount"),
+  vowelExecutionSliders: document.getElementById("vowelExecutionSliders"),
+  consonantExecutionSliders: document.getElementById("consonantExecutionSliders"),
+  vowelCalibrationMount: document.getElementById("vowelCalibrationMount"),
+  consonantCalibrationMount: document.getElementById("consonantCalibrationMount"),
   smokingInput: document.getElementById("smokingInput"),
   exerciseInput: document.getElementById("exerciseInput"),
   dietInput: document.getElementById("dietInput"),
@@ -271,7 +293,6 @@ const els = {
   vocalTractProfileSliders: document.getElementById("vocalTractProfileSliders"),
   glottalPhysiologySliders: document.getElementById("glottalPhysiologySliders"),
   trunkPhysiologySliders: document.getElementById("trunkPhysiologySliders"),
-  executionSliders: document.getElementById("executionSliders"),
   advancedAcousticSliders: document.getElementById("advancedAcousticSliders"),
   glottalPerformanceRanges: document.getElementById("glottalPerformanceRanges"),
   vocalTractPerformanceRanges: document.getElementById("vocalTractPerformanceRanges"),
@@ -307,6 +328,41 @@ const els = {
   recordAuditoryEvaluationBtn: document.getElementById("recordAuditoryEvaluationBtn"),
   auditoryEvaluationVowel: document.getElementById("auditoryEvaluationVowel"),
   auditoryEvaluationHistory: document.getElementById("auditoryEvaluationHistory"),
+  nasalTokenSelect: document.getElementById("nasalTokenSelect"),
+  nasalCalibrationStatus: document.getElementById("nasalCalibrationStatus"),
+  nasalProfileCanvas: document.getElementById("nasalProfileCanvas"),
+  nasalParameterSummary: document.getElementById("nasalParameterSummary"),
+  nasalClosurePositionInput: document.getElementById("nasalClosurePositionInput"),
+  nasalClosurePositionValue: document.getElementById("nasalClosurePositionValue"),
+  nasalClosureAreaInput: document.getElementById("nasalClosureAreaInput"),
+  nasalClosureAreaValue: document.getElementById("nasalClosureAreaValue"),
+  nasalClosureWidthInput: document.getElementById("nasalClosureWidthInput"),
+  nasalClosureWidthValue: document.getElementById("nasalClosureWidthValue"),
+  nasalVpOpeningInput: document.getElementById("nasalVpOpeningInput"),
+  nasalVpOpeningValue: document.getElementById("nasalVpOpeningValue"),
+  nasalPathGainInput: document.getElementById("nasalPathGainInput"),
+  nasalPathGainLabel: document.getElementById("nasalPathGainLabel"),
+  nasalPathGainValue: document.getElementById("nasalPathGainValue"),
+  nasalDampingInput: document.getElementById("nasalDampingInput"),
+  nasalDampingValue: document.getElementById("nasalDampingValue"),
+  nasalDurationInput: document.getElementById("nasalDurationInput"),
+  nasalDurationValue: document.getElementById("nasalDurationValue"),
+  nasalCoarticulationLeadInput: document.getElementById("nasalCoarticulationLeadInput"),
+  nasalCoarticulationLeadValue: document.getElementById("nasalCoarticulationLeadValue"),
+  nasalTransitionInput: document.getElementById("nasalTransitionInput"),
+  nasalTransitionValue: document.getElementById("nasalTransitionValue"),
+  nasalAttackFadeInput: document.getElementById("nasalAttackFadeInput"),
+  nasalAttackFadeValue: document.getElementById("nasalAttackFadeValue"),
+  playUntunedNasalBtn: document.getElementById("playUntunedNasalBtn"),
+  playTunedNasalBtn: document.getElementById("playTunedNasalBtn"),
+  resetNasalTuningBtn: document.getElementById("resetNasalTuningBtn"),
+  nasalClarityInput: document.getElementById("nasalClarityInput"),
+  nasalClarityValue: document.getElementById("nasalClarityValue"),
+  nasalTransitionRatingInput: document.getElementById("nasalTransitionRatingInput"),
+  nasalTransitionRatingValue: document.getElementById("nasalTransitionRatingValue"),
+  nasalNoteInput: document.getElementById("nasalNoteInput"),
+  recordNasalEvaluationBtn: document.getElementById("recordNasalEvaluationBtn"),
+  nasalEvaluationHistory: document.getElementById("nasalEvaluationHistory"),
   ttsOutputLanguageInput: document.getElementById("ttsOutputLanguageInput"),
   syllableSetInput: document.getElementById("syllableSetInput"),
   datasetPrefixInput: document.getElementById("datasetPrefixInput"),
@@ -1813,6 +1869,218 @@ function renderTractRegionSummary(summary, hondaSpace = null, sideBranchGuides =
   }
 }
 
+function buildNasalOralClosureAreaFunction(baseAreaFunction, tuning, options = {}) {
+  const placeGesture = options.placeGesture
+    ?? nasalPlaceGestureModel(tuning, baseAreaFunction.vocal_tract_length_cm);
+  const placeGestureStrength = clamp(options.placeGestureStrength ?? 1, 0, 1);
+  const closureAreaCm2 = clamp(
+    options.closureAreaCm2 ?? tuning.closure_area_cm2,
+    0.006,
+    0.35
+  );
+  const closureWidth = clamp(
+    options.closureWidth ?? tuning.closure_width,
+    0.01,
+    0.24
+  );
+  const areas = baseAreaFunction.areas_cm2.map((area, index) => {
+    const position = baseAreaFunction.areas_cm2.length > 1 ? index / (baseAreaFunction.areas_cm2.length - 1) : 0.5;
+    let gesturedArea = area;
+    if (placeGesture.kind === "coronal_alveolar" && placeGestureStrength > 0) {
+      const bladeDistance = (position - placeGesture.tongue_blade_center_x_over_l)
+        / placeGesture.tongue_blade_spread_x_over_l;
+      const bodyDistance = (position - placeGesture.tongue_body_center_x_over_l)
+        / placeGesture.tongue_body_spread_x_over_l;
+      const bladeWeight = Math.exp(-0.5 * bladeDistance * bladeDistance);
+      const bodyWeight = Math.exp(-0.5 * bodyDistance * bodyDistance);
+      const coronalCompression = clamp(
+        placeGestureStrength * (0.5 * bladeWeight + 0.2 * bodyWeight),
+        0,
+        0.72
+      );
+      gesturedArea = clamp(area * (1 - coronalCompression), 0.045, 14);
+    }
+    const d = (position - tuning.closure_position) / closureWidth;
+    const closureWeight = Math.exp(-0.5 * d * d);
+    return clamp(
+      gesturedArea * (1 - closureWeight) + Math.min(gesturedArea, closureAreaCm2) * closureWeight,
+      0.006,
+      14
+    );
+  });
+  let anchoredClosureIndex = null;
+  if (options.anchorClosureSection && areas.length) {
+    anchoredClosureIndex = clamp(
+      Math.round(tuning.closure_position * Math.max(0, areas.length - 1)),
+      0,
+      areas.length - 1
+    );
+    areas[anchoredClosureIndex] = clamp(
+      Math.min(baseAreaFunction.areas_cm2[anchoredClosureIndex], closureAreaCm2),
+      0.006,
+      14
+    );
+  }
+  const sectionLengthCm = (baseAreaFunction.vocal_tract_length_cm ?? 15.5)
+    / Math.max(1, areas.length);
+  const vpIndex = Math.round(placeGesture.vp_junction_position * Math.max(0, areas.length - 1));
+  const contactIndex = anchoredClosureIndex
+    ?? Math.round(tuning.closure_position * Math.max(0, areas.length - 1));
+  const oralSideVolumeCm3 = areas
+    .slice(Math.min(vpIndex, contactIndex), Math.max(vpIndex, contactIndex) + 1)
+    .reduce((sum, area) => sum + area * sectionLengthCm, 0);
+  return {
+    schema_version: "nasal_oral_closure_area_0.3",
+    closure_position: tuning.closure_position,
+    closure_area_cm2: closureAreaCm2,
+    closure_width: closureWidth,
+    anchored_closure_index: anchoredClosureIndex,
+    place_gesture: placeGesture,
+    place_gesture_strength: Number(placeGestureStrength.toFixed(4)),
+    oral_side_volume_cm3: Number(oralSideVolumeCm3.toFixed(4)),
+    areas_cm2: areas.map((area) => Number(area.toFixed(4))),
+  };
+}
+
+function drawNasalProfile() {
+  const canvas = els.nasalProfileCanvas;
+  if (!canvas) return;
+  const ctx = canvas.getContext("2d");
+  const width = canvas.width;
+  const height = canvas.height;
+  ctx.clearRect(0, 0, width, height);
+  ctx.fillStyle = "#fffdf8";
+  ctx.fillRect(0, 0, width, height);
+  const geometry = state.vocalTractGeometry ?? buildVocalTractGeometry();
+  if (!geometry?.sections?.length) return;
+  const token = selectedNasalToken();
+  const parsed = parseSyllableToken(token);
+  const tuning = normalizedNasalTuning(nasalClassFromToken(token));
+  const baseArea = buildTubeAreaFunction(geometry, parsed.vowel, PREVIEW_SAMPLE_RATE);
+  const closure = buildNasalOralClosureAreaFunction(baseArea, tuning);
+  const plot = { left: 46, right: width - 18, top: 28, bottom: height - 72 };
+  const closureBand = { top: height - 51, bottom: height - 20 };
+  const maxValue = Math.max(6, ...baseArea.areas_cm2) * 1.06;
+  const xAt = (position) => plot.left + position * (plot.right - plot.left);
+  const yAt = (value) => plot.bottom - value / maxValue * (plot.bottom - plot.top);
+  state.nasalProfilePlot = { plot, closureBand, maxValue };
+
+  for (const region of tractRegions) {
+    ctx.fillStyle = region.color;
+    ctx.fillRect(xAt(region.start), plot.top, xAt(Math.min(1, region.end)) - xAt(region.start), plot.bottom - plot.top);
+    ctx.fillStyle = "#4e4a42";
+    ctx.font = "11px Segoe UI";
+    ctx.textAlign = "center";
+    ctx.fillText(region.label, (xAt(region.start) + xAt(Math.min(1, region.end))) / 2, 18);
+  }
+  ctx.strokeStyle = "rgba(184,177,163,0.42)";
+  ctx.lineWidth = 1;
+  for (let tick = 0; tick <= 3; tick++) {
+    const value = maxValue * tick / 3;
+    const y = yAt(value);
+    ctx.beginPath();
+    ctx.moveTo(plot.left, y);
+    ctx.lineTo(plot.right, y);
+    ctx.stroke();
+    ctx.fillStyle = "#666257";
+    ctx.textAlign = "right";
+    ctx.fillText(value.toFixed(1), plot.left - 7, y + 4);
+  }
+  const asSections = (areas, key) => areas.map((area, index) => ({
+    position: areas.length > 1 ? index / (areas.length - 1) : 0.5,
+    [key]: area,
+  }));
+  drawProfileLine(ctx, asSections(baseArea.areas_cm2, "area"), "area", "rgba(138,84,47,0.38)", xAt, yAt, 2);
+  drawProfileLine(ctx, asSections(closure.areas_cm2, "area"), "area", "#36648c", xAt, yAt, 3);
+  const closureX = xAt(tuning.closure_position);
+  ctx.strokeStyle = "rgba(185,71,47,0.65)";
+  ctx.setLineDash([4, 4]);
+  ctx.beginPath();
+  ctx.moveTo(closureX, plot.top);
+  ctx.lineTo(closureX, plot.bottom);
+  ctx.stroke();
+  ctx.setLineDash([]);
+
+  ctx.fillStyle = "#f1efe7";
+  ctx.fillRect(plot.left, closureBand.top, plot.right - plot.left, closureBand.bottom - closureBand.top);
+  ctx.strokeStyle = "#b8b1a3";
+  ctx.strokeRect(plot.left, closureBand.top, plot.right - plot.left, closureBand.bottom - closureBand.top);
+  const areaFraction = (tuning.closure_area_cm2 - NASAL_TUNING_FIELDS.closure_area_cm2.min)
+    / (NASAL_TUNING_FIELDS.closure_area_cm2.max - NASAL_TUNING_FIELDS.closure_area_cm2.min);
+  const handleY = closureBand.bottom - clamp(areaFraction, 0, 1) * (closureBand.bottom - closureBand.top);
+  ctx.fillStyle = "#fffdf8";
+  ctx.strokeStyle = "#b9472f";
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  ctx.arc(closureX, handleY, 7, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.stroke();
+  ctx.fillStyle = "#666257";
+  ctx.font = "11px Segoe UI";
+  ctx.textAlign = "left";
+  ctx.fillText("閉鎖位置 x/L・残存面積（拡大）", plot.left + 8, closureBand.top + 13);
+  drawChartLegend(ctx, [
+    [`/${parsed.vowel}/ 母音A(x)`, "rgba(138,84,47,0.72)"],
+    ["鼻音閉鎖A(x)", "#36648c"],
+  ], plot.right - 250, plot.top + 12);
+}
+
+function updateNasalProfileFromPointer(event) {
+  const meta = state.nasalProfilePlot;
+  if (!meta) return;
+  const point = canvasPoint(event, els.nasalProfileCanvas);
+  const tuningClass = nasalClassFromToken(selectedNasalToken());
+  const position = (clamp(point.x, meta.plot.left, meta.plot.right) - meta.plot.left) / (meta.plot.right - meta.plot.left);
+  setNasalTuningValue(tuningClass, "closure_position", position);
+  if (point.y >= meta.closureBand.top - 12) {
+    const fraction = (meta.closureBand.bottom - clamp(point.y, meta.closureBand.top, meta.closureBand.bottom))
+      / (meta.closureBand.bottom - meta.closureBand.top);
+    const definition = NASAL_TUNING_FIELDS.closure_area_cm2;
+    setNasalTuningValue(tuningClass, "closure_area_cm2", definition.min + fraction * (definition.max - definition.min));
+  }
+  renderNasalCalibration();
+  renderConstraints();
+  draw();
+}
+
+function handleNasalProfilePointerDown(event) {
+  state.nasalProfileDrag = { pointerId: event.pointerId };
+  els.nasalProfileCanvas.setPointerCapture?.(event.pointerId);
+  updateNasalProfileFromPointer(event);
+  event.preventDefault();
+}
+
+function handleNasalProfilePointerMove(event) {
+  if (!state.nasalProfileDrag) return;
+  updateNasalProfileFromPointer(event);
+  event.preventDefault();
+}
+
+function handleNasalProfilePointerUp(event) {
+  if (!state.nasalProfileDrag) return;
+  els.nasalProfileCanvas.releasePointerCapture?.(event.pointerId);
+  state.nasalProfileDrag = null;
+  renderConstraints();
+  event.preventDefault();
+}
+
+function handleNasalProfileKeyDown(event) {
+  const tuningClass = nasalClassFromToken(selectedNasalToken());
+  const tuning = normalizedNasalTuning(tuningClass);
+  const amount = event.shiftKey ? 0.025 : 0.005;
+  if (event.key === "ArrowLeft" || event.key === "ArrowRight") {
+    setNasalTuningValue(tuningClass, "closure_position", tuning.closure_position + (event.key === "ArrowRight" ? amount : -amount));
+  } else if (event.key === "ArrowUp" || event.key === "ArrowDown") {
+    setNasalTuningValue(tuningClass, "closure_area_cm2", tuning.closure_area_cm2 + (event.key === "ArrowUp" ? amount : -amount));
+  } else {
+    return;
+  }
+  renderNasalCalibration();
+  renderConstraints();
+  draw();
+  event.preventDefault();
+}
+
 function draw() {
   const bodyImageCtx = els.bodyImageCanvas.getContext("2d");
   drawImage(bodyImageCtx, state.images.body, "\u5168\u8eab\u6b63\u9762\u753b\u50cf\u3092\u8aad\u307f\u8fbc\u307f");
@@ -1837,6 +2105,7 @@ function draw() {
   drawCursorGuide(vocalTractCtx, "profile", state.profileDrag, state.profileCursor);
   drawTractProfile(state.vocalTractGeometry ?? liveGeometry);
   drawTractCrossSectionProfile(state.vocalTractGeometry ?? liveGeometry);
+  drawNasalProfile();
 }
 
 // Legacy extraction helpers are kept for future comparison experiments; the current UI is manual-only.
@@ -3726,7 +3995,8 @@ function renderDetailControls() {
   renderSliderGroup(els.vocalTractProfileSliders, vocalTractProfileControls);
   renderSliderGroup(els.glottalPhysiologySliders, glottalPhysiologyControls);
   renderSliderGroup(els.trunkPhysiologySliders, trunkPhysiologyControls);
-  renderSliderGroup(els.executionSliders, executionControls);
+  renderSliderGroup(els.vowelExecutionSliders, vowelExecutionControls);
+  renderSliderGroup(els.consonantExecutionSliders, consonantExecutionControls);
   renderSliderGroup(els.advancedAcousticSliders, advancedAcousticControls);
   renderPerformanceRangeEditors();
 }
@@ -4230,6 +4500,10 @@ function renderSyllableDatasetPreview() {
       item.setAttribute("aria-pressed", token === state.selectedSyllableToken ? "true" : "false");
       item.addEventListener("click", () => {
         state.selectedSyllableToken = token;
+        if (["m", "n"].includes(parseSyllableToken(token).consonant) || token === "n") {
+          if (els.nasalTokenSelect) els.nasalTokenSelect.value = token;
+          renderNasalCalibration();
+        }
         renderSyllableDatasetPreview();
       });
       els.syllableTokenList.appendChild(item);
@@ -4595,6 +4869,8 @@ function buildExport() {
     vowel_area_tuning: exportVowelAreaTuning(),
     vowel_width_tuning: exportVowelWidthTuning(),
     auditory_evaluation_log: state.auditoryEvaluationLog,
+    nasal_articulation_tuning: exportNasalTuning(),
+    nasal_auditory_evaluation_log: state.nasalEvaluationLog,
     voice_constraints: withoutRetiredConstraints(state.constraints),
     constraint_overrides: withoutReadOnlyDerivedOverrides(withoutRetiredConstraints(state.constraintOverrides)),
     performance_range_overrides: withoutReadOnlyDerivedOverrides(withoutRetiredConstraints(state.performanceRangeOverrides)),
@@ -4651,7 +4927,7 @@ function setActiveTab(tabId) {
     panel.classList.toggle("active", active);
     panel.hidden = !active;
   }
-  if (els.floatingPreviewDock) els.floatingPreviewDock.hidden = tabId !== "detailTab";
+  if (els.floatingPreviewDock) els.floatingPreviewDock.hidden = tabId !== "vowelTab";
   draw();
 }
 
@@ -4875,6 +5151,164 @@ const SYLLABLE_SETS = Object.freeze({
     "wa", "wo", "n",
   ],
 });
+
+const NASAL_TUNING_FIELDS = Object.freeze({
+  closure_position: { min: 0.42, max: 0.99, step: 0.005 },
+  closure_area_cm2: { min: 0.006, max: 0.35, step: 0.001 },
+  closure_width: { min: 0.02, max: 0.16, step: 0.005 },
+  velopharyngeal_opening: { min: 0.2, max: 1, step: 0.01 },
+  nasal_path_gain: { min: 0.35, max: 1.4, step: 0.01 },
+  branch_damping: { min: 0.3, max: 1.4, step: 0.01 },
+  hold_duration_ms: { min: 45, max: 240, step: 1 },
+  coarticulation_lead_ms: { min: 0, max: 60, step: 1 },
+  transition_ms: { min: 15, max: 130, step: 1 },
+  attack_fade_ms: { min: 0, max: 30, step: 1 },
+});
+
+const NASAL_DEFAULTS = Object.freeze({
+  m: Object.freeze({
+    label: "両唇鼻音 /m/",
+    closure_position: 0.975,
+    closure_area_cm2: 0.008,
+    closure_width: 0.035,
+    velopharyngeal_opening: 0.88,
+    nasal_path_gain: 0.92,
+    branch_damping: 0.72,
+    hold_duration_ms: 52,
+    coarticulation_lead_ms: 24,
+    transition_ms: 22,
+    attack_fade_ms: 15,
+  }),
+  n: Object.freeze({
+    label: "歯茎鼻音 /n/",
+    closure_position: 0.88,
+    closure_area_cm2: 0.008,
+    closure_width: 0.05,
+    velopharyngeal_opening: 0.86,
+    nasal_path_gain: 0.9,
+    branch_damping: 0.74,
+    hold_duration_ms: 50,
+    coarticulation_lead_ms: 22,
+    transition_ms: 20,
+    attack_fade_ms: 15,
+  }),
+  N: Object.freeze({
+    label: "撥音 /N/（後続音未指定）",
+    closure_position: 0.64,
+    closure_area_cm2: 0.08,
+    closure_width: 0.085,
+    velopharyngeal_opening: 0.9,
+    nasal_path_gain: 0.96,
+    branch_damping: 0.8,
+    hold_duration_ms: 170,
+    coarticulation_lead_ms: 0,
+    transition_ms: 64,
+    attack_fade_ms: 12,
+  }),
+});
+
+function nasalClassFromToken(token) {
+  const normalized = String(token || "ma").toLowerCase();
+  if (normalized === "n") return "N";
+  if (normalized.startsWith("m")) return "m";
+  return "n";
+}
+
+function selectedNasalToken() {
+  return String(els.nasalTokenSelect?.value || "ma");
+}
+
+function normalizedNasalTuning(nasalClass, manualTuning = true) {
+  const key = NASAL_DEFAULTS[nasalClass] ? nasalClass : "m";
+  const defaults = NASAL_DEFAULTS[key];
+  const saved = manualTuning && state.nasalTuning?.[key] ? state.nasalTuning[key] : {};
+  const tuning = { nasal_class: key, label: defaults.label };
+  for (const [field, definition] of Object.entries(NASAL_TUNING_FIELDS)) {
+    const value = Number(saved[field]);
+    const fallback = defaults[field];
+    const rounded = definition.step >= 1 ? Math.round(Number.isFinite(value) ? value : fallback) : Number((Number.isFinite(value) ? value : fallback).toFixed(4));
+    tuning[field] = clamp(rounded, definition.min, definition.max);
+  }
+  return tuning;
+}
+
+function setNasalTuningValue(nasalClass, field, value) {
+  const definition = NASAL_TUNING_FIELDS[field];
+  if (!definition) return;
+  const current = normalizedNasalTuning(nasalClass);
+  const numeric = clamp(Number(value), definition.min, definition.max);
+  current[field] = definition.step >= 1 ? Math.round(numeric) : Number(numeric.toFixed(4));
+  const { nasal_class, label, ...saved } = current;
+  state.nasalTuning = { ...(state.nasalTuning ?? {}), [nasalClass]: saved };
+  state.nasalPreviewDiagnostics = {};
+  state.lastWav = null;
+}
+
+function resetNasalTuning(nasalClass = nasalClassFromToken(selectedNasalToken())) {
+  const next = { ...(state.nasalTuning ?? {}) };
+  delete next[nasalClass];
+  state.nasalTuning = next;
+  state.nasalPreviewDiagnostics = {};
+  state.lastWav = null;
+  renderNasalCalibration();
+  renderConstraints();
+  draw();
+}
+
+function exportNasalTuning() {
+  const profiles = {};
+  for (const nasalClass of Object.keys(NASAL_DEFAULTS)) {
+    if (!state.nasalTuning?.[nasalClass]) continue;
+    profiles[nasalClass] = normalizedNasalTuning(nasalClass);
+  }
+  return {
+    schema_version: "nasal_articulation_tuning_0.4",
+    position_axis: "normalized glottis-to-lips distance x/L",
+    parameter_semantics: {
+      closure_position: "oral closure location along the vowel area function",
+      closure_area_cm2: "residual oral area at maximum closure",
+      closure_width: "longitudinal spread of the closure gesture",
+      velopharyngeal_opening: "dynamic nasal-port opening during the consonant",
+      nasal_path_gain: "nostril-radiation efficiency scale; velopharyngeal_opening controls branch admittance independently",
+      branch_damping: "frequency-dependent nasal-path wall and viscothermal loss control",
+      hold_duration_ms: "oral-release anchor measured from nasal onset",
+      coarticulation_lead_ms: "time before oral release when the closed internal oral tract begins moving toward the following vowel",
+      transition_ms: "duration from oral-release anchor to full following-vowel target",
+      attack_fade_ms: "half-cosine output fade that suppresses initial waveguide transients",
+    },
+    profiles,
+  };
+}
+
+function normalizeLoadedNasalTuning(data) {
+  const source = data?.profiles ?? data;
+  const directClosureAreaSchema = data?.schema_version === "nasal_articulation_tuning_0.4";
+  const next = {};
+  if (!source || typeof source !== "object") return next;
+  for (const nasalClass of Object.keys(NASAL_DEFAULTS)) {
+    if (!source[nasalClass] || typeof source[nasalClass] !== "object") continue;
+    const profileSource = { ...source[nasalClass] };
+    if (nasalClass === "n" && !directClosureAreaSchema && Number.isFinite(Number(profileSource.closure_area_cm2))) {
+      profileSource.closure_area_cm2 = clamp(Number(profileSource.closure_area_cm2) * 0.2, 0.006, 0.025);
+    }
+    const normalized = normalizedNasalTuningFromSource(nasalClass, profileSource);
+    const { nasal_class, label, ...saved } = normalized;
+    next[nasalClass] = saved;
+  }
+  return next;
+}
+
+function normalizedNasalTuningFromSource(nasalClass, source) {
+  const defaults = NASAL_DEFAULTS[nasalClass];
+  const tuning = { nasal_class: nasalClass, label: defaults.label };
+  for (const [field, definition] of Object.entries(NASAL_TUNING_FIELDS)) {
+    const value = Number(source?.[field]);
+    const fallback = defaults[field];
+    const clamped = clamp(Number.isFinite(value) ? value : fallback, definition.min, definition.max);
+    tuning[field] = definition.step >= 1 ? Math.round(clamped) : Number(clamped.toFixed(4));
+  }
+  return tuning;
+}
 
 function selectedVowel() {
   return vowelFormants[els.vowelSelect.value] ? els.vowelSelect.value : "a";
@@ -5631,6 +6065,72 @@ function smoothAreaSeries(values, passes = 1) {
   return current;
 }
 
+function synthesizeTubeSourceSamples(options) {
+  const sampleCount = Math.max(1, Math.round(options.sampleCount ?? 1));
+  const sampleRate = Math.max(8000, options.sampleRate ?? PREVIEW_SAMPLE_RATE);
+  const out = new Float32Array(sampleCount);
+  if (options.sourceMode === "impulse") {
+    out[0] = options.impulseAmplitude ?? 1;
+    return out;
+  }
+
+  const inflammation = options.inflammation ?? 0;
+  const lumenNarrowing = options.lumenNarrowing ?? 0;
+  const tension = options.tension ?? 1;
+  const respiratorySupport = options.respiratorySupport ?? 1;
+  const effectiveClosure = options.effectiveClosure ?? 0.55;
+  const precision = clamp(options.motorControlPrecision ?? 1, 0.15, 1.4);
+  const glottalParams = options.glottalParams
+    ?? currentGlottalSourceParams({}, tension, inflammation, lumenNarrowing);
+  const aspirationNoiseScale = clamp(options.aspirationNoiseScale ?? 1, 0, 1);
+  const sourceAttackSeconds = Math.max(0, options.sourceAttackSeconds ?? 0.08);
+  const sourceReleaseSeconds = Math.max(0, options.sourceReleaseSeconds ?? (0.1 + respiratorySupport * 0.05));
+  const sampleRateNoiseScale = Math.sqrt(PREVIEW_REFERENCE_SAMPLE_RATE / sampleRate);
+  const tiltAlpha = glottalTiltAlpha(sampleRate, glottalParams.spectral_tilt_db);
+  const glottalSourceState = { lastRawFlow: 0, smoothedFlow: 0, lastSmoothedFlow: 0 };
+  let glottalTiltState = 0;
+  let phase = 0;
+  let seed = 1;
+
+  for (let sampleIndex = 0; sampleIndex < sampleCount; sampleIndex++) {
+    const t = sampleIndex / sampleRate;
+    const attackEnvelope = sourceAttackSeconds > 0 ? t / sourceAttackSeconds : 1;
+    const releaseEnvelope = sourceReleaseSeconds > 0 ? (sampleCount / sampleRate - t) / sourceReleaseSeconds : 1;
+    const env = clamp(Math.min(1, attackEnvelope, releaseEnvelope), 0, 1);
+    const instability = inflammation * 0.004 + Math.max(0, 1 - precision) * 0.006;
+    const jitterFraction = Math.sin(Math.PI * 2 * t * (4.1 + tension * 1.7)) * instability;
+    phase += ((options.f0 ?? 165) * (1 + jitterFraction)) / sampleRate;
+    phase -= Math.floor(phase);
+    const glottalFlow = lfLikeGlottalFlow(phase, glottalParams);
+    seed = (seed * 1664525 + 1013904223) >>> 0;
+    const noise = ((seed / 0xffffffff) * 2 - 1)
+      * (glottalParams.breathiness + (1 - effectiveClosure) * 0.04 + inflammation * 0.04 + lumenNarrowing * 0.03)
+      * sampleRateNoiseScale
+      * aspirationNoiseScale;
+    const pressureDrive = Math.min(
+      1.35,
+      ((options.pressure ?? 900) / 900) * (0.86 + respiratorySupport * 0.14) * (1 - lumenNarrowing * 0.18)
+    );
+    const sourceSample = glottalVolumeVelocitySample(
+      glottalFlow,
+      glottalSourceState,
+      glottalParams,
+      effectiveClosure,
+      noise,
+      0.62,
+      { sampleRate }
+    );
+    glottalTiltState += tiltAlpha * (sourceSample - glottalTiltState);
+    out[sampleIndex] = glottalTiltState * env * pressureDrive * 0.145;
+  }
+  return out;
+}
+
+function smoothstep01(value) {
+  const t = clamp(value, 0, 1);
+  return t * t * (3 - 2 * t);
+}
+
 function synthesizeKellyLochbaumTube(areas, options) {
   const count = Math.max(3, areas.length);
   const sampleCount = options.sampleCount;
@@ -5641,62 +6141,99 @@ function synthesizeKellyLochbaumTube(areas, options) {
   let nextRight = new Float32Array(count + 1);
   let nextLeft = new Float32Array(count + 1);
   const reflections = new Float32Array(count);
-  for (let index = 1; index < count; index++) {
-    const a0 = Math.max(0.04, areas[index - 1]);
-    const a1 = Math.max(0.04, areas[index]);
-    reflections[index] = clamp((a0 - a1) / (a0 + a1), -0.94, 0.94);
-  }
-  const lipArea = areas[count - 1] ?? 1;
-  const lipReflection = clamp(-0.92 + Math.min(0.2, lipArea * 0.022), -0.93, -0.66);
+  const areaTrajectory = options.areaTrajectory;
+  const trajectoryStartAreas = areaTrajectory?.start_areas_cm2;
+  const trajectoryEndAreas = areaTrajectory?.end_areas_cm2;
+  const trajectoryKeyframes = Array.isArray(areaTrajectory?.keyframes)
+    ? areaTrajectory.keyframes
+      .filter((keyframe) => Array.isArray(keyframe?.areas_cm2) && keyframe.areas_cm2.length >= count)
+      .map((keyframe) => ({
+        sample: clamp(Math.round(keyframe.sample ?? 0), 0, Math.max(0, sampleCount - 1)),
+        areas_cm2: keyframe.areas_cm2,
+      }))
+      .sort((a, b) => a.sample - b.sample)
+    : [];
+  const hasKeyframeTrajectory = trajectoryKeyframes.length >= 2;
+  const hasLinearTrajectory = Array.isArray(trajectoryStartAreas)
+    && Array.isArray(trajectoryEndAreas)
+    && trajectoryStartAreas.length >= count
+    && trajectoryEndAreas.length >= count;
+  const hasAreaTrajectory = hasKeyframeTrajectory || hasLinearTrajectory;
+  const trajectoryStartSample = hasLinearTrajectory
+    ? clamp(Math.round(areaTrajectory.start_sample ?? 0), 0, Math.max(0, sampleCount - 1))
+    : 0;
+  const trajectoryEndSample = hasLinearTrajectory
+    ? clamp(Math.round(areaTrajectory.end_sample ?? sampleCount - 1), trajectoryStartSample + 1, Math.max(trajectoryStartSample + 1, sampleCount - 1))
+    : 0;
+  const activeAreas = hasAreaTrajectory ? new Float32Array(count) : areas;
+  let lipReflection = -0.8;
+  let meanArea = 1;
+  const updateTubeGeometry = (sampleIndex = 0) => {
+    if (hasKeyframeTrajectory) {
+      let leftKeyframe = trajectoryKeyframes[0];
+      let rightKeyframe = trajectoryKeyframes[trajectoryKeyframes.length - 1];
+      for (let index = 1; index < trajectoryKeyframes.length; index++) {
+        if (sampleIndex <= trajectoryKeyframes[index].sample) {
+          rightKeyframe = trajectoryKeyframes[index];
+          leftKeyframe = trajectoryKeyframes[index - 1];
+          break;
+        }
+        leftKeyframe = trajectoryKeyframes[index];
+      }
+      const progress = smoothstep01(
+        (sampleIndex - leftKeyframe.sample) / Math.max(1, rightKeyframe.sample - leftKeyframe.sample)
+      );
+      for (let index = 0; index < count; index++) {
+        const start = Math.max(0.012, leftKeyframe.areas_cm2[index]);
+        const end = Math.max(0.012, rightKeyframe.areas_cm2[index]);
+        activeAreas[index] = start + (end - start) * progress;
+      }
+    } else if (hasLinearTrajectory) {
+      const progress = clamp(
+        (sampleIndex - trajectoryStartSample) / Math.max(1, trajectoryEndSample - trajectoryStartSample),
+        0,
+        1
+      );
+      for (let index = 0; index < count; index++) {
+        const start = Math.max(0.012, trajectoryStartAreas[index]);
+        const end = Math.max(0.012, trajectoryEndAreas[index]);
+        activeAreas[index] = start + (end - start) * progress;
+      }
+    }
+    for (let index = 1; index < count; index++) {
+      const a0 = Math.max(0.04, activeAreas[index - 1]);
+      const a1 = Math.max(0.04, activeAreas[index]);
+      reflections[index] = clamp((a0 - a1) / (a0 + a1), -0.94, 0.94);
+    }
+    const lipArea = activeAreas[count - 1] ?? 1;
+    lipReflection = clamp(-0.92 + Math.min(0.2, lipArea * 0.022), -0.93, -0.66);
+    let areaSum = 0;
+    for (let index = 0; index < count; index++) areaSum += Math.max(0.05, activeAreas[index]);
+    meanArea = areaSum / count;
+  };
+  updateTubeGeometry(0);
   const glottalReflection = clamp(0.64 + options.effectiveClosure * 0.3 - options.inflammation * 0.06, 0.52, 0.96);
-  const glottalParams = options.glottalParams ?? currentGlottalSourceParams({}, options.tension, options.inflammation, options.lumenNarrowing);
-  const aspirationNoiseScale = clamp(options.aspirationNoiseScale ?? 1, 0, 1);
   const lossParams = options.lossParams ?? currentTubeLossParams({}, options.lumenNarrowing, options.inflammation);
   const lossModel = options.lossModel ?? buildTubeDistributedLossModel(lossParams, sampleRate, count);
   const damping = lossModel.per_section_gain;
-  const precision = clamp(options.motorControlPrecision ?? 1, 0.15, 1.4);
-  const tiltAlpha = glottalTiltAlpha(sampleRate, glottalParams.spectral_tilt_db);
-  const meanArea = areas.reduce((sum, area) => sum + Math.max(0.05, area), 0) / Math.max(1, areas.length);
   const complianceBaseMix = lossModel.wall_memory_mix;
   const complianceRelaxation = lossModel.wall_memory_relaxation;
   const wallRight = new Float32Array(count + 1);
   const wallLeft = new Float32Array(count + 1);
-  let phase = 0;
-  let seed = 1;
-  const glottalSourceState = { lastRawFlow: 0, smoothedFlow: 0, lastSmoothedFlow: 0 };
-  let glottalTiltState = 0;
   let lastMouthFlow = 0;
   let lastOutput = 0;
   let radiationSmoothState = 0;
-  const sampleRateNoiseScale = Math.sqrt(PREVIEW_REFERENCE_SAMPLE_RATE / sampleRate);
   const radiationAlpha = sampleRateAdjustedAlpha(clamp(1 - lossParams.lip_radiation_smoothing, 0.08, 1), sampleRate);
   const radiationMemory = sampleRateAdjustedPole(clamp(0.985 - lossParams.high_frequency_damping * 0.12, 0.82, 0.99), sampleRate);
   const outputMemory = sampleRateAdjustedPole(clamp(0.12 + lossParams.high_frequency_damping * 0.12, 0.08, 0.28), sampleRate);
-  const impulseMode = options.sourceMode === "impulse";
+  const sourceSamples = options.sourceSamples?.length >= sampleCount
+    ? options.sourceSamples
+    : synthesizeTubeSourceSamples(options);
   for (let sampleIndex = 0; sampleIndex < sampleCount; sampleIndex++) {
+    if (hasAreaTrajectory) updateTubeGeometry(sampleIndex);
     nextRight.fill(0);
     nextLeft.fill(0);
-    let source;
-    if (impulseMode) {
-      source = sampleIndex === 0 ? (options.impulseAmplitude ?? 1) : 0;
-    } else {
-      const t = sampleIndex / sampleRate;
-      const env = Math.min(1, t / 0.08, (sampleCount / sampleRate - t) / (0.1 + options.respiratorySupport * 0.05));
-      const instability = options.inflammation * 0.004 + Math.max(0, 1 - precision) * 0.006;
-      const jitterFraction = Math.sin(Math.PI * 2 * t * (4.1 + options.tension * 1.7)) * instability;
-      phase += (options.f0 * (1 + jitterFraction)) / sampleRate;
-      phase -= Math.floor(phase);
-      const glottalFlow = lfLikeGlottalFlow(phase, glottalParams);
-      seed = (seed * 1664525 + 1013904223) >>> 0;
-      const noise = ((seed / 0xffffffff) * 2 - 1)
-        * (glottalParams.breathiness + (1 - options.effectiveClosure) * 0.04 + options.inflammation * 0.04 + options.lumenNarrowing * 0.03)
-        * sampleRateNoiseScale
-        * aspirationNoiseScale;
-      const pressureDrive = Math.min(1.35, (options.pressure / 900) * (0.86 + options.respiratorySupport * 0.14) * (1 - options.lumenNarrowing * 0.18));
-      const sourceSample = glottalVolumeVelocitySample(glottalFlow, glottalSourceState, glottalParams, options.effectiveClosure, noise, 0.62, { sampleRate });
-      glottalTiltState += tiltAlpha * (sourceSample - glottalTiltState);
-      source = glottalTiltState * env * pressureDrive * 0.145;
-    }
+    const source = sourceSamples[sampleIndex] ?? 0;
     nextRight[1] += (source + glottalReflection * left[0]) * damping;
     const mouthFlow = (1 - lipReflection) * right[count];
     nextLeft[count - 1] += lipReflection * right[count] * damping;
@@ -5708,7 +6245,7 @@ function synthesizeKellyLochbaumTube(areas, options) {
       nextLeft[junction - 1] += (r * rin + (1 - r) * lin) * junctionLoss;
       nextRight[junction + 1] += ((1 + r) * rin - r * lin) * junctionLoss;
     }
-    applyWallComplianceToTubeState(nextRight, nextLeft, wallRight, wallLeft, areas, meanArea, complianceBaseMix, complianceRelaxation);
+    applyWallComplianceToTubeState(nextRight, nextLeft, wallRight, wallLeft, activeAreas, meanArea, complianceBaseMix, complianceRelaxation);
     radiationSmoothState += radiationAlpha * (mouthFlow - radiationSmoothState);
     const radiated = (radiationSmoothState - lastMouthFlow * radiationMemory) + lastOutput * outputMemory;
     lastMouthFlow = radiationSmoothState;
@@ -5723,6 +6260,315 @@ function synthesizeKellyLochbaumTube(areas, options) {
   }
   applyTubeOutputConditioning(out, sampleRate, lossParams);
   return out;
+}
+
+function synthesizeBranchedNasalOralTube(oralAreas, nasalAreas, options) {
+  const oralCount = Math.max(4, oralAreas.length);
+  const nasalCount = Math.max(3, nasalAreas.length);
+  const sampleCount = Math.max(1, Math.round(options.sampleCount ?? 1));
+  const sampleRate = Math.max(8000, options.sampleRate ?? PREVIEW_SAMPLE_RATE);
+  const vpJunction = clamp(
+    Math.round((oralCount - 1) * clamp(options.vpJunctionPosition ?? 0.34, 0.12, 0.72)),
+    2,
+    oralCount - 2
+  );
+  const requestedContactJunction = Number.isFinite(Number(options.oralContactPosition))
+    ? clamp(
+      Math.round((oralCount - 1) * clamp(Number(options.oralContactPosition), 0, 1)),
+      vpJunction + 1,
+      oralCount - 1
+    )
+    : -1;
+  const out = new Float32Array(sampleCount);
+  const oralRadiation = new Float32Array(sampleCount);
+  const nasalRadiation = new Float32Array(sampleCount);
+  let oralRight = new Float32Array(oralCount + 1);
+  let oralLeft = new Float32Array(oralCount + 1);
+  let nextOralRight = new Float32Array(oralCount + 1);
+  let nextOralLeft = new Float32Array(oralCount + 1);
+  let nasalRight = new Float32Array(nasalCount + 1);
+  let nasalLeft = new Float32Array(nasalCount + 1);
+  let nextNasalRight = new Float32Array(nasalCount + 1);
+  let nextNasalLeft = new Float32Array(nasalCount + 1);
+  const oralReflections = new Float32Array(oralCount);
+  const nasalReflections = new Float32Array(nasalCount);
+  const activeOralAreas = Float32Array.from(oralAreas, (area) => Math.max(0.006, area));
+  const activeNasalAreas = Float32Array.from(nasalAreas, (area) => Math.max(0.012, area));
+  const oralTrajectory = Array.isArray(options.areaTrajectory?.keyframes)
+    ? options.areaTrajectory.keyframes
+      .filter((keyframe) => Array.isArray(keyframe?.areas_cm2) && keyframe.areas_cm2.length >= oralCount)
+      .map((keyframe) => ({
+        sample: clamp(Math.round(keyframe.sample ?? 0), 0, Math.max(0, sampleCount - 1)),
+        areas_cm2: keyframe.areas_cm2,
+      }))
+      .sort((a, b) => a.sample - b.sample)
+    : [];
+  const vpTrajectory = Array.isArray(options.velopharyngealAreaTrajectory?.keyframes)
+    ? options.velopharyngealAreaTrajectory.keyframes
+      .filter((keyframe) => Number.isFinite(Number(keyframe?.area_cm2)))
+      .map((keyframe) => ({
+        sample: clamp(Math.round(keyframe.sample ?? 0), 0, Math.max(0, sampleCount - 1)),
+        area_cm2: Math.max(0.008, Number(keyframe.area_cm2)),
+      }))
+      .sort((a, b) => a.sample - b.sample)
+    : [];
+  const interpolateKeyframes = (keyframes, sampleIndex, valueAt) => {
+    if (!keyframes.length) return null;
+    let leftKeyframe = keyframes[0];
+    let rightKeyframe = keyframes[keyframes.length - 1];
+    for (let index = 1; index < keyframes.length; index++) {
+      if (sampleIndex <= keyframes[index].sample) {
+        rightKeyframe = keyframes[index];
+        leftKeyframe = keyframes[index - 1];
+        break;
+      }
+      leftKeyframe = keyframes[index];
+    }
+    const progress = smoothstep01(
+      (sampleIndex - leftKeyframe.sample) / Math.max(1, rightKeyframe.sample - leftKeyframe.sample)
+    );
+    const start = valueAt(leftKeyframe);
+    return start + (valueAt(rightKeyframe) - start) * progress;
+  };
+  let vpPortArea = Math.max(0.008, options.velopharyngealPortAreaCm2 ?? activeNasalAreas[0]);
+  let lipReflection = -0.8;
+  let noseReflection = -0.78;
+  let oralMeanArea = 1;
+  let nasalMeanArea = 1;
+  let oralContactJunction = -1;
+  let oralContactStrength = 0;
+  let peakOralContactStrength = 0;
+  const updateGeometry = (sampleIndex) => {
+    if (oralTrajectory.length >= 2) {
+      let leftKeyframe = oralTrajectory[0];
+      let rightKeyframe = oralTrajectory[oralTrajectory.length - 1];
+      for (let index = 1; index < oralTrajectory.length; index++) {
+        if (sampleIndex <= oralTrajectory[index].sample) {
+          rightKeyframe = oralTrajectory[index];
+          leftKeyframe = oralTrajectory[index - 1];
+          break;
+        }
+        leftKeyframe = oralTrajectory[index];
+      }
+      const progress = smoothstep01(
+        (sampleIndex - leftKeyframe.sample) / Math.max(1, rightKeyframe.sample - leftKeyframe.sample)
+      );
+      for (let index = 0; index < oralCount; index++) {
+        const start = Math.max(0.006, leftKeyframe.areas_cm2[index]);
+        const end = Math.max(0.006, rightKeyframe.areas_cm2[index]);
+        activeOralAreas[index] = start + (end - start) * progress;
+      }
+    }
+    const interpolatedPortArea = interpolateKeyframes(vpTrajectory, sampleIndex, (keyframe) => keyframe.area_cm2);
+    if (interpolatedPortArea !== null) vpPortArea = Math.max(0.008, interpolatedPortArea);
+    activeNasalAreas[0] = vpPortArea;
+    let oralAreaSum = 0;
+    let minimumOralArea = Number.POSITIVE_INFINITY;
+    let minimumOralAreaIndex = -1;
+    for (let index = 0; index < oralCount; index++) {
+      oralAreaSum += Math.max(0.006, activeOralAreas[index]);
+      if (index > vpJunction && index < oralCount - 1 && activeOralAreas[index] < minimumOralArea) {
+        minimumOralArea = activeOralAreas[index];
+        minimumOralAreaIndex = index;
+      }
+      if (index === 0) continue;
+      const a0 = Math.max(0.006, activeOralAreas[index - 1]);
+      const a1 = Math.max(0.006, activeOralAreas[index]);
+      oralReflections[index] = clamp((a0 - a1) / (a0 + a1), -0.995, 0.995);
+    }
+    oralContactJunction = requestedContactJunction >= 0 ? requestedContactJunction : minimumOralAreaIndex;
+    const contactArea = oralContactJunction >= 0
+      ? activeOralAreas[oralContactJunction]
+      : minimumOralArea;
+    oralContactStrength = oralContactJunction >= 0
+      ? 1 - smoothstep01((contactArea - 0.006) / 0.044)
+      : 0;
+    peakOralContactStrength = Math.max(peakOralContactStrength, oralContactStrength);
+    let nasalAreaSum = 0;
+    for (let index = 0; index < nasalCount; index++) {
+      nasalAreaSum += Math.max(0.04, activeNasalAreas[index]);
+      if (index === 0) continue;
+      const a0 = Math.max(0.04, activeNasalAreas[index - 1]);
+      const a1 = Math.max(0.04, activeNasalAreas[index]);
+      nasalReflections[index] = clamp((a0 - a1) / (a0 + a1), -0.94, 0.94);
+    }
+    oralMeanArea = oralAreaSum / oralCount;
+    nasalMeanArea = nasalAreaSum / nasalCount;
+    const lipArea = activeOralAreas[oralCount - 1] ?? 1;
+    const nostrilArea = activeNasalAreas[nasalCount - 1] ?? 1;
+    lipReflection = clamp(-0.92 + Math.min(0.2, lipArea * 0.022), -0.93, -0.66);
+    noseReflection = clamp(-0.88 + Math.min(0.16, nostrilArea * 0.018), -0.9, -0.7);
+  };
+  updateGeometry(0);
+
+  const glottalReflection = clamp(0.64 + options.effectiveClosure * 0.3 - options.inflammation * 0.06, 0.52, 0.96);
+  const lossParams = options.lossParams ?? currentTubeLossParams({}, options.lumenNarrowing, options.inflammation);
+  const oralLossModel = options.lossModel ?? buildTubeDistributedLossModel(lossParams, sampleRate, oralCount);
+  const nasalLossModel = buildTubeDistributedLossModel(lossParams, sampleRate, nasalCount);
+  const oralDamping = oralLossModel.per_section_gain;
+  const nasalDampingControl = clamp(options.nasalBranchDamping ?? 0.74, 0.3, 1.4);
+  const nasalDamping = clamp(
+    Math.pow(nasalLossModel.per_section_gain, 0.9) * Math.exp(-0.002 - 0.004 * nasalDampingControl),
+    0.9,
+    0.9998
+  );
+  const nasalWallMemoryMix = clamp(
+    nasalLossModel.wall_memory_mix * 1.8 + 0.012 + nasalDampingControl * 0.028,
+    0.016,
+    0.075
+  );
+  const nasalWallMemoryRelaxation = sampleRateAdjustedAlpha(
+    clamp(0.11 + nasalDampingControl * 0.07, 0.1, 0.24),
+    sampleRate
+  );
+  const nasalRadiationScale = clamp(options.nasalRadiationScale ?? 0.3, 0.08, 0.72);
+  const oralWallRight = new Float32Array(oralCount + 1);
+  const oralWallLeft = new Float32Array(oralCount + 1);
+  const nasalWallRight = new Float32Array(nasalCount + 1);
+  const nasalWallLeft = new Float32Array(nasalCount + 1);
+  const sourceSamples = options.sourceSamples?.length >= sampleCount
+    ? options.sourceSamples
+    : synthesizeTubeSourceSamples(options);
+  const radiationAlpha = sampleRateAdjustedAlpha(clamp(1 - lossParams.lip_radiation_smoothing, 0.08, 1), sampleRate);
+  const oralRadiationMemory = sampleRateAdjustedPole(clamp(0.985 - lossParams.high_frequency_damping * 0.12, 0.82, 0.99), sampleRate);
+  const nasalRadiationMemory = sampleRateAdjustedPole(clamp(0.988 - lossParams.high_frequency_damping * 0.1, 0.84, 0.992), sampleRate);
+  const outputMemory = sampleRateAdjustedPole(clamp(0.12 + lossParams.high_frequency_damping * 0.12, 0.08, 0.28), sampleRate);
+  let oralFlowState = 0;
+  let nasalFlowState = 0;
+  let previousOralFlow = 0;
+  let previousNasalFlow = 0;
+  let previousOralOutput = 0;
+  let previousNasalOutput = 0;
+  let peakVpPortArea = vpPortArea;
+  let minimumVpPortArea = vpPortArea;
+
+  for (let sampleIndex = 0; sampleIndex < sampleCount; sampleIndex++) {
+    updateGeometry(sampleIndex);
+    peakVpPortArea = Math.max(peakVpPortArea, vpPortArea);
+    minimumVpPortArea = Math.min(minimumVpPortArea, vpPortArea);
+    nextOralRight.fill(0);
+    nextOralLeft.fill(0);
+    nextNasalRight.fill(0);
+    nextNasalLeft.fill(0);
+    const source = sourceSamples[sampleIndex] ?? 0;
+    nextOralRight[1] += (source + glottalReflection * oralLeft[0]) * oralDamping;
+
+    const mouthFlow = (1 - lipReflection)
+      * oralRight[oralCount]
+      * Math.max(0.006, activeOralAreas[oralCount - 1]);
+    nextOralLeft[oralCount - 1] += lipReflection * oralRight[oralCount] * oralDamping;
+    const noseFlow = (1 - noseReflection)
+      * nasalRight[nasalCount]
+      * Math.max(0.04, activeNasalAreas[nasalCount - 1]);
+    nextNasalLeft[nasalCount - 1] += noseReflection * nasalRight[nasalCount] * nasalDamping;
+
+    for (let junction = 1; junction < oralCount; junction++) {
+      if (junction === vpJunction) continue;
+      const reflection = oralReflections[junction];
+      const incomingRight = oralRight[junction];
+      const incomingLeft = oralLeft[junction];
+      const junctionLoss = oralDamping * (1 - oralLossModel.discontinuity_loss_scale * Math.abs(reflection));
+      const normalLeft = reflection * incomingRight + (1 - reflection) * incomingLeft;
+      const normalRight = (1 + reflection) * incomingRight - reflection * incomingLeft;
+      const contactMix = junction === oralContactJunction ? oralContactStrength : 0;
+      nextOralLeft[junction - 1] += (
+        normalLeft * (1 - contactMix) + incomingRight * contactMix
+      ) * junctionLoss;
+      nextOralRight[junction + 1] += (
+        normalRight * (1 - contactMix) + incomingLeft * contactMix
+      ) * junctionLoss;
+    }
+    for (let junction = 1; junction < nasalCount; junction++) {
+      const reflection = nasalReflections[junction];
+      const incomingRight = nasalRight[junction];
+      const incomingLeft = nasalLeft[junction];
+      const junctionLoss = nasalDamping * (1 - nasalLossModel.discontinuity_loss_scale * Math.abs(reflection));
+      nextNasalLeft[junction - 1] += (reflection * incomingRight + (1 - reflection) * incomingLeft) * junctionLoss;
+      nextNasalRight[junction + 1] += ((1 + reflection) * incomingRight - reflection * incomingLeft) * junctionLoss;
+    }
+
+    const commonAdmittance = Math.max(0.006, activeOralAreas[vpJunction - 1]);
+    const oralAdmittance = Math.max(0.006, activeOralAreas[vpJunction]);
+    const nasalAdmittance = Math.max(0.008, vpPortArea);
+    const incomingCommon = oralRight[vpJunction];
+    const incomingOral = oralLeft[vpJunction];
+    const incomingNasal = nasalLeft[0];
+    const junctionPressure = 2 * (
+      commonAdmittance * incomingCommon
+      + oralAdmittance * incomingOral
+      + nasalAdmittance * incomingNasal
+    ) / Math.max(0.032, commonAdmittance + oralAdmittance + nasalAdmittance);
+    const branchLoss = Math.min(oralDamping, nasalDamping);
+    nextOralLeft[vpJunction - 1] += (junctionPressure - incomingCommon) * branchLoss;
+    nextOralRight[vpJunction + 1] += (junctionPressure - incomingOral) * branchLoss;
+    nextNasalRight[1] += (junctionPressure - incomingNasal) * branchLoss;
+
+    applyWallComplianceToTubeState(
+      nextOralRight,
+      nextOralLeft,
+      oralWallRight,
+      oralWallLeft,
+      activeOralAreas,
+      oralMeanArea,
+      oralLossModel.wall_memory_mix,
+      oralLossModel.wall_memory_relaxation
+    );
+    applyWallComplianceToTubeState(
+      nextNasalRight,
+      nextNasalLeft,
+      nasalWallRight,
+      nasalWallLeft,
+      activeNasalAreas,
+      nasalMeanArea,
+      nasalWallMemoryMix,
+      nasalWallMemoryRelaxation
+    );
+
+    oralFlowState += radiationAlpha * (mouthFlow - oralFlowState);
+    nasalFlowState += radiationAlpha * 0.82 * (noseFlow - nasalFlowState);
+    const mouthRadiated = (oralFlowState - previousOralFlow * oralRadiationMemory) + previousOralOutput * outputMemory;
+    const noseRadiated = (nasalFlowState - previousNasalFlow * nasalRadiationMemory) + previousNasalOutput * outputMemory;
+    previousOralFlow = oralFlowState;
+    previousNasalFlow = nasalFlowState;
+    previousOralOutput = mouthRadiated;
+    previousNasalOutput = noseRadiated;
+    oralRadiation[sampleIndex] = mouthRadiated;
+    nasalRadiation[sampleIndex] = noseRadiated;
+    out[sampleIndex] = (mouthRadiated * 0.68 + noseRadiated * nasalRadiationScale) * (options.amplitude ?? 0.9);
+
+    [oralRight, nextOralRight] = [nextOralRight, oralRight];
+    [oralLeft, nextOralLeft] = [nextOralLeft, oralLeft];
+    [nasalRight, nextNasalRight] = [nextNasalRight, nasalRight];
+    [nasalLeft, nextNasalLeft] = [nextNasalLeft, nasalLeft];
+  }
+  applyTubeOutputConditioning(out, sampleRate, lossParams);
+  return {
+    samples: out,
+    oral_radiation: oralRadiation,
+    nasal_radiation: nasalRadiation,
+    topology: {
+      schema_version: "branched_nasal_oral_waveguide_0.2",
+      scattering: "lossy_three_port_pressure_junction",
+      vp_junction_index: vpJunction,
+      vp_junction_position: Number((vpJunction / Math.max(1, oralCount - 1)).toFixed(4)),
+      oral_section_count: oralCount,
+      nasal_section_count: nasalCount,
+      peak_vp_port_area_cm2: Number(peakVpPortArea.toFixed(5)),
+      minimum_vp_port_area_cm2: Number(minimumVpPortArea.toFixed(5)),
+      nasal_radiation_scale: Number(nasalRadiationScale.toFixed(5)),
+      nasal_wall_memory_mix: Number(nasalWallMemoryMix.toFixed(6)),
+      nasal_wall_memory_relaxation: Number(nasalWallMemoryRelaxation.toFixed(6)),
+      nasal_per_section_gain: Number(nasalDamping.toFixed(7)),
+      oral_contact_boundary: "continuous rigid-contact blend below 0.05 cm2",
+      requested_oral_contact_junction: requestedContactJunction,
+      requested_oral_contact_position: requestedContactJunction >= 0
+        ? Number((requestedContactJunction / Math.max(1, oralCount - 1)).toFixed(4))
+        : null,
+      peak_oral_contact_strength: Number(peakOralContactStrength.toFixed(6)),
+      oral_and_nasal_radiation_summed_once: true,
+      shared_glottal_source: true,
+    },
+  };
 }
 
 function buildTubeDistributedLossModel(lossParams, sampleRate, tubeCount) {
@@ -5897,6 +6743,7 @@ function applyTubeOutputConditioning(samples, sampleRate, lossParams) {
 
 function buildSideBranchLossModel(constraints, vowel, geometry = null, areaFunction = null, options = {}) {
   const applicationStrength = clamp(options.strength ?? 1, 0, 1.5);
+  const excludedBranches = new Set(Array.isArray(options.excludeBranches) ? options.excludeBranches : []);
   const volume = constraints.paranasal_sinus_volume_cm3?.center ?? 24;
   const neckArea = constraints.sinus_neck_area_cm2?.center ?? 0.24;
   const neckLength = constraints.sinus_neck_length_cm?.center ?? 1.2;
@@ -6005,7 +6852,8 @@ function buildSideBranchLossModel(constraints, vowel, geometry = null, areaFunct
       tract_length_cm: roundMetric(tractLength, 4),
       laryngeal_narrowness: roundMetric(laryngealNarrowness, 4),
     },
-    branches,
+    excluded_branches: [...excludedBranches],
+    branches: branches.filter((branch) => !excludedBranches.has(branch.branch)),
   };
 }
 
@@ -6220,6 +7068,22 @@ async function playVowelCalibrationVariant(manualTuning) {
   await playAudioSamples(audio.samples, audio.sampleRate);
 }
 
+async function playNasalCalibrationVariant(manualTuning) {
+  if (!Object.keys(state.constraints).length) analyze();
+  const token = selectedNasalToken();
+  const audio = synthesizeSyllable(token, { manualTuning });
+  state.nasalPreviewDiagnostics = {
+    ...(state.nasalPreviewDiagnostics ?? {}),
+    [token]: {
+      manual_tuning: manualTuning,
+      level: audio.nasal_model?.level_matching ?? null,
+      continuity: audio.nasal_model?.voicing_continuity_diagnostic ?? null,
+    },
+  };
+  renderNasalCalibration();
+  await playAudioSamples(audio.samples, audio.sampleRate);
+}
+
 function renderAuditoryEvaluation() {
   const vowel = selectedVowel();
   const records = state.auditoryEvaluationLog.filter((entry) => entry.vowel === vowel);
@@ -6281,6 +7145,355 @@ function normalizeAuditoryEvaluationLog(data) {
   }));
 }
 
+function nasalPlaceGestureModel(tuning, vocalTractLengthCm = 15.5) {
+  const vpJunctionPosition = 0.34;
+  if (tuning.nasal_class !== "n") {
+    return {
+      schema_version: "nasal_place_gesture_0.1",
+      kind: tuning.nasal_class === "m" ? "bilabial_end_closure" : "moraic_neutral",
+      vp_junction_position: vpJunctionPosition,
+      contact_position_x_over_l: tuning.closure_position,
+      coronal_shaping: false,
+      release_locus_fraction: null,
+      release_constriction_area_cm2: null,
+      acoustic_basis: tuning.nasal_class === "m"
+        ? "lip-end closure with neutral tongue posture"
+        : "moraic nasal without a fixed following-vowel place gesture",
+    };
+  }
+  const bladeCenter = clamp(
+    tuning.closure_position - Math.max(0.04, tuning.closure_width * 0.8),
+    0.72,
+    0.9
+  );
+  const bodyCenter = clamp(
+    tuning.closure_position - Math.max(0.14, tuning.closure_width * 2.7),
+    0.56,
+    0.78
+  );
+  return {
+    schema_version: "nasal_place_gesture_0.1",
+    kind: "coronal_alveolar",
+    vp_junction_position: vpJunctionPosition,
+    contact_position_x_over_l: tuning.closure_position,
+    tongue_blade_center_x_over_l: Number(bladeCenter.toFixed(5)),
+    tongue_blade_spread_x_over_l: Number(clamp(tuning.closure_width * 0.9, 0.038, 0.075).toFixed(5)),
+    tongue_body_center_x_over_l: Number(bodyCenter.toFixed(5)),
+    tongue_body_spread_x_over_l: Number(clamp(tuning.closure_width * 1.9, 0.08, 0.14).toFixed(5)),
+    coronal_shaping: true,
+    release_locus_fraction: 0.42,
+    release_constriction_area_cm2: Number(clamp(
+      0.3 + Math.max(0, tuning.closure_area_cm2 - 0.006) * 0.4,
+      0.3,
+      0.35
+    ).toFixed(5)),
+    nominal_vocal_tract_length_cm: Number(vocalTractLengthCm.toFixed(4)),
+    acoustic_basis: "derived tongue-blade dome and residual alveolar constriction during voiced release",
+  };
+}
+
+function nasalOralSideCavityModel(tuning, vocalTractLengthCm = 15.5) {
+  const vpJunctionPosition = 0.34;
+  const sideLengthCm = clamp((tuning.closure_position - vpJunctionPosition) * vocalTractLengthCm, 2.2, 12.5);
+  const primaryAntiresonanceHz = clamp(34300 / (4 * sideLengthCm), 650, 3900);
+  return {
+    vp_junction_position: vpJunctionPosition,
+    oral_side_cavity_length_cm: Number(sideLengthCm.toFixed(4)),
+    primary_antiresonance_hz: Number(primaryAntiresonanceHz.toFixed(2)),
+    secondary_antiresonance_hz: Number(clamp(primaryAntiresonanceHz * 2.45, 1500, 7600).toFixed(2)),
+  };
+}
+
+function nasalCouplingModel(tuning, nasalInletAreaCm2) {
+  const nasalInletArea = Math.max(0.08, Number(nasalInletAreaCm2) || 1);
+  return {
+    maximum_vp_port_area_cm2: clamp(
+      nasalInletArea * tuning.velopharyngeal_opening * 0.36,
+      0.05,
+      0.72
+    ),
+    nasal_radiation_scale: clamp(
+      0.3 * tuning.nasal_path_gain / (NASAL_DEFAULTS[tuning.nasal_class]?.nasal_path_gain ?? NASAL_DEFAULTS.n.nasal_path_gain),
+      0.08,
+      0.72
+    ),
+  };
+}
+
+function nasalArticulationValidity(tuning) {
+  const nasalClass = tuning.nasal_class;
+  const isCvNasal = nasalClass === "m" || nasalClass === "n";
+  const targetPlace = nasalClass === "m"
+    ? { min: 0.94, max: 1, label: "両唇閉鎖域" }
+    : nasalClass === "n"
+      ? { min: 0.82, max: 0.93, label: "歯茎閉鎖域" }
+      : null;
+  const contactStrength = isCvNasal
+    ? 1 - smoothstep01((tuning.closure_area_cm2 - 0.006) / 0.044)
+    : null;
+  const coarticulationRatio = isCvNasal
+    ? tuning.coarticulation_lead_ms / Math.max(1, tuning.hold_duration_ms)
+    : 0;
+  const issues = [];
+  if (targetPlace && (tuning.closure_position < targetPlace.min || tuning.closure_position > targetPlace.max)) {
+    issues.push({
+      code: "closure_place_outside_target",
+      severity: "warning",
+      label_ja: `${targetPlace.label}外（${targetPlace.min.toFixed(2)}-${targetPlace.max.toFixed(2)} x/L）`,
+    });
+  }
+  if (isCvNasal && contactStrength < 0.7) {
+    issues.push({
+      code: "incomplete_oral_contact",
+      severity: "warning",
+      label_ja: nasalClass === "m" ? "唇閉鎖が弱く /w/ 化しやすい" : "舌端閉鎖が弱く鼻音位置が曖昧",
+    });
+  }
+  if (isCvNasal && coarticulationRatio > 0.7) {
+    issues.push({
+      code: "excessive_early_coarticulation",
+      severity: "warning",
+      label_ja: "保持区間の大半が母音移行になっている",
+    });
+  }
+  if (isCvNasal && tuning.transition_ms > 60) {
+    issues.push({
+      code: "prolonged_vowel_transition",
+      severity: "warning",
+      label_ja: "母音移行が長く接近音・音列化しやすい",
+    });
+  }
+  if (nasalClass === "n" && tuning.nasal_path_gain < 0.65) {
+    issues.push({
+      code: "weak_nasal_radiation",
+      severity: "warning",
+      label_ja: "鼻音保持部が後続母音に埋もれやすい",
+    });
+  }
+  return {
+    schema_version: "nasal_articulation_validity_0.1",
+    target_manner: nasalClass === "m" ? "bilabial_nasal" : nasalClass === "n" ? "alveolar_nasal" : "moraic_nasal",
+    target_place_range_x_over_l: targetPlace ? [targetPlace.min, targetPlace.max] : null,
+    oral_contact_strength: contactStrength === null ? null : Number(contactStrength.toFixed(5)),
+    coarticulation_fraction_of_hold: Number(coarticulationRatio.toFixed(5)),
+    within_target_guide: issues.length === 0,
+    issues,
+    basis: "engineering target guide for manner retention; non-target designs remain allowed",
+  };
+}
+
+function renderNasalCalibration() {
+  if (!els.nasalTokenSelect) return;
+  const token = selectedNasalToken();
+  const parsed = parseSyllableToken(token);
+  const nasalClass = nasalClassFromToken(token);
+  const tuning = normalizedNasalTuning(nasalClass);
+  const vtl = state.vocalTractGeometry?.vocal_tract_length_cm ?? state.constraints.vocal_tract_length_cm?.center ?? 15.5;
+  const sideCavity = nasalOralSideCavityModel(tuning, vtl);
+  const fields = [
+    [els.nasalClosurePositionInput, els.nasalClosurePositionValue, "closure_position", (value) => `${value.toFixed(3)} x/L`],
+    [els.nasalClosureAreaInput, els.nasalClosureAreaValue, "closure_area_cm2", (value) => `${value.toFixed(3)} cm²`],
+    [els.nasalClosureWidthInput, els.nasalClosureWidthValue, "closure_width", (value) => `${value.toFixed(3)} x/L`],
+    [els.nasalVpOpeningInput, els.nasalVpOpeningValue, "velopharyngeal_opening", (value) => value.toFixed(2)],
+    [els.nasalPathGainInput, els.nasalPathGainValue, "nasal_path_gain", (value) => `${value.toFixed(2)} x`],
+    [els.nasalDampingInput, els.nasalDampingValue, "branch_damping", (value) => value.toFixed(2)],
+    [els.nasalDurationInput, els.nasalDurationValue, "hold_duration_ms", (value) => `${Math.round(value)} ms`],
+    [els.nasalCoarticulationLeadInput, els.nasalCoarticulationLeadValue, "coarticulation_lead_ms", (value) => `${Math.round(value)} ms`],
+    [els.nasalTransitionInput, els.nasalTransitionValue, "transition_ms", (value) => `${Math.round(value)} ms`],
+    [els.nasalAttackFadeInput, els.nasalAttackFadeValue, "attack_fade_ms", (value) => `${Math.round(value)} ms`],
+  ];
+  for (const [input, output, field, formatter] of fields) {
+    if (input) input.value = String(tuning[field]);
+    if (output) output.textContent = formatter(tuning[field]);
+  }
+  if (els.nasalTransitionInput) els.nasalTransitionInput.disabled = parsed.moraic_nasal;
+  if (els.nasalCoarticulationLeadInput) els.nasalCoarticulationLeadInput.disabled = parsed.moraic_nasal;
+  if (els.nasalPathGainLabel) {
+    els.nasalPathGainLabel.textContent = nasalClass !== "N"
+      ? "鼻腔放射寄与"
+      : "鼻腔経路寄与";
+  }
+  if (parsed.moraic_nasal && els.nasalTransitionValue) els.nasalTransitionValue.textContent = "終端フェード固定";
+  if (els.nasalCalibrationStatus) {
+    els.nasalCalibrationStatus.textContent = `/${token === "n" ? "N" : token}/ · ${tuning.label} · ${parsed.moraic_nasal ? "単独終端" : `→ /${parsed.vowel}/`}`;
+  }
+  renderNasalParameterSummary(tuning, sideCavity);
+  renderNasalEvaluation();
+}
+
+function renderNasalParameterSummary(tuning, sideCavity) {
+  if (!els.nasalParameterSummary) return;
+  els.nasalParameterSummary.innerHTML = "";
+  const vpGap = state.vocalTractGeometry?.side_branch_guides?.velopharyngeal_port?.gap_cm;
+  const coarticulationStartMs = Math.max(0, tuning.hold_duration_ms - tuning.coarticulation_lead_ms);
+  const vowelTargetMs = tuning.hold_duration_ms + tuning.transition_ms;
+  const nasalPath = tuning.nasal_class !== "N"
+    ? buildNasalPathAreaFunction(state.constraints, PREVIEW_SAMPLE_RATE)
+    : null;
+  const coupling = nasalPath
+    ? nasalCouplingModel(tuning, nasalPath.areas_cm2[0])
+    : null;
+  const previewDiagnostic = state.nasalPreviewDiagnostics?.[selectedNasalToken()] ?? null;
+  const articulationValidity = nasalArticulationValidity(tuning);
+  const placeGesture = nasalPlaceGestureModel(
+    tuning,
+    state.vocalTractGeometry?.vocal_tract_length_cm
+      ?? state.constraints.vocal_tract_length_cm?.center
+      ?? 15.5
+  );
+  const items = [
+    ["基準鼻腔容積", `${format(state.constraints.nasal_cavity_volume_cm3?.center, 1)} cm³`, "詳細設定の安静時物理量"],
+    ["VP gap", `${format(vpGap, 2)} cm`, "側面ランドマーク由来ガイド"],
+    ["閉鎖側枝長", `${sideCavity.oral_side_cavity_length_cm.toFixed(2)} cm`, "VP分岐から口腔閉鎖まで"],
+    ["一次反共振", `${Math.round(sideCavity.primary_antiresonance_hz)} Hz`, `閉鎖位置 ${tuning.closure_position.toFixed(3)} x/L`],
+    [
+      tuning.nasal_class === "N" ? "鼻腔経路寄与" : "鼻腔放射寄与",
+      tuning.nasal_class === "N"
+        ? "単独音"
+        : `${tuning.nasal_path_gain.toFixed(2)} ×`,
+      tuning.nasal_class === "N"
+        ? "後続母音がないためRMS整合なし"
+        : "鼻咽腔開放とは独立して鼻孔放射効率へ写像",
+    ],
+  ];
+  if (tuning.nasal_class !== "N") {
+    items.push([
+      "調音部位派生",
+      placeGesture.kind === "coronal_alveolar" ? "舌端・歯茎" : "両唇端",
+      placeGesture.kind === "coronal_alveolar"
+        ? `冠舌ドームと ${placeGesture.release_constriction_area_cm2.toFixed(2)} cm² の開放狭窄を閉鎖位置から自動生成`
+        : "舌形状を中立に保ち、口唇終端だけを閉鎖",
+    ]);
+    items.push(["音響トポロジ", "三分岐波導管", "共通咽頭から口腔・鼻腔へ圧力結合"]);
+    items.push([
+      "VP最大開口",
+      `${coupling.maximum_vp_port_area_cm2.toFixed(3)} cm²`,
+      "鼻咽腔開放から算出し、鼻腔放射寄与から独立",
+    ]);
+    items.push(["固定開放バースト", "なし", "連続する口腔断面・VP開口変化だけで開放過渡を生成"]);
+    if (previewDiagnostic?.continuity && previewDiagnostic?.level) {
+      items.push([
+        previewDiagnostic.manual_tuning ? "調整後・保持音レベル" : "推定原形・保持音レベル",
+        `${previewDiagnostic.level.measured_nasal_to_vowel_db.toFixed(1)} dB`,
+        "後続母音の定常区間に対するRMS比",
+      ]);
+      items.push([
+        "有声連続性",
+        `${previewDiagnostic.continuity.hold_periodicity.toFixed(2)} / ${previewDiagnostic.continuity.release_periodicity.toFixed(2)}`,
+        "保持区間 / 開放区間の短時間F0周期相関（工学診断値）",
+      ]);
+      items.push([
+        "保持音の低域集中",
+        `${previewDiagnostic.continuity.hold_low_to_high_energy_db.toFixed(1)} dB`,
+        "900 Hzを境界とした簡易エネルギー比",
+      ]);
+    }
+  }
+  if (articulationValidity.issues.length) {
+    items.unshift([
+      "調音様式整合",
+      `警告 ${articulationValidity.issues.length}件`,
+      articulationValidity.issues.map((issue) => issue.label_ja).join(" / "),
+      "warning",
+    ]);
+  } else if (tuning.nasal_class !== "N") {
+    items.unshift(["調音様式整合", "基準範囲内", "調音位置・接触・時間軌道の工学ガイド", "ok"]);
+  }
+  items.push([
+    "CV時間アンカー",
+    tuning.nasal_class === "N"
+      ? `0 → ${Math.round(tuning.hold_duration_ms)} ms`
+      : `0 / ${Math.round(coarticulationStartMs)} / ${Math.round(tuning.hold_duration_ms)} / ${Math.round(vowelTargetMs)} ms`,
+    tuning.nasal_class === "N" ? "鼻音開始 → 終端" : "鼻音開始 / 共調音開始 / 口腔開放 / 母音到達",
+  ]);
+  for (const [label, value, note, tone] of items) {
+    const item = document.createElement("div");
+    item.className = "nasal-summary-item";
+    if (tone) item.classList.add(tone);
+    const strong = document.createElement("strong");
+    const span = document.createElement("span");
+    const small = document.createElement("small");
+    strong.textContent = label;
+    span.textContent = value;
+    small.textContent = note;
+    item.append(strong, span, small);
+    els.nasalParameterSummary.appendChild(item);
+  }
+}
+
+function updateNasalTuningFromInput(field, input) {
+  const nasalClass = nasalClassFromToken(selectedNasalToken());
+  setNasalTuningValue(nasalClass, field, num(input, NASAL_DEFAULTS[nasalClass][field]));
+  renderNasalCalibration();
+  renderConstraints();
+  draw();
+}
+
+function renderNasalEvaluation() {
+  if (!els.nasalEvaluationHistory) return;
+  const token = selectedNasalToken();
+  const records = state.nasalEvaluationLog.filter((entry) => entry.token === token);
+  const latest = records.at(-1);
+  if (els.nasalClarityInput) els.nasalClarityInput.value = String(latest?.nasal_clarity ?? 3);
+  if (els.nasalTransitionRatingInput) els.nasalTransitionRatingInput.value = String(latest?.transition_quality ?? 3);
+  if (els.nasalNoteInput) els.nasalNoteInput.value = latest?.note ?? "";
+  updateNasalRatingOutputs();
+  els.nasalEvaluationHistory.innerHTML = "";
+  for (const entry of records.slice(-5).reverse()) {
+    const row = document.createElement("div");
+    row.className = "auditory-evaluation-entry";
+    const tokenLabel = document.createElement("strong");
+    tokenLabel.textContent = `/${entry.token === "n" ? "N" : entry.token}/`;
+    const score = document.createElement("span");
+    score.textContent = `判別 ${entry.nasal_clarity}/5 · 接続 ${entry.transition_quality}/5`;
+    const note = document.createElement("span");
+    note.textContent = entry.note || "メモなし";
+    row.append(tokenLabel, score, note);
+    els.nasalEvaluationHistory.appendChild(row);
+  }
+}
+
+function updateNasalRatingOutputs() {
+  if (els.nasalClarityValue) els.nasalClarityValue.textContent = `${num(els.nasalClarityInput, 3)} / 5`;
+  if (els.nasalTransitionRatingValue) els.nasalTransitionRatingValue.textContent = `${num(els.nasalTransitionRatingInput, 3)} / 5`;
+}
+
+function recordNasalEvaluation() {
+  const token = selectedNasalToken();
+  const nasalClass = nasalClassFromToken(token);
+  state.nasalEvaluationLog.push({
+    id: `${Date.now()}-${token}`,
+    created_at: new Date().toISOString(),
+    token,
+    nasal_class: nasalClass,
+    nasal_clarity: clamp(Math.round(num(els.nasalClarityInput, 3)), 1, 5),
+    transition_quality: clamp(Math.round(num(els.nasalTransitionRatingInput, 3)), 1, 5),
+    note: String(els.nasalNoteInput?.value ?? "").trim(),
+    tuning: normalizedNasalTuning(nasalClass),
+  });
+  state.nasalEvaluationLog = state.nasalEvaluationLog.slice(-100);
+  renderNasalEvaluation();
+  renderConstraints();
+}
+
+function normalizeNasalEvaluationLog(data) {
+  if (!Array.isArray(data)) return [];
+  return data.slice(-100).map((entry, index) => {
+    const token = String(entry?.token || "ma").toLowerCase();
+    const nasalClass = nasalClassFromToken(token);
+    return {
+      id: String(entry?.id ?? `migrated-nasal-${index}`),
+      created_at: String(entry?.created_at ?? ""),
+      token,
+      nasal_class: nasalClass,
+      nasal_clarity: clamp(Math.round(Number(entry?.nasal_clarity) || 3), 1, 5),
+      transition_quality: clamp(Math.round(Number(entry?.transition_quality) || 3), 1, 5),
+      note: String(entry?.note ?? "").slice(0, 400),
+      tuning: normalizedNasalTuningFromSource(nasalClass, entry?.tuning ?? {}),
+    };
+  });
+}
+
 async function playSelectedSyllablePreview() {
   if (!Object.keys(state.constraints).length) analyze();
   const token = selectedSyllableToken();
@@ -6290,15 +7503,18 @@ async function playSelectedSyllablePreview() {
 }
 
 function parseSyllableToken(token) {
-  if (token === "n") return { consonant: "n", vowel: "u", moraic_nasal: true };
+  if (token === "n") return { consonant: "N", vowel: "u", moraic_nasal: true };
   const normalized = String(token || "a").toLowerCase();
   const vowel = [...normalized].reverse().find((char) => vowelFormants[char]) ?? "a";
   const consonant = normalized.endsWith(vowel) ? normalized.slice(0, -1) : "";
   return { consonant, vowel, moraic_nasal: false };
 }
 
-function synthesizeSyllable(token) {
+function synthesizeSyllable(token, options = {}) {
   const parsed = parseSyllableToken(token);
+  if (parsed.moraic_nasal || ["m", "n"].includes(parsed.consonant)) {
+    return synthesizeNasalSyllable(token, parsed, options);
+  }
   const vowelAudio = synthesizeVowel(parsed.vowel);
   const onset = synthesizeConsonantOnset(parsed, vowelAudio.sampleRate, currentDerivedF0(state.constraints));
   const samples = new Float32Array(onset.length + vowelAudio.samples.length);
@@ -6314,6 +7530,741 @@ function synthesizeSyllable(token) {
     consonant: parsed.consonant,
     samples,
     onset_model: onsetDescriptor(parsed),
+  };
+}
+
+function buildNasalPathAreaFunction(constraints, sampleRate) {
+  const volumeCm3 = clamp(constraints.nasal_cavity_volume_cm3?.center ?? 20, 5, 50);
+  const vtl = constraints.vocal_tract_length_cm?.center ?? 15.5;
+  const pathLengthCm = clamp(vtl * 0.76 + (volumeCm3 - 20) * 0.055, 9.5, 16.5);
+  const tubeCount = clamp(Math.round(pathLengthCm * sampleRate / 35000), 6, 36);
+  const meanArea = clamp(volumeCm3 / pathLengthCm, 0.65, 4.2);
+  const areas = Array.from({ length: tubeCount }, (_, index) => {
+    const position = tubeCount > 1 ? index / (tubeCount - 1) : 0.5;
+    const inlet = 0.72 + 0.28 * Math.min(1, position / 0.24);
+    const turbinateShape = 1 - 0.22 * Math.exp(-0.5 * Math.pow((position - 0.48) / 0.16, 2));
+    const outlet = 1 - 0.34 * Math.exp(-0.5 * Math.pow((position - 0.94) / 0.10, 2));
+    return Number(clamp(meanArea * inlet * turbinateShape * outlet, 0.35, 5.5).toFixed(4));
+  });
+  return {
+    schema_version: "synthetic_nasal_path_area_0.1",
+    source_role: "engineering nasal-path geometry derived from aggregate-scale design volume; not observed internal anatomy",
+    nasal_cavity_volume_cm3: Number(volumeCm3.toFixed(4)),
+    path_length_cm: Number(pathLengthCm.toFixed(4)),
+    tube_count: tubeCount,
+    section_length_cm: Number((pathLengthCm / tubeCount).toFixed(4)),
+    areas_cm2: areas,
+  };
+}
+
+function nasalTubeSynthesisOptions(sampleCount, sampleRate, constraints, areaCount) {
+  const tension = constraints.baseline_muscle_tension?.center ?? 1;
+  const inflammation = constraints.inflammation_index?.center ?? 0;
+  const lumenNarrowing = constraints.airway_lumen_narrowing?.center ?? 0;
+  const respiratoryProfile = currentRespiratoryProfile(constraints);
+  const glottalParams = currentGlottalSourceParams(constraints, tension, inflammation, lumenNarrowing);
+  const lossParams = currentTubeLossParams(constraints, lumenNarrowing, inflammation);
+  return {
+    sampleCount,
+    sampleRate,
+    f0: currentDerivedF0(constraints),
+    pressure: respiratoryProfile.effective_pressure_pa * 0.88,
+    effectiveClosure: glottalClosureProxyFromOpenQuotient(glottalParams.open_quotient),
+    respiratorySupport: respiratoryProfile.effective_support,
+    tension,
+    inflammation,
+    lumenNarrowing,
+    amplitude: 0.78,
+    motorControlPrecision: currentArticulationMotorProfile(constraints).motor_control_precision,
+    glottalParams,
+    aspirationNoiseScale: 0.5,
+    lossParams,
+    lossModel: buildTubeDistributedLossModel(lossParams, sampleRate, areaCount),
+  };
+}
+
+function oralReleaseTubeSynthesisOptions(sampleCount, sampleRate, constraints, areaCount, vowel, vocalTractLengthCm) {
+  const options = nasalTubeSynthesisOptions(sampleCount, sampleRate, constraints, areaCount);
+  const respiratoryProfile = currentRespiratoryProfile(constraints);
+  return {
+    ...options,
+    pressure: respiratoryProfile.effective_pressure_pa,
+    respiratorySupport: respiratoryProfile.effective_support,
+    amplitude: currentVowelReference(vowel, vocalTractLengthCm).amplitude,
+    aspirationNoiseScale: 0.82,
+  };
+}
+
+function nasalReleaseCueMetadata(transitionSamples, sampleRate) {
+  return {
+    type: "waveguide_geometry_transient",
+    gain: 0,
+    duration_ms: Number((Math.max(0, transitionSamples) * 1000 / sampleRate).toFixed(2)),
+    stochastic_excitation: false,
+    source: "continuous oral-area and velopharyngeal-port trajectories",
+  };
+}
+
+function signalRms(samples, startSample, endSample) {
+  let sum = 0;
+  let count = 0;
+  const start = clamp(Math.floor(startSample), 0, samples.length);
+  const end = clamp(Math.ceil(endSample), start, samples.length);
+  for (let index = start; index < end; index++) {
+    sum += samples[index] * samples[index];
+    count += 1;
+  }
+  return Math.sqrt(sum / Math.max(1, count));
+}
+
+function signalLagPeriodicity(samples, startSample, endSample, lagSamples) {
+  const start = clamp(Math.floor(startSample), 0, samples.length);
+  const end = clamp(Math.ceil(endSample), start, samples.length);
+  const lag = Math.max(1, Math.round(lagSamples));
+  if (end - start <= lag * 2) return 0;
+  let mean = 0;
+  for (let index = start; index < end; index++) mean += samples[index];
+  mean /= Math.max(1, end - start);
+  let cross = 0;
+  let leftEnergy = 0;
+  let rightEnergy = 0;
+  for (let index = start; index < end - lag; index++) {
+    const left = samples[index] - mean;
+    const right = samples[index + lag] - mean;
+    cross += left * right;
+    leftEnergy += left * left;
+    rightEnergy += right * right;
+  }
+  return clamp(cross / Math.sqrt(Math.max(1e-16, leftEnergy * rightEnergy)), -1, 1);
+}
+
+function signalFramewiseLagPeriodicity(samples, startSample, endSample, lagSamples) {
+  const lag = Math.max(1, Math.round(lagSamples));
+  const start = clamp(Math.floor(startSample), 0, samples.length);
+  const end = clamp(Math.ceil(endSample), start, samples.length);
+  const frameLength = Math.max(lag * 2 + 1, Math.round(lag * 2.5));
+  if (end - start <= frameLength) {
+    return Math.max(0, signalLagPeriodicity(samples, start, end, lag));
+  }
+  const step = Math.max(1, Math.round(lag * 0.75));
+  let weightedSum = 0;
+  let weightTotal = 0;
+  for (let frameStart = start; frameStart + frameLength <= end; frameStart += step) {
+    const frameEnd = frameStart + frameLength;
+    const frameRms = signalRms(samples, frameStart, frameEnd);
+    const periodicity = Math.max(0, signalLagPeriodicity(samples, frameStart, frameEnd, lag));
+    const weight = Math.max(1e-8, frameRms * frameRms);
+    weightedSum += periodicity * weight;
+    weightTotal += weight;
+  }
+  return weightTotal > 0 ? clamp(weightedSum / weightTotal, 0, 1) : 0;
+}
+
+function signalLowHighEnergyRatioDb(samples, startSample, endSample, sampleRate, crossoverHz = 900) {
+  const start = clamp(Math.floor(startSample), 0, samples.length);
+  const end = clamp(Math.ceil(endSample), start, samples.length);
+  if (end - start < 2) return 0;
+  let mean = 0;
+  for (let index = start; index < end; index++) mean += samples[index];
+  mean /= Math.max(1, end - start);
+  const alpha = 1 - Math.exp(-2 * Math.PI * crossoverHz / sampleRate);
+  let lowState = 0;
+  let lowEnergy = 0;
+  let highEnergy = 0;
+  for (let index = start; index < end; index++) {
+    const sample = samples[index] - mean;
+    lowState += alpha * (sample - lowState);
+    const high = sample - lowState;
+    lowEnergy += lowState * lowState;
+    highEnergy += high * high;
+  }
+  return 10 * Math.log10(Math.max(1e-16, lowEnergy) / Math.max(1e-16, highEnergy));
+}
+
+function matchNasalLevelToVowel(nasalSamples, oralSamples, sampleRate, holdSamples, transitionSamples, tuning, nasalClass) {
+  const holdStart = Math.min(Math.floor(sampleRate * 0.025), Math.floor(holdSamples * 0.45));
+  const holdEnd = Math.max(holdStart + 1, holdSamples - Math.floor(sampleRate * 0.006));
+  const vowelStart = holdSamples + transitionSamples + Math.floor(sampleRate * 0.12);
+  const vowelEnd = vowelStart + Math.floor(sampleRate * 0.18);
+  const nasalRms = signalRms(nasalSamples, holdStart, holdEnd);
+  const vowelRms = signalRms(oralSamples, vowelStart, vowelEnd);
+  const defaults = NASAL_DEFAULTS[nasalClass] ?? NASAL_DEFAULTS.n;
+  const baseTargetDb = -2;
+  const userControlScale = clamp(
+    (tuning.nasal_path_gain / defaults.nasal_path_gain)
+      * (tuning.velopharyngeal_opening / defaults.velopharyngeal_opening),
+    0.18,
+    2
+  );
+  const targetRatio = Math.pow(10, baseTargetDb / 20) * userControlScale;
+  const requestedRms = Math.max(1e-6, vowelRms) * targetRatio;
+  const appliedGain = clamp(requestedRms / Math.max(1e-6, nasalRms), 0.02, 5);
+  return {
+    schema_version: "nasal_vowel_level_match_0.1",
+    basis: "steady-window RMS matching; engineering target, not a clinical or population norm",
+    base_target_db: baseTargetDb,
+    user_control_scale: Number(userControlScale.toFixed(4)),
+    effective_target_db: Number((baseTargetDb + 20 * Math.log10(userControlScale)).toFixed(3)),
+    measured_nasal_path_rms: Number(nasalRms.toFixed(6)),
+    measured_vowel_path_rms: Number(vowelRms.toFixed(6)),
+    applied_nasal_gain: Number(appliedGain.toFixed(5)),
+    hold_measurement_ms: [
+      Number((holdStart * 1000 / sampleRate).toFixed(2)),
+      Number((holdEnd * 1000 / sampleRate).toFixed(2)),
+    ],
+    vowel_measurement_ms: [
+      Number((vowelStart * 1000 / sampleRate).toFixed(2)),
+      Number((vowelEnd * 1000 / sampleRate).toFixed(2)),
+    ],
+  };
+}
+
+function applyNasalPathResonances(samples, sampleRate, tuning, sideCavity, constraints) {
+  const volumeCm3 = clamp(constraints.nasal_cavity_volume_cm3?.center ?? 20, 5, 50);
+  const damping = clamp(tuning.branch_damping, 0.3, 1.4);
+  const opening = clamp(tuning.velopharyngeal_opening, 0.2, 1);
+  const murmurHz = clamp(245 + (20 - volumeCm3) * 2.2, 190, 340);
+  const q = clamp(3.1 / damping, 1.1, 7.5);
+  const branches = [
+    { key: "nasal_murmur", frequency_hz: murmurHz, q: q * 0.62, gain_db: 5.5 * opening },
+    { key: "oral_side_primary_antiresonance", frequency_hz: sideCavity.primary_antiresonance_hz, q, gain_db: -10.5 * opening },
+    { key: "oral_side_secondary_antiresonance", frequency_hz: sideCavity.secondary_antiresonance_hz, q: q * 0.82, gain_db: -6.5 * opening },
+  ];
+  for (const branch of branches) {
+    applyBiquadInPlace(samples, makeBiquad("peaking", branch.frequency_hz, branch.q, branch.gain_db, sampleRate));
+  }
+  const lowpassCutoffHz = clamp(4300 - opening * 900 + damping * 320, 2800, 4800);
+  applyOnePoleLowpassBlend(samples, sampleRate, lowpassCutoffHz, clamp(0.22 + opening * 0.24, 0, 0.55));
+  return {
+    schema_version: "nasal_path_resonance_0.1",
+    branches: branches.map((branch) => ({
+      ...branch,
+      frequency_hz: Number(branch.frequency_hz.toFixed(2)),
+      q: Number(branch.q.toFixed(3)),
+      gain_db: Number(branch.gain_db.toFixed(3)),
+    })),
+    lowpass_cutoff_hz: Number(lowpassCutoffHz.toFixed(2)),
+    damping,
+    velopharyngeal_opening: opening,
+  };
+}
+
+function synthesizeCoupledNasalSyllable(context) {
+  const {
+    token,
+    parsed,
+    nasalClass,
+    constraints,
+    sampleRate,
+    tuning,
+    vowelAudio,
+    closureArea,
+    neutralClosureArea,
+    coronalReleaseArea,
+    placeGesture,
+    nasalPath,
+    sideCavity,
+    oralSampleCount,
+    oralReleaseOptions,
+    sharedSourceSamples,
+    holdSamples,
+    coarticulationStartSample,
+    appliedTransitionSamples,
+    vowelTargetSample,
+  } = context;
+  const nasalInletArea = Math.max(0.08, nasalPath.areas_cm2[0] ?? 1);
+  const coupling = nasalCouplingModel(tuning, nasalInletArea);
+  const maximumVpPortArea = coupling.maximum_vp_port_area_cm2;
+  const nasalRadiationScale = coupling.nasal_radiation_scale;
+  const closedVpPortArea = 0.008;
+  const hasCoronalReleaseCue = nasalClass === "n"
+    && coronalReleaseArea
+    && vowelTargetSample > holdSamples + 1;
+  const coronalReleaseSample = hasCoronalReleaseCue
+    ? clamp(
+      holdSamples + Math.round(appliedTransitionSamples * placeGesture.release_locus_fraction),
+      holdSamples + 1,
+      vowelTargetSample - 1
+    )
+    : null;
+  const oralAreaTrajectory = {
+    ...oralReleaseOptions.areaTrajectory,
+    keyframes: [
+      { role: "nasal_neutral_closed", sample: 0, areas_cm2: neutralClosureArea.areas_cm2 },
+      { role: "coarticulation_start", sample: coarticulationStartSample, areas_cm2: neutralClosureArea.areas_cm2 },
+      { role: "oral_release", sample: holdSamples, areas_cm2: closureArea.areas_cm2 },
+      ...(hasCoronalReleaseCue ? [{
+        role: "coronal_release_locus",
+        sample: coronalReleaseSample,
+        areas_cm2: coronalReleaseArea.areas_cm2,
+      }] : []),
+      { role: "vowel_target", sample: vowelTargetSample, areas_cm2: vowelAudio.area_function.areas_cm2 },
+    ],
+  };
+  const vpAreaTrajectory = {
+    schema_version: "velopharyngeal_port_area_trajectory_0.1",
+    interpolation: "smoothstep_per_keyframe",
+    keyframes: [
+      { role: "nasal_hold", sample: 0, area_cm2: maximumVpPortArea },
+      { role: "coarticulation_start", sample: coarticulationStartSample, area_cm2: maximumVpPortArea },
+      { role: "oral_release", sample: holdSamples, area_cm2: maximumVpPortArea * 0.85 },
+      ...(hasCoronalReleaseCue ? [{
+        role: "coronal_release_locus",
+        sample: coronalReleaseSample,
+        area_cm2: maximumVpPortArea * 0.58,
+      }] : []),
+      { role: "vowel_target", sample: vowelTargetSample, area_cm2: closedVpPortArea },
+    ],
+  };
+  const coupled = synthesizeBranchedNasalOralTube(
+    closureArea.areas_cm2,
+    nasalPath.areas_cm2,
+    {
+      ...oralReleaseOptions,
+      sourceSamples: sharedSourceSamples,
+      areaTrajectory: oralAreaTrajectory,
+      velopharyngealAreaTrajectory: vpAreaTrajectory,
+      velopharyngealPortAreaCm2: maximumVpPortArea,
+      vpJunctionPosition: sideCavity.vp_junction_position,
+      nasalBranchDamping: tuning.branch_damping,
+      nasalRadiationScale,
+      oralContactPosition: tuning.closure_position,
+    }
+  );
+  const samples = coupled.samples;
+  const sideBranchLossModel = applySideBranchLosses(
+    samples,
+    sampleRate,
+    constraints,
+    parsed.vowel,
+    state.vocalTractGeometry,
+    vowelAudio.area_function,
+    { strength: 1, excludeBranches: ["velopharyngeal_nasal"] }
+  );
+  const releaseCue = nasalReleaseCueMetadata(appliedTransitionSamples, sampleRate);
+  const bodyResonanceModel = applyBodyResonance(samples, sampleRate, constraints);
+  applyHalfCosineFade(samples, 0, Math.min(samples.length, Math.floor(sampleRate * tuning.attack_fade_ms / 1000)));
+  applyFade(samples, Math.max(0, samples.length - Math.floor(sampleRate * 0.04)), samples.length, true);
+
+  const holdStart = Math.min(Math.floor(sampleRate * 0.025), Math.floor(holdSamples * 0.45));
+  const holdEnd = Math.max(holdStart + 1, holdSamples - Math.floor(sampleRate * 0.006));
+  const vowelStart = holdSamples + appliedTransitionSamples + Math.floor(sampleRate * 0.12);
+  const vowelEnd = vowelStart + Math.floor(sampleRate * 0.18);
+  const nasalWindowRms = signalRms(samples, holdStart, holdEnd);
+  const vowelWindowRms = signalRms(samples, vowelStart, vowelEnd);
+  const oralRadiationHoldRms = signalRms(coupled.oral_radiation, holdStart, holdEnd);
+  const nasalRadiationHoldRms = signalRms(coupled.nasal_radiation, holdStart, holdEnd);
+  const oralRadiationVowelRms = signalRms(coupled.oral_radiation, vowelStart, vowelEnd);
+  const nasalRadiationVowelRms = signalRms(coupled.nasal_radiation, vowelStart, vowelEnd);
+  const measuredBalanceDb = 20 * Math.log10(
+    Math.max(1e-8, nasalWindowRms) / Math.max(1e-8, vowelWindowRms)
+  );
+  const f0Hz = currentDerivedF0(constraints);
+  const f0LagSamples = sampleRate / Math.max(50, f0Hz);
+  const continuityDiagnostic = {
+    schema_version: "nasal_voicing_continuity_diagnostic_0.2",
+    basis: "engineering waveform diagnostic; framewise during changing geometry; not a perceptual or clinical threshold",
+    expected_f0_hz: Number(f0Hz.toFixed(4)),
+    hold_periodicity: Number(signalLagPeriodicity(
+      samples,
+      holdStart,
+      holdEnd,
+      f0LagSamples
+    ).toFixed(5)),
+    release_periodicity: Number(signalFramewiseLagPeriodicity(
+      samples,
+      holdSamples,
+      Math.max(holdSamples + 1, vowelTargetSample),
+      f0LagSamples
+    ).toFixed(5)),
+    release_periodicity_method: "RMS-weighted 2.5-period frame correlation",
+    hold_low_to_high_energy_db: Number(signalLowHighEnergyRatioDb(
+      samples,
+      holdStart,
+      holdEnd,
+      sampleRate
+    ).toFixed(3)),
+    stochastic_release_excitation: false,
+  };
+  const levelDiagnostic = {
+    schema_version: "coupled_radiation_level_diagnostic_0.1",
+    basis: "measured output windows from one coupled waveguide; no independent nasal-path normalization",
+    measured_nasal_window_rms: Number(nasalWindowRms.toFixed(6)),
+    measured_vowel_window_rms: Number(vowelWindowRms.toFixed(6)),
+    measured_nasal_to_vowel_db: Number(measuredBalanceDb.toFixed(3)),
+    component_radiation_rms: {
+      hold_oral: Number(oralRadiationHoldRms.toFixed(6)),
+      hold_nasal: Number(nasalRadiationHoldRms.toFixed(6)),
+      vowel_oral: Number(oralRadiationVowelRms.toFixed(6)),
+      vowel_nasal: Number(nasalRadiationVowelRms.toFixed(6)),
+    },
+    applied_nasal_gain: 1,
+    independent_level_matching: false,
+  };
+  normalize(samples, 0.92);
+  const releaseTrajectory = {
+    schema_version: "nasal_release_trajectory_0.8",
+    interpolation: "simultaneous smoothstep A(x,t) and velopharyngeal-port area trajectories",
+    area_trajectory_schema: oralAreaTrajectory.schema_version,
+    vp_area_trajectory_schema: vpAreaTrajectory.schema_version,
+    coarticulation_start_sample: coarticulationStartSample,
+    oral_release_sample: holdSamples,
+    place_cue_keyframe_sample: coronalReleaseSample,
+    vowel_target_sample: vowelTargetSample,
+    closure_position: tuning.closure_position,
+    continuous_oral_render: true,
+    waveform_switch_after_release: false,
+    shared_glottal_source: true,
+    independent_path_normalization: false,
+    pressure_coupled_branch: true,
+    place_specific_coronal_release: hasCoronalReleaseCue,
+    oral_render_duration_ms: Number((oralSampleCount * 1000 / sampleRate).toFixed(2)),
+  };
+  const nasalModel = {
+    schema_version: "nasal_consonant_model_1.1",
+    nasal_class: nasalClass,
+    token,
+    following_vowel: parsed.vowel,
+    tuning,
+    oral_closure_area_function: closureArea,
+    neutral_oral_closure_area_function: neutralClosureArea,
+    coronal_release_area_function: coronalReleaseArea,
+    place_gesture: placeGesture,
+    nasal_path_area_function: nasalPath,
+    oral_side_cavity: sideCavity,
+    resonance_model: {
+      schema_version: "coupled_branch_resonance_0.1",
+      generated_by: coupled.topology.schema_version,
+      explicit_nasal_pole_zero_filter: false,
+      oral_side_antiresonance_generated_by_closed_branch: true,
+    },
+    acoustic_topology: coupled.topology,
+    side_branch_loss_model: sideBranchLossModel,
+    level_matching: levelDiagnostic,
+    voicing_continuity_diagnostic: continuityDiagnostic,
+    articulation_validity: nasalArticulationValidity(tuning),
+    release_trajectory: releaseTrajectory,
+    release_cue: releaseCue,
+    routing: {
+      nasal_path_gain: tuning.nasal_path_gain,
+      requested_nasal_path_gain: tuning.nasal_path_gain,
+      maximum_vp_port_area_cm2: Number(maximumVpPortArea.toFixed(5)),
+      closed_vp_port_area_cm2: closedVpPortArea,
+      nasal_radiation_scale: Number(nasalRadiationScale.toFixed(5)),
+      requested_closure_area_cm2: tuning.closure_area_cm2,
+      effective_contact_area_cm2: closureArea.closure_area_cm2,
+      closure_mapping: `${nasalClass === "m" ? "bilabial" : "alveolar"} contact maps the editable residual-area control directly to the anchored acoustic section`,
+      control_mapping: "velopharyngeal_opening scales three-port branch admittance; nasal_path_gain scales nostril radiation efficiency",
+      route_curve: "continuous_vp_port_area_trajectory",
+      shared_glottal_source: true,
+      independent_path_normalization: false,
+    },
+    timing: {
+      hold_duration_ms: tuning.hold_duration_ms,
+      coarticulation_lead_ms: tuning.coarticulation_lead_ms,
+      coarticulation_start_ms: Number((coarticulationStartSample * 1000 / sampleRate).toFixed(3)),
+      oral_release_ms: tuning.hold_duration_ms,
+      vowel_target_ms: Number((vowelTargetSample * 1000 / sampleRate).toFixed(3)),
+      transition_ms: tuning.transition_ms,
+      transition_samples: appliedTransitionSamples,
+      place_cue_peak_ms: coronalReleaseSample === null
+        ? null
+        : Number((coronalReleaseSample * 1000 / sampleRate).toFixed(3)),
+      attack_fade_ms: tuning.attack_fade_ms,
+      attack_fade_curve: "half_cosine",
+      transition_model: "single-state branched waveguide with time-varying oral closure, place-derived tongue posture, vowel posture, and velopharyngeal port",
+    },
+    limitation: "The nasal geometry is an aggregate-scale synthetic tube; the three-port junction and derived coronal tongue dome are one-dimensional approximations.",
+  };
+  return {
+    ...vowelAudio,
+    samples,
+    token,
+    vowel: parsed.vowel,
+    consonant: nasalClass,
+    nasal_model: nasalModel,
+    onset_model: nasalModel,
+    body_resonance_model: bodyResonanceModel,
+  };
+}
+
+function synthesizeNasalSyllable(token, parsed, options = {}) {
+  const constraints = state.constraints;
+  const sampleRate = PREVIEW_SAMPLE_RATE;
+  const nasalClass = parsed.moraic_nasal ? "N" : parsed.consonant;
+  const tuning = normalizedNasalTuning(nasalClass, options.manualTuning !== false);
+  const vowelAudio = synthesizeVowel(parsed.vowel);
+  const placeGesture = nasalPlaceGestureModel(
+    tuning,
+    vowelAudio.area_function.vocal_tract_length_cm
+  );
+  const closureArea = buildNasalOralClosureAreaFunction(
+    vowelAudio.area_function,
+    tuning,
+    { placeGesture }
+  );
+  const neutralAreaFunction = {
+    ...vowelAudio.area_function,
+    areas_cm2: vowelAudio.area_function.raw_areas_cm2?.length === vowelAudio.area_function.areas_cm2.length
+      ? vowelAudio.area_function.raw_areas_cm2
+      : vowelAudio.area_function.areas_cm2,
+  };
+  const neutralClosureArea = buildNasalOralClosureAreaFunction(
+    neutralAreaFunction,
+    tuning,
+    { placeGesture }
+  );
+  const nasalPath = buildNasalPathAreaFunction(constraints, sampleRate);
+  const holdSamples = Math.floor(sampleRate * tuning.hold_duration_ms / 1000);
+  const coarticulationLeadSamples = parsed.moraic_nasal
+    ? 0
+    : Math.min(
+      Math.max(0, holdSamples - 1),
+      Math.floor(sampleRate * tuning.coarticulation_lead_ms / 1000)
+    );
+  const coarticulationStartSample = holdSamples - coarticulationLeadSamples;
+  const transitionSamples = Math.floor(sampleRate * tuning.transition_ms / 1000);
+  const nasalSampleCount = Math.max(1, holdSamples + (parsed.moraic_nasal ? 0 : transitionSamples));
+  const appliedTransitionSamples = parsed.moraic_nasal
+    ? 0
+    : Math.min(transitionSamples, nasalSampleCount - holdSamples);
+  const vowelTargetSample = holdSamples + appliedTransitionSamples - 1;
+  const sideCavity = nasalOralSideCavityModel(tuning, vowelAudio.area_function.vocal_tract_length_cm);
+  const nasalOptions = nasalTubeSynthesisOptions(
+    nasalSampleCount,
+    sampleRate,
+    constraints,
+    nasalPath.areas_cm2.length
+  );
+  let oralReleaseOptions = null;
+  let oralSampleCount = 0;
+  let sharedSourceSamples = null;
+  if (!parsed.moraic_nasal) {
+    oralSampleCount = nasalSampleCount + vowelAudio.samples.length;
+    oralReleaseOptions = oralReleaseTubeSynthesisOptions(
+      oralSampleCount,
+      sampleRate,
+      constraints,
+      closureArea.areas_cm2.length,
+      parsed.vowel,
+      vowelAudio.area_function.vocal_tract_length_cm
+    );
+    oralReleaseOptions.sourceAttackSeconds = tuning.attack_fade_ms / 1000;
+    oralReleaseOptions.areaTrajectory = {
+      schema_version: "multi_stage_area_trajectory_0.1",
+      interpolation: "smoothstep_per_keyframe",
+      keyframes: [
+        { role: "nasal_neutral_closed", sample: 0, areas_cm2: neutralClosureArea.areas_cm2 },
+        { role: "coarticulation_start", sample: coarticulationStartSample, areas_cm2: neutralClosureArea.areas_cm2 },
+        { role: "oral_release", sample: holdSamples, areas_cm2: closureArea.areas_cm2 },
+        { role: "vowel_target", sample: vowelTargetSample, areas_cm2: vowelAudio.area_function.areas_cm2 },
+      ],
+    };
+    sharedSourceSamples = synthesizeTubeSourceSamples({
+      ...oralReleaseOptions,
+      aspirationNoiseScale: 0.68,
+      sourceReleaseSeconds: 0,
+    });
+    nasalOptions.sourceSamples = sharedSourceSamples;
+    oralReleaseOptions.sourceSamples = sharedSourceSamples;
+  }
+  if ((nasalClass === "m" || nasalClass === "n") && !parsed.moraic_nasal) {
+    const coupledClosureTuning = { ...tuning };
+    const coupledClosureArea = buildNasalOralClosureAreaFunction(
+      vowelAudio.area_function,
+      coupledClosureTuning,
+      { anchorClosureSection: true, placeGesture }
+    );
+    const coupledNeutralClosureArea = buildNasalOralClosureAreaFunction(
+      neutralAreaFunction,
+      coupledClosureTuning,
+      { anchorClosureSection: true, placeGesture }
+    );
+    const coronalReleaseArea = nasalClass === "n"
+      ? buildNasalOralClosureAreaFunction(
+        vowelAudio.area_function,
+        coupledClosureTuning,
+        {
+          anchorClosureSection: true,
+          placeGesture,
+          placeGestureStrength: 0.5,
+          closureAreaCm2: placeGesture.release_constriction_area_cm2,
+          closureWidth: clamp(coupledClosureTuning.closure_width * 0.82, 0.032, 0.065),
+        }
+      )
+      : null;
+    return synthesizeCoupledNasalSyllable({
+      token,
+      parsed,
+      nasalClass,
+      constraints,
+      sampleRate,
+      tuning,
+      vowelAudio,
+      closureArea: coupledClosureArea,
+      neutralClosureArea: coupledNeutralClosureArea,
+      coronalReleaseArea,
+      placeGesture,
+      nasalPath,
+      sideCavity,
+      oralSampleCount,
+      oralReleaseOptions,
+      sharedSourceSamples,
+      holdSamples,
+      coarticulationStartSample,
+      appliedTransitionSamples,
+      vowelTargetSample,
+    });
+  }
+  const nasalSamples = synthesizeKellyLochbaumTube(
+    nasalPath.areas_cm2,
+    nasalOptions
+  );
+  const resonanceModel = applyNasalPathResonances(nasalSamples, sampleRate, tuning, sideCavity, constraints);
+  const nasalGain = tuning.nasal_path_gain * tuning.velopharyngeal_opening;
+  let effectiveNasalGain = nasalGain;
+  let levelMatching = null;
+  let samples;
+  let bodyResonanceModel;
+  let releaseTrajectory = null;
+  let releaseCue = { type: "none", gain: 0, duration_ms: 0 };
+  let oralLeakGain;
+  if (parsed.moraic_nasal) {
+    normalize(nasalSamples, 0.74);
+    const oralLeakSamples = synthesizeKellyLochbaumTube(
+      closureArea.areas_cm2,
+      nasalTubeSynthesisOptions(nasalSampleCount, sampleRate, constraints, closureArea.areas_cm2.length)
+    );
+    normalize(oralLeakSamples, 0.58);
+    oralLeakGain = clamp((1 - tuning.velopharyngeal_opening) * 0.24 + tuning.closure_area_cm2 * 0.22, 0.018, 0.24);
+    samples = new Float32Array(nasalSampleCount);
+    for (let index = 0; index < samples.length; index++) {
+      samples[index] = nasalSamples[index] * nasalGain + oralLeakSamples[index] * oralLeakGain;
+    }
+    bodyResonanceModel = applyBodyResonance(samples, sampleRate, constraints);
+    applyHalfCosineFade(samples, 0, Math.min(samples.length, Math.floor(sampleRate * tuning.attack_fade_ms / 1000)));
+    applyFade(samples, Math.max(0, samples.length - Math.floor(sampleRate * 0.045)), samples.length, true);
+  } else {
+    const oralReleaseSamples = synthesizeKellyLochbaumTube(closureArea.areas_cm2, oralReleaseOptions);
+    applySideBranchLosses(
+      oralReleaseSamples,
+      sampleRate,
+      constraints,
+      parsed.vowel,
+      state.vocalTractGeometry,
+      vowelAudio.area_function,
+      { strength: 1 }
+    );
+    bodyResonanceModel = applyBodyResonance(oralReleaseSamples, sampleRate, constraints);
+    applyBodyResonance(nasalSamples, sampleRate, constraints);
+    levelMatching = matchNasalLevelToVowel(
+      nasalSamples,
+      oralReleaseSamples,
+      sampleRate,
+      holdSamples,
+      appliedTransitionSamples,
+      tuning,
+      nasalClass
+    );
+    effectiveNasalGain = levelMatching.applied_nasal_gain;
+    oralLeakGain = clamp(
+      (1 - tuning.velopharyngeal_opening) * 0.055 + tuning.closure_area_cm2 * 0.04,
+      0.003,
+      0.035
+    );
+    samples = new Float32Array(oralSampleCount);
+    for (let index = 0; index < coarticulationStartSample; index++) {
+      samples[index] = nasalSamples[index] * effectiveNasalGain + oralReleaseSamples[index] * oralLeakGain;
+    }
+    for (let index = coarticulationStartSample; index < holdSamples; index++) {
+      const progress = smoothstep01(
+        (index - coarticulationStartSample) / Math.max(1, holdSamples - coarticulationStartSample - 1)
+      );
+      const nasalRoute = effectiveNasalGain * (1 - 0.15 * progress);
+      samples[index] = nasalSamples[index] * nasalRoute + oralReleaseSamples[index] * oralLeakGain;
+    }
+    for (let index = 0; index < appliedTransitionSamples; index++) {
+      const progress = smoothstep01(appliedTransitionSamples > 1 ? index / (appliedTransitionSamples - 1) : 1);
+      const sampleIndex = holdSamples + index;
+      const nasalRoute = effectiveNasalGain * 0.85 * Math.cos(progress * Math.PI / 2);
+      const oralRoute = oralLeakGain + (1 - oralLeakGain) * Math.sin(progress * Math.PI / 2);
+      samples[sampleIndex] = nasalSamples[sampleIndex] * nasalRoute + oralReleaseSamples[sampleIndex] * oralRoute;
+    }
+    const vowelContinuationStart = holdSamples + appliedTransitionSamples;
+    for (let index = vowelContinuationStart; index < samples.length; index++) {
+      samples[index] = oralReleaseSamples[index];
+    }
+    releaseCue = { type: "none", gain: 0, duration_ms: 0 };
+    applyHalfCosineFade(samples, 0, Math.min(samples.length, Math.floor(sampleRate * tuning.attack_fade_ms / 1000)));
+    applyFade(samples, Math.max(0, samples.length - Math.floor(sampleRate * 0.04)), samples.length, true);
+    releaseTrajectory = {
+      schema_version: "nasal_release_trajectory_0.4",
+      interpolation: "smoothstep keyframes: closed neutral tract to closed vowel posture, then oral release to the full vowel target",
+      area_trajectory_schema: oralReleaseOptions.areaTrajectory.schema_version,
+      coarticulation_start_sample: coarticulationStartSample,
+      oral_release_sample: holdSamples,
+      vowel_target_sample: vowelTargetSample,
+      closure_position: tuning.closure_position,
+      nasal_route_at_release_end: 0,
+      oral_route_at_release_end: 1,
+      continuous_oral_render: true,
+      waveform_switch_after_release: false,
+      shared_glottal_source: true,
+      independent_path_normalization: false,
+      oral_render_duration_ms: Number((oralSampleCount * 1000 / sampleRate).toFixed(2)),
+    };
+  }
+  normalize(samples, 0.92);
+  const nasalModel = {
+    schema_version: "nasal_consonant_model_0.7",
+    nasal_class: nasalClass,
+    token,
+    following_vowel: parsed.moraic_nasal ? null : parsed.vowel,
+    tuning,
+    oral_closure_area_function: closureArea,
+    neutral_oral_closure_area_function: neutralClosureArea,
+    nasal_path_area_function: nasalPath,
+    oral_side_cavity: sideCavity,
+    resonance_model: resonanceModel,
+    level_matching: levelMatching,
+    articulation_validity: nasalArticulationValidity(tuning),
+    release_trajectory: releaseTrajectory,
+    release_cue: releaseCue,
+    routing: {
+      nasal_path_gain: Number(effectiveNasalGain.toFixed(4)),
+      requested_nasal_path_gain: Number(nasalGain.toFixed(4)),
+      oral_leak_gain: Number(oralLeakGain.toFixed(4)),
+      route_curve: parsed.moraic_nasal ? "static" : "smoothstep_equal_power_release",
+      shared_glottal_source: !parsed.moraic_nasal,
+      independent_path_normalization: parsed.moraic_nasal,
+    },
+    timing: {
+      hold_duration_ms: tuning.hold_duration_ms,
+      coarticulation_lead_ms: parsed.moraic_nasal ? 0 : tuning.coarticulation_lead_ms,
+      coarticulation_start_ms: parsed.moraic_nasal
+        ? null
+        : Number((coarticulationStartSample * 1000 / sampleRate).toFixed(3)),
+      oral_release_ms: parsed.moraic_nasal ? null : tuning.hold_duration_ms,
+      vowel_target_ms: parsed.moraic_nasal
+        ? null
+        : Number((vowelTargetSample * 1000 / sampleRate).toFixed(3)),
+      transition_ms: parsed.moraic_nasal ? 0 : tuning.transition_ms,
+      transition_samples: appliedTransitionSamples,
+      attack_fade_ms: tuning.attack_fade_ms,
+      attack_fade_curve: "half_cosine",
+      transition_model: parsed.moraic_nasal ? "nasal hold with release fade" : "shared-source anchored coarticulation with a closed internal posture lead, smooth oral release, and uninterrupted vowel continuation",
+    },
+    limitation: "The oral and nasal tubes share one glottal source and are mixed without independent path normalization, but they remain separate filters rather than one pressure-coupled branched waveguide.",
+  };
+  return {
+    ...vowelAudio,
+    samples,
+    token,
+    vowel: parsed.moraic_nasal ? null : parsed.vowel,
+    consonant: nasalClass,
+    nasal_model: nasalModel,
+    onset_model: nasalModel,
+    body_resonance_model: bodyResonanceModel,
   };
 }
 
@@ -6382,6 +8333,15 @@ function applyFade(samples, start, end, fadeOut = false) {
   }
 }
 
+function applyHalfCosineFade(samples, start, end, fadeOut = false) {
+  const length = Math.max(1, end - start);
+  for (let index = start; index < end; index++) {
+    const t = length > 1 ? (index - start) / (length - 1) : 1;
+    const raisedCosine = 0.5 - 0.5 * Math.cos(Math.PI * clamp(t, 0, 1));
+    samples[index] *= fadeOut ? 1 - raisedCosine : raisedCosine;
+  }
+}
+
 async function exportSyllableDataset() {
   if (!Object.keys(state.constraints).length) analyze();
   const tokens = selectedSyllableTokens();
@@ -6403,6 +8363,7 @@ async function exportSyllableDataset() {
       derived_f0_hz: audio.derived_f0_hz,
       area_function: areaFunctionDescriptor(audio.area_function),
       onset_model: audio.onset_model,
+      nasal_model: audio.nasal_model ?? null,
     });
   }
   const metadata = {
@@ -6601,6 +8562,9 @@ function applyProfile(data) {
   state.vowelAreaTuning = normalizeLoadedAreaTuning(data.vowel_area_tuning);
   state.vowelWidthTuning = normalizeLoadedWidthTuning(data.vowel_width_tuning);
   state.auditoryEvaluationLog = normalizeAuditoryEvaluationLog(data.auditory_evaluation_log);
+  state.nasalTuning = normalizeLoadedNasalTuning(data.nasal_articulation_tuning);
+  state.nasalPreviewDiagnostics = {};
+  state.nasalEvaluationLog = normalizeNasalEvaluationLog(data.nasal_auditory_evaluation_log);
   analyze();
   if (data.integrated_features) state.features = data.integrated_features;
   if (data.prior_resolution) state.priorResolution = data.prior_resolution;
@@ -6615,6 +8579,7 @@ function applyProfile(data) {
   renderSyllableDatasetPreview();
   updateTractEditStatus();
   renderAuditoryEvaluation();
+  renderNasalCalibration();
   draw();
 }
 
@@ -6640,9 +8605,21 @@ function mountCompositionGuide() {
   }
 }
 
+function mountArticulationWorkspaces() {
+  const tractAnalysis = document.querySelector(".tract-analysis");
+  const nasalCalibration = document.querySelector(".nasal-calibration");
+  if (nasalCalibration && els.consonantCalibrationMount && nasalCalibration.parentElement !== els.consonantCalibrationMount) {
+    els.consonantCalibrationMount.appendChild(nasalCalibration);
+  }
+  if (tractAnalysis && els.vowelCalibrationMount && tractAnalysis.parentElement !== els.vowelCalibrationMount) {
+    els.vowelCalibrationMount.appendChild(tractAnalysis);
+  }
+}
+
 function init() {
   refreshLandmarkSelect();
   mountCompositionGuide();
+  mountArticulationWorkspaces();
   renderLandmarkReference();
   renderPublicationReferences();
   analyze();
@@ -6677,6 +8654,12 @@ function init() {
   els.tractProfileCanvas?.addEventListener("pointercancel", handleAreaTuningPointerUp);
   els.tractProfileCanvas?.addEventListener("pointerleave", handleAreaTuningPointerUp);
   els.tractProfileCanvas?.addEventListener("keydown", handleTractTuningKeyDown);
+  els.nasalProfileCanvas?.addEventListener("pointerdown", handleNasalProfilePointerDown);
+  els.nasalProfileCanvas?.addEventListener("pointermove", handleNasalProfilePointerMove);
+  els.nasalProfileCanvas?.addEventListener("pointerup", handleNasalProfilePointerUp);
+  els.nasalProfileCanvas?.addEventListener("pointercancel", handleNasalProfilePointerUp);
+  els.nasalProfileCanvas?.addEventListener("pointerleave", handleNasalProfilePointerUp);
+  els.nasalProfileCanvas?.addEventListener("keydown", handleNasalProfileKeyDown);
   for (const el of [els.ageInput, els.sexInput, els.heightInput, els.weightInput, els.bodyFatInput, els.primaryLanguageInput, els.phoneticTargetProfileInput, els.populationInput, els.referenceImageStyleInput, els.dataSourceInput, els.smokingInput, els.exerciseInput, els.dietInput, els.respiratoryHistoryInput].filter(Boolean)) {
     el.addEventListener("input", analyze);
   }
@@ -6713,6 +8696,30 @@ function init() {
   els.phonemeClarityInput?.addEventListener("input", updateAuditoryRatingOutputs);
   els.targetMatchInput?.addEventListener("input", updateAuditoryRatingOutputs);
   els.recordAuditoryEvaluationBtn?.addEventListener("click", recordAuditoryEvaluation);
+  els.nasalTokenSelect?.addEventListener("input", () => {
+    renderNasalCalibration();
+    draw();
+  });
+  for (const [input, field] of [
+    [els.nasalClosurePositionInput, "closure_position"],
+    [els.nasalClosureAreaInput, "closure_area_cm2"],
+    [els.nasalClosureWidthInput, "closure_width"],
+    [els.nasalVpOpeningInput, "velopharyngeal_opening"],
+    [els.nasalPathGainInput, "nasal_path_gain"],
+    [els.nasalDampingInput, "branch_damping"],
+    [els.nasalDurationInput, "hold_duration_ms"],
+    [els.nasalCoarticulationLeadInput, "coarticulation_lead_ms"],
+    [els.nasalTransitionInput, "transition_ms"],
+    [els.nasalAttackFadeInput, "attack_fade_ms"],
+  ]) {
+    input?.addEventListener("input", () => updateNasalTuningFromInput(field, input));
+  }
+  els.playUntunedNasalBtn?.addEventListener("click", () => playNasalCalibrationVariant(false));
+  els.playTunedNasalBtn?.addEventListener("click", () => playNasalCalibrationVariant(true));
+  els.resetNasalTuningBtn?.addEventListener("click", () => resetNasalTuning());
+  els.nasalClarityInput?.addEventListener("input", updateNasalRatingOutputs);
+  els.nasalTransitionRatingInput?.addEventListener("input", updateNasalRatingOutputs);
+  els.recordNasalEvaluationBtn?.addEventListener("click", recordNasalEvaluation);
   els.syllableSetInput?.addEventListener("input", () => {
     renderSyllableDatasetPreview();
     renderConstraints();
@@ -6739,6 +8746,7 @@ function init() {
   renderSyllableDatasetPreview();
   updateTractEditStatus();
   renderAuditoryEvaluation();
+  renderNasalCalibration();
   draw();
 }
 

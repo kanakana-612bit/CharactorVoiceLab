@@ -28,6 +28,8 @@
     <nav class="tabbar" aria-label="解析タブ">
       <button class="tab-button active" data-tab-target="setupTab">基本情報</button>
       <button class="tab-button" data-tab-target="detailTab">詳細設定</button>
+      <button class="tab-button" data-tab-target="vowelTab">母音調整</button>
+      <button class="tab-button" data-tab-target="consonantTab">子音調整</button>
       <button class="tab-button" data-tab-target="outputTab">TTS設定</button>
       <button class="tab-button" data-tab-target="referenceTab">参考文献・公開方針</button>
     </nav>
@@ -400,6 +402,115 @@
               </div>
               <div id="auditoryEvaluationHistory" class="auditory-evaluation-history"></div>
             </section>
+            <section class="nasal-calibration" aria-labelledby="nasalCalibrationHeading">
+              <div class="subsection-heading nasal-heading">
+                <div>
+                  <h3 id="nasalCalibrationHeading">鼻音校正</h3>
+                  <span id="nasalCalibrationStatus">/ma/ · 両唇閉鎖</span>
+                </div>
+                <label>
+                  評価音節
+                  <select id="nasalTokenSelect">
+                    <optgroup label="両唇鼻音 /m/">
+                      <option value="ma" selected>/ma/</option>
+                      <option value="mi">/mi/</option>
+                      <option value="mu">/mu/</option>
+                      <option value="me">/me/</option>
+                      <option value="mo">/mo/</option>
+                    </optgroup>
+                    <optgroup label="歯茎鼻音 /n/">
+                      <option value="na">/na/</option>
+                      <option value="ni">/ni/</option>
+                      <option value="nu">/nu/</option>
+                      <option value="ne">/ne/</option>
+                      <option value="no">/no/</option>
+                    </optgroup>
+                    <optgroup label="撥音 /N/">
+                      <option value="n">/N/</option>
+                    </optgroup>
+                  </select>
+                </label>
+              </div>
+              <div class="nasal-visual-grid">
+                <canvas id="nasalProfileCanvas" width="760" height="260" tabindex="0" aria-label="鼻音の口腔閉鎖位置・残存面積編集グラフ"></canvas>
+                <div class="nasal-parameter-summary" id="nasalParameterSummary"></div>
+              </div>
+              <div class="nasal-control-grid">
+                <label>
+                  閉鎖位置 x/L
+                  <input id="nasalClosurePositionInput" type="range" min="0.42" max="0.99" step="0.005" />
+                  <output id="nasalClosurePositionValue"></output>
+                </label>
+                <label>
+                  閉鎖残存面積 cm²
+                  <input id="nasalClosureAreaInput" type="range" min="0.006" max="0.35" step="0.001" />
+                  <output id="nasalClosureAreaValue"></output>
+                </label>
+                <label>
+                  閉鎖幅 x/L
+                  <input id="nasalClosureWidthInput" type="range" min="0.02" max="0.16" step="0.005" />
+                  <output id="nasalClosureWidthValue"></output>
+                </label>
+                <label>
+                  鼻咽腔開放
+                  <input id="nasalVpOpeningInput" type="range" min="0.2" max="1" step="0.01" />
+                  <output id="nasalVpOpeningValue"></output>
+                </label>
+                <label>
+                  <span id="nasalPathGainLabel">鼻腔経路寄与</span>
+                  <input id="nasalPathGainInput" type="range" min="0.35" max="1.4" step="0.01" />
+                  <output id="nasalPathGainValue"></output>
+                </label>
+                <label>
+                  鼻腔枝減衰
+                  <input id="nasalDampingInput" type="range" min="0.3" max="1.4" step="0.01" />
+                  <output id="nasalDampingValue"></output>
+                </label>
+                <label>
+                  口腔開放／終端アンカー ms
+                  <input id="nasalDurationInput" type="range" min="45" max="240" step="1" />
+                  <output id="nasalDurationValue"></output>
+                </label>
+                <label>
+                  先行共調音 ms
+                  <input id="nasalCoarticulationLeadInput" type="range" min="0" max="60" step="1" />
+                  <output id="nasalCoarticulationLeadValue"></output>
+                </label>
+                <label>
+                  母音到達まで ms
+                  <input id="nasalTransitionInput" type="range" min="15" max="130" step="1" />
+                  <output id="nasalTransitionValue"></output>
+                </label>
+                <label>
+                  立上りフェード ms
+                  <input id="nasalAttackFadeInput" type="range" min="0" max="30" step="1" />
+                  <output id="nasalAttackFadeValue"></output>
+                </label>
+              </div>
+              <div class="nasal-action-row">
+                <button id="playUntunedNasalBtn" type="button">推定原形を再生</button>
+                <button id="playTunedNasalBtn" class="primary" type="button">調整後を再生</button>
+                <button id="resetNasalTuningBtn" type="button">選択鼻音をリセット</button>
+              </div>
+              <div class="auditory-rating-grid nasal-rating-grid">
+                <label>
+                  鼻音判別性
+                  <input id="nasalClarityInput" type="range" min="1" max="5" step="1" value="3" />
+                  <output id="nasalClarityValue">3 / 5</output>
+                </label>
+                <label>
+                  母音接続・終端
+                  <input id="nasalTransitionRatingInput" type="range" min="1" max="5" step="1" value="3" />
+                  <output id="nasalTransitionRatingValue">3 / 5</output>
+                </label>
+                <label class="auditory-note-field">
+                  試聴メモ
+                  <textarea id="nasalNoteInput" rows="2" maxlength="400" placeholder="例: /m/ の鼻腔音が弱い"></textarea>
+                </label>
+                <button id="recordNasalEvaluationBtn" type="button">評価を記録</button>
+              </div>
+              <div id="nasalEvaluationHistory" class="auditory-evaluation-history"></div>
+            </section>
           </section>
         </section>
 
@@ -439,11 +550,6 @@
               <div class="performance-range-list" id="trunkPerformanceRanges"></div>
             </section>
           </div>
-          <div class="subsection-heading">
-            <h3>試聴時の発話運動</h3>
-            <span>可動範囲のうち、現在の発話で使用する量</span>
-          </div>
-          <div class="slider-list compact-list" id="executionSliders"></div>
         </section>
 
         <section class="pane detail-full">
@@ -456,6 +562,34 @@
             <div class="slider-list compact-list" id="advancedAcousticSliders"></div>
             <pre id="constraintOutput"></pre>
           </details>
+        </section>
+      </section>
+
+      <section id="vowelTab" class="tab-panel articulation-workspace" aria-label="母音調整" hidden>
+        <section class="pane detail-full">
+          <div class="pane-head">
+            <h2>母音の発話運動</h2>
+            <span>PerformanceControlRange内で現在の母音目標に使用する運動量</span>
+          </div>
+          <section class="execution-controls-section">
+            <div class="slider-list compact-list" id="vowelExecutionSliders"></div>
+          </section>
+        </section>
+        <section class="pane detail-full vowel-calibration-pane">
+          <div id="vowelCalibrationMount"></div>
+        </section>
+      </section>
+
+      <section id="consonantTab" class="tab-panel articulation-workspace" aria-label="子音調整" hidden>
+        <section class="pane detail-full consonant-calibration-pane">
+          <div class="pane-head">
+            <h2>子音の発話運動</h2>
+            <span>調音位置・閉鎖・側枝結合・音素遷移を種類別に校正</span>
+          </div>
+          <section class="execution-controls-section consonant-execution-controls">
+            <div class="slider-list compact-list" id="consonantExecutionSliders"></div>
+          </section>
+          <div id="consonantCalibrationMount"></div>
         </section>
       </section>
 

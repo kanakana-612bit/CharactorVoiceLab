@@ -10,6 +10,7 @@ It owns only:
 - performance constraint-range export
 - experiment profile import/export
 - 2.5D vocal-tract geometry and source-assumption export
+- vowel A(x)/W(x), nasal-articulation, and auditory-evaluation calibration export
 - reproducible project-package import/export
 
 The TTS core should be connected later through a small HTTP API or local adapter.
@@ -132,6 +133,8 @@ The profile includes three intentionally separate metadata fields:
 - `vowel_area_tuning`: vowel-specific total-area gains along normalized tract position
 - `vowel_width_tuning`: vowel-specific coronal-width gains; sagittal height is held fixed and total area is recomputed before 1D projection
 - `auditory_evaluation_log`: local design evaluations containing vowel, clarity/target-match ratings, notes, and the A(x)/W(x) settings present when the evaluation was recorded
+- `nasal_articulation_tuning` (`nasal_articulation_tuning_0.4`): `/m/`, `/n/`, and moraic `/N/` engineering controls for oral closure, velopharyngeal opening, nasal-radiation/path damping, and consonant-to-vowel timing. Version 0.4 stores `/n/` closure residual area directly in cm2; older profiles are migrated from the former hidden effective-area mapping at load time.
+- `nasal_auditory_evaluation_log`: local nasal-token evaluations containing nasal clarity, transition quality, notes, and the tuning snapshot present when recorded
 
 `range_semantics` documents the distinction among baseline, morphological plausibility, WebUI edit range, and dynamic performance range. A downstream service must not use `constraint_range` as a UI slider range; it is only a deprecated alias of `performance_control_range`.
 
@@ -191,6 +194,10 @@ Honda-style landmarks and sinus guides are manually controlled model anchors. Th
 
 The browser preview runs at 44.1 kHz and derives a temporary `area_function_tube_0.2` object. It retains `cross_sections_2_5d` with sagittal height, coronal width, aspect ratio, tongue-groove depth, and lateral-channel activation, then projects each section's total area to the current single-channel tube solver. Its `articulation_target` keeps jaw, oral volume, lip, tongue, and cross-section targets separate; for example, `/o/` expands the middle/front oral cavity and oral aperture while retaining a short terminal lip constriction, rather than reusing the `/u/` mandibular posture. The sole browser backend is a lightweight Kelly-Lochbaum style tube preview. Its tube count follows `round(vocal_tract_length_cm * sample_rate / sound_speed)`, and `tube_distributed_loss_0.1` converts generalized wall, viscothermal, and broadening controls into a tract-length-normalized per-section gain. It also retains provisional vowel-specific area warps, LF-style volume-velocity input, restrained soft-wall compliance, simple side-branch antiresonance coloring, and smoothed lip radiation. Published formant targets remain evaluation/provenance metadata for the tube geometry; they are not a separate formant synthesizer. This browser model is intended for fast design feedback, not as a bit-identical VocalTractLab implementation.
 
+Nasal CV syllables export `nasal_consonant_model_1.1` metadata and use `branched_nasal_oral_waveguide_0.2`: one pressure-wave state runs from the glottis to a lossy three-port velar junction and then into the oral and synthetic nasal branches. `/m/` uses a bilabial end closure with a neutral tongue posture. `/n/` uses `nasal_place_gesture_0.1` to derive a tongue-blade dome and a residual alveolar release constriction from the same editable contact position and width; this is synthetic design geometry, not an inferred participant anatomy or an independent user control. `multi_stage_area_trajectory_0.1` changes `A_oral(x,t)` through nasal onset, closed-tract coarticulation onset, oral release, the `/n/`-only coronal release-locus keyframe, and the following-vowel target. `velopharyngeal_port_area_trajectory_0.1` changes the branch admittance over the same interval. Mouth and nostril volume velocities are derived from terminal pressure waves and terminal areas, radiated, and summed once. The closed oral branch generates its own antiresonance; neither CV nasal applies the older explicit nasal pole/zero coloring or independent nasal-path normalization. `nasal_path_gain` controls nostril-radiation efficiency without changing the velopharyngeal branch area, while `branch_damping` controls frequency-dependent nasal-wall loss. The release contains no stochastic burst: `nasal_release_trajectory_0.8` obtains the transient only from continuous area and port trajectories. `coupled_radiation_level_diagnostic_0.1` records output-window and component-radiation RMS values without altering either branch after synthesis. `nasal_voicing_continuity_diagnostic_0.2` records hold correlation, framewise release F0-lag correlation, and the hold low/high-energy ratio as engineering diagnostics, not perceptual or clinical thresholds. `nasal_articulation_validity_0.1` warns when place, contact, or timing leaves the target manner but does not clamp non-target character designs.
+
+Moraic `/N/` temporarily retains `nasal_consonant_model_0.7` as a terminal nasal hold without following-vowel anchors or CV level matching. `attack_fade_ms` applies a half-cosine onset fade in all three profiles. All defaults and nasal-path geometries are synthetic engineering design values, not measurements of an individual or population.
+
 ## External TTS Integration Target
 
 External TTS engines should not be coupled to the WebUI directly.
@@ -202,7 +209,7 @@ Use a separate core service that accepts either:
 - curated WAV/material paths for cloning or fine-tuning
 - a saved `character_voice_profile.json` as the reproducible experiment record
 
-The WebUI should remain useful even when no external synthesis backend is available. In that mode it exports constraints, vowel-specific area/width tuning, local auditory-evaluation records, and synthetic phoneme/syllable datasets using the browser 2.5D-derived tube preview. CV onset generation is experimental scaffolding rather than a validated consonant model; tokens are evaluated individually before a set is accepted. Profiles saved by older versions may still contain `formant` or `hybrid` preview selections and hybrid-only controls; version 1.1 ignores those retired fields and exports `preview_synthesis_backend: "tube"`.
+The WebUI should remain useful even when no external synthesis backend is available. In that mode it exports constraints, vowel-specific area/width tuning, nasal-articulation tuning, local auditory-evaluation records, and synthetic phoneme/syllable datasets using the browser 2.5D-derived tube preview. Nasal `/m/`, `/n/`, and moraic `/N/` use a dedicated initial model; other CV onset generation remains experimental scaffolding rather than a validated consonant model. Tokens are evaluated individually before a set is accepted. Profiles saved by older versions may still contain `formant` or `hybrid` preview selections and hybrid-only controls; version 1.1 ignores those retired fields and exports `preview_synthesis_backend: "tube"`.
 
 ## Aggregate Reference Data Policy
 
