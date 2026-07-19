@@ -54,6 +54,8 @@ MICROMAMBA_ROOT="$RUNTIME_ROOT/bootstrap/micromamba"
 MICROMAMBA_BIN="$MICROMAMBA_ROOT/micromamba"
 MAMBA_CACHE_ROOT="$RUNTIME_ROOT/micromamba-root"
 TOOLCHAIN_ROOT="$RUNTIME_ROOT/toolchains/gcc13"
+PYWORLD_REQUIREMENT="pyworld==0.3.5"
+SETUPTOOLS_REQUIREMENT="setuptools<81"
 
 download_file() {
   local url="$1"
@@ -209,12 +211,15 @@ if ! "$PYTHON_BIN" -c "import torch, safetensors, yaml" >/dev/null 2>&1 ||
   [[ ! -x "$VENV_BIN/cmake" || ! -x "$VENV_BIN/ninja" ]]; then
   echo "Installing model-manager, build, and F0-correction dependencies..."
   "$PYTHON_BIN" -m pip install --upgrade pip
-  "$PYTHON_BIN" -m pip install torch safetensors PyYAML numpy pyworld praat-parselmouth cmake ninja
+  "$PYTHON_BIN" -m pip install \
+    "$SETUPTOOLS_REQUIREMENT" \
+    torch safetensors PyYAML numpy "$PYWORLD_REQUIREMENT" praat-parselmouth cmake ninja
 fi
 
 if ! postprocess_dependencies_ready >/dev/null 2>&1; then
   echo "Repairing the local F0-correction dependencies..."
-  "$PYTHON_BIN" -m pip install --upgrade --force-reinstall --no-cache-dir numpy pyworld praat-parselmouth
+  "$PYTHON_BIN" -m pip install --upgrade --force-reinstall --no-cache-dir \
+    "$SETUPTOOLS_REQUIREMENT" numpy "$PYWORLD_REQUIREMENT" praat-parselmouth
 fi
 if ! postprocess_dependencies_ready; then
   echo "The local PSOLA F0-correction runtime is incomplete. See the dependency diagnostics above." >&2

@@ -18,6 +18,8 @@ if (-not $AudioCppRoot) {
 }
 $AudioCppRoot = [System.IO.Path]::GetFullPath($AudioCppRoot)
 $RuntimeRoot = Split-Path -Parent $AudioCppRoot
+$PyWorldRequirement = "pyworld==0.3.5"
+$SetuptoolsRequirement = "setuptools<81"
 New-Item -ItemType Directory -Force -Path $RuntimeRoot | Out-Null
 New-Item -ItemType Directory -Force -Path $AudioCppRoot | Out-Null
 
@@ -115,14 +117,14 @@ if ($InstallModel) {
   $ErrorActionPreference = $PreviousErrorActionPreference
   if ($DependencyCheckExitCode -ne 0) {
     & $ModelPython -m pip install --upgrade pip
-    & $ModelPython -m pip install torch safetensors PyYAML numpy pyworld praat-parselmouth
+    & $ModelPython -m pip install $SetuptoolsRequirement torch safetensors PyYAML numpy $PyWorldRequirement praat-parselmouth
     if ($LASTEXITCODE -ne 0) { throw "Model-manager dependency installation failed." }
   }
   $PostprocessCheck = Join-Path $ProjectRoot "audio_postprocess.py"
   & $ModelPython $PostprocessCheck --check
   if ($LASTEXITCODE -ne 0) {
     Write-Host "Repairing the local F0-correction dependencies..."
-    & $ModelPython -m pip install --upgrade --force-reinstall --no-cache-dir numpy pyworld praat-parselmouth
+    & $ModelPython -m pip install --upgrade --force-reinstall --no-cache-dir $SetuptoolsRequirement numpy $PyWorldRequirement praat-parselmouth
     if ($LASTEXITCODE -ne 0) { throw "F0-correction dependency repair failed." }
     & $ModelPython $PostprocessCheck --check
     if ($LASTEXITCODE -ne 0) { throw "The local PSOLA F0-correction runtime is incomplete." }

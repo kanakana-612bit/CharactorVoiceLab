@@ -41,7 +41,7 @@ The pinned audio.cpp release does not publish a Linux prebuilt package. On the f
 
 The Linux launcher does not replace the system compiler and does not require `sudo` for its compiler toolchain. Allow additional time for the initial native build and use at least 15 GB of free disk space. Later launches reuse the toolchain, build, models, ports, and validated process records. Run `./stop_webui.sh` to stop only launcher-owned processes. Use `./webui.sh --no-browser` on a headless machine; the local URL is printed to the terminal.
 
-Every launch verifies that `pyworld` and `praat-parselmouth` can actually be loaded, not merely that their packages are installed. If F0 correction fails after an update, run `./stop_webui.sh` followed by `./webui.sh`; the launcher repairs the local packages and reloads the WebUI bridge. The exact native-import diagnostics can be checked with `runtime/mm/bin/python audio_postprocess.py --check`.
+Every launch verifies that `pyworld` and `praat-parselmouth` can actually be loaded, not merely that their packages are installed. The local environment pins `pyworld` and retains the compatible `setuptools` provider required by Linux source builds. If F0 correction fails after an update, run `./stop_webui.sh` followed by `./webui.sh`; the launcher repairs the local packages and reloads the WebUI bridge. The exact native-import diagnostics can be checked with `runtime/mm/bin/python audio_postprocess.py --check`.
 
 Model weights and executable packages are downloaded from their upstream projects and are not redistributed in this repository. Review the applicable upstream model and runtime licenses before redistributing a populated `runtime/` directory.
 
