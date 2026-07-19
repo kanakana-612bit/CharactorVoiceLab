@@ -60,6 +60,15 @@ Every launch verifies that `pyworld` and `praat-parselmouth` can actually be loa
 
 Model weights and executable packages are downloaded from their upstream projects and are not redistributed in this repository. Review the applicable upstream model and runtime licenses before redistributing a populated `runtime/` directory.
 
+## Synthetic sample
+
+The [`samples/`](samples/) directory contains a loadable profile package and a
+corresponding synthesized WAV for a wholly synthetic character. The reference
+images were generated with Stable Diffusion; their embedded generation prompt,
+model identifiers, hashes, and seeds are retained as provenance. No real-person
+image, voice recording, medical record, or participant-level dataset is used in
+the sample.
+
 ## Manual and advanced startup
 
 The current TTS adapter targets a local `audio.cpp` server and Japanese VoiceDesign inference path. The browser does not load native inference code or model weights. `designer_server.py` serves the independent WebUI and exposes a narrow same-origin bridge to the selected loopback audio.cpp port.
