@@ -33,8 +33,9 @@ RUNTIME_ROOT="$PROJECT_ROOT/runtime"
 PYTHON_ROOT="$RUNTIME_ROOT/mm"
 PYTHON_BIN="$PYTHON_ROOT/bin/python"
 AUDIO_ROOT="$RUNTIME_ROOT/audio.cpp"
-AUDIO_BUILD_ROOT="$RUNTIME_ROOT/audio.cpp-build/linux-cpu-release"
+AUDIO_BUILD_ROOT="$RUNTIME_ROOT/audio.cpp-build/linux-cpu-gcc13-release"
 AUDIO_SERVER="$AUDIO_BUILD_ROOT/bin/audiocpp_server"
+LOCAL_TOOLCHAIN_ROOT="$RUNTIME_ROOT/toolchains/gcc13"
 LOG_ROOT="$RUNTIME_ROOT/logs"
 STATE_PATH="$RUNTIME_ROOT/webui.state.json"
 UV_ROOT="$RUNTIME_ROOT/bootstrap/uv"
@@ -292,6 +293,9 @@ PY
   echo "[3/4] Starting audio.cpp on port $AUDIO_PORT..."
   (
     cd -- "$AUDIO_ROOT"
+    if [[ -d "$LOCAL_TOOLCHAIN_ROOT/lib" ]]; then
+      export LD_LIBRARY_PATH="$LOCAL_TOOLCHAIN_ROOT/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+    fi
     exec nohup "$AUDIO_SERVER" --config "$AUDIO_CONFIG"
   ) >"$AUDIO_OUT_LOG" 2>"$AUDIO_ERROR_LOG" </dev/null &
   NEW_AUDIO_PID=$!

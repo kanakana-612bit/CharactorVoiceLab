@@ -25,7 +25,7 @@ The launcher starts both services on loopback-only addresses, selects nearby fre
 
 ## One-click Linux setup
 
-The validation baseline is Ubuntu 24.04 x86_64. Current glibc-based x86_64 and ARM64 distributions using `apt`, `dnf`, `pacman`, or `zypper` are supported on a best-effort basis.
+The target baseline is Ubuntu 22.04/24.04 x86_64. Current glibc-based x86_64 and ARM64 distributions are supported on a best-effort basis.
 
 ```bash
 chmod +x webui.sh stop_webui.sh
@@ -36,10 +36,10 @@ The pinned audio.cpp release does not publish a Linux prebuilt package. On the f
 
 - prepares project-local Python 3.12, CMake, Ninja, and the audio post-processing dependencies
 - downloads the pinned audio.cpp source and builds a portable CPU server
-- asks before installing GCC/G++ 13 or newer through a supported system package manager when no compatible compiler is present
+- installs a pinned micromamba executable and a conda-forge GCC/G++ 13 toolchain with a glibc 2.17 compatibility sysroot under `runtime/toolchains/` when no compatible compiler is present
 - installs the same VoiceDesign model set used by the Windows launcher
 
-Allow additional time for the initial native build and use at least 15 GB of free disk space. Later launches reuse the build, models, ports, and validated process records. Run `./stop_webui.sh` to stop only launcher-owned processes. Use `./webui.sh --no-browser` on a headless machine; the local URL is printed to the terminal.
+The Linux launcher does not replace the system compiler and does not require `sudo` for its compiler toolchain. Allow additional time for the initial native build and use at least 15 GB of free disk space. Later launches reuse the toolchain, build, models, ports, and validated process records. Run `./stop_webui.sh` to stop only launcher-owned processes. Use `./webui.sh --no-browser` on a headless machine; the local URL is printed to the terminal.
 
 Model weights and executable packages are downloaded from their upstream projects and are not redistributed in this repository. Review the applicable upstream model and runtime licenses before redistributing a populated `runtime/` directory.
 

@@ -45,10 +45,15 @@ fi
 AUDIO_ROOT="$(mkdir -p -- "$AUDIO_ROOT" && cd -- "$AUDIO_ROOT" && pwd -P)"
 RUNTIME_ROOT="$(cd -- "$AUDIO_ROOT/.." && pwd -P)"
 SOURCE_ROOT="$RUNTIME_ROOT/audio.cpp-source"
-BUILD_ROOT="$RUNTIME_ROOT/audio.cpp-build/linux-cpu-release"
+BUILD_ROOT="$RUNTIME_ROOT/audio.cpp-build/linux-cpu-gcc13-release"
 SERVER_BIN="$BUILD_ROOT/bin/audiocpp_server"
 MODELS_ROOT="$AUDIO_ROOT/models"
 VENV_BIN="$(cd -- "$(dirname -- "$PYTHON_BIN")" && pwd -P)"
+MICROMAMBA_VERSION="2.8.1-0"
+MICROMAMBA_ROOT="$RUNTIME_ROOT/bootstrap/micromamba"
+MICROMAMBA_BIN="$MICROMAMBA_ROOT/micromamba"
+MAMBA_CACHE_ROOT="$RUNTIME_ROOT/micromamba-root"
+TOOLCHAIN_ROOT="$RUNTIME_ROOT/toolchains/gcc13"
 
 download_file() {
   local url="$1"
@@ -63,54 +68,11 @@ download_file() {
   fi
 }
 
-run_privileged() {
-  if [[ "${EUID:-$(id -u)}" -eq 0 ]]; then
-    "$@"
-  elif command -v sudo >/dev/null 2>&1; then
-    sudo "$@"
-  else
-    echo "Root access or sudo is required to install the missing compiler." >&2
-    return 1
-  fi
-}
-
-confirm_system_install() {
-  if [[ "${CVD_AUTO_INSTALL_SYSTEM_DEPS:-0}" == "1" ]]; then
-    return 0
-  fi
-  if [[ ! -t 0 ]]; then
-    echo "GCC 13 or newer is missing. Re-run interactively or set CVD_AUTO_INSTALL_SYSTEM_DEPS=1." >&2
-    return 1
-  fi
-  local answer
-  read -r -p "GCC 13 or newer is required. Install system build packages now? [Y/n] " answer
-  [[ -z "$answer" || "$answer" =~ ^[Yy]$ ]]
-}
-
-install_system_compiler() {
-  confirm_system_install || return 1
-  if command -v apt-get >/dev/null 2>&1; then
-    run_privileged apt-get update
-    if ! run_privileged apt-get install -y gcc-13 g++-13 make curl ca-certificates tar; then
-      run_privileged apt-get install -y build-essential curl ca-certificates tar
-    fi
-  elif command -v dnf >/dev/null 2>&1; then
-    run_privileged dnf install -y gcc gcc-c++ make curl ca-certificates tar
-  elif command -v pacman >/dev/null 2>&1; then
-    run_privileged pacman -S --needed --noconfirm base-devel curl ca-certificates tar
-  elif command -v zypper >/dev/null 2>&1; then
-    run_privileged zypper --non-interactive install gcc13 gcc13-c++ make curl ca-certificates tar
-  else
-    echo "No supported package manager was found. Install GCC/G++ 13 or newer, make, curl, ca-certificates, and tar." >&2
-    return 1
-  fi
-}
-
 compiler_major() {
   "$1" -dumpfullversion -dumpversion 2>/dev/null | awk -F. 'NR == 1 { print $1 }'
 }
 
-select_compiler() {
+select_system_compiler() {
   local candidate major suffix cc_candidate
   for candidate in g++-15 g++-14 g++-13 g++; do
     command -v "$candidate" >/dev/null 2>&1 || continue
@@ -122,16 +84,91 @@ select_compiler() {
     command -v "$cc_candidate" >/dev/null 2>&1 || continue
     CVD_CC="$(command -v "$cc_candidate")"
     CVD_CXX="$(command -v "$candidate")"
+    CVD_TOOLCHAIN_ROOT=""
     return 0
   done
   return 1
 }
 
+select_local_compiler() {
+  local cc_candidate cxx_candidate major
+  cc_candidate="$(find "$TOOLCHAIN_ROOT/bin" -maxdepth 1 \( -type f -o -type l \) -name '*-conda-linux-gnu-cc' -print -quit 2>/dev/null || true)"
+  cxx_candidate="$(find "$TOOLCHAIN_ROOT/bin" -maxdepth 1 \( -type f -o -type l \) -name '*-conda-linux-gnu-c++' -print -quit 2>/dev/null || true)"
+  [[ -x "$cc_candidate" && -x "$cxx_candidate" ]] || return 1
+  major="$(compiler_major "$cxx_candidate")"
+  [[ "$major" =~ ^[0-9]+$ ]] && ((major >= 13)) || return 1
+  CVD_CC="$cc_candidate"
+  CVD_CXX="$cxx_candidate"
+  CVD_TOOLCHAIN_ROOT="$TOOLCHAIN_ROOT"
+}
+
+verify_sha256() {
+  "$PYTHON_BIN" - "$1" "$2" <<'PY'
+from hashlib import sha256
+from pathlib import Path
+import sys
+
+source = Path(sys.argv[1])
+expected = sys.argv[2].lower()
+digest = sha256()
+with source.open("rb") as handle:
+    for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+        digest.update(chunk)
+actual = digest.hexdigest()
+if actual != expected:
+    raise SystemExit(f"SHA-256 mismatch for {source.name}: expected {expected}, got {actual}")
+PY
+}
+
+install_local_compiler() {
+  local architecture asset_name asset_sha platform_suffix compiler_suffix
+  architecture="$(uname -m)"
+  case "$architecture" in
+    x86_64)
+      asset_name="micromamba-linux-64"
+      asset_sha="9689782d863c05a1bf5d2d371ba527104e7a4eb4310c1637d8653b751aed9c82"
+      platform_suffix="64"
+      compiler_suffix="64"
+      ;;
+    aarch64 | arm64)
+      asset_name="micromamba-linux-aarch64"
+      asset_sha="e5ba23b5945aa49dfd11022e592a510d2686a8feee810e00140b73c9fdf0ba2a"
+      platform_suffix="aarch64"
+      compiler_suffix="aarch64"
+      ;;
+    *)
+      echo "No project-local compiler package is configured for $architecture." >&2
+      return 1
+      ;;
+  esac
+
+  mkdir -p -- "$MICROMAMBA_ROOT"
+  if [[ ! -x "$MICROMAMBA_BIN" ]]; then
+    echo "Downloading micromamba $MICROMAMBA_VERSION for the project-local compiler..."
+    download_file \
+      "https://github.com/mamba-org/micromamba-releases/releases/download/$MICROMAMBA_VERSION/$asset_name" \
+      "$MICROMAMBA_BIN"
+    verify_sha256 "$MICROMAMBA_BIN" "$asset_sha"
+    chmod 0755 "$MICROMAMBA_BIN"
+  fi
+
+  echo "Installing a project-local GCC 13 toolchain; the system compiler will not be changed..."
+  MAMBA_ROOT_PREFIX="$MAMBA_CACHE_ROOT" "$MICROMAMBA_BIN" create \
+    --yes \
+    --prefix "$TOOLCHAIN_ROOT" \
+    --override-channels \
+    --channel conda-forge \
+    "gcc_linux-$compiler_suffix=13" \
+    "gxx_linux-$compiler_suffix=13" \
+    "sysroot_linux-$platform_suffix=2.17"
+}
+
 if [[ ! -x "$SERVER_BIN" ]]; then
-  if ! select_compiler; then
-    install_system_compiler
-    if ! select_compiler; then
-      echo "A supported compiler was not found after package installation. audio.cpp requires GCC/G++ 13 or newer." >&2
+  CVD_TOOLCHAIN_ROOT=""
+  if ! select_local_compiler && ! select_system_compiler; then
+    install_local_compiler
+    if ! select_local_compiler; then
+      echo "The project-local GCC 13 toolchain could not be prepared." >&2
       exit 1
     fi
   fi
@@ -151,21 +188,7 @@ if [[ ! -x "$SERVER_BIN" ]]; then
     echo "Downloading audio.cpp source $RELEASE_TAG..."
     download_file "https://github.com/0xShug0/audio.cpp/archive/refs/tags/$RELEASE_TAG.tar.gz" "$SOURCE_ARCHIVE"
     if [[ "$RELEASE_TAG" == "release-0.3-qwen3-tts" ]]; then
-      "$PYTHON_BIN" - "$SOURCE_ARCHIVE" "$PINNED_SOURCE_SHA256" <<'PY'
-from hashlib import sha256
-from pathlib import Path
-import sys
-
-archive = Path(sys.argv[1])
-expected = sys.argv[2].lower()
-digest = sha256()
-with archive.open("rb") as handle:
-    for chunk in iter(lambda: handle.read(1024 * 1024), b""):
-        digest.update(chunk)
-actual = digest.hexdigest()
-if actual != expected:
-    raise SystemExit(f"audio.cpp source SHA-256 mismatch: expected {expected}, got {actual}")
-PY
+      verify_sha256 "$SOURCE_ARCHIVE" "$PINNED_SOURCE_SHA256"
     fi
     tar -xzf "$SOURCE_ARCHIVE" --strip-components=1 -C "$SOURCE_ROOT"
     rm -f -- "$SOURCE_ARCHIVE"
@@ -189,8 +212,15 @@ if [[ ! -x "$SERVER_BIN" ]]; then
   echo "Building the portable audio.cpp CPU server with $CVD_CXX ($JOBS jobs)..."
   (
     cd -- "$SOURCE_ROOT"
-    PATH="$VENV_BIN:$PATH" CC="$CVD_CC" CXX="$CVD_CXX" \
-      bash ./scripts/build_linux.sh \
+    export PATH="$VENV_BIN:$PATH"
+    export CC="$CVD_CC"
+    export CXX="$CVD_CXX"
+    if [[ -n "$CVD_TOOLCHAIN_ROOT" ]]; then
+      export CONDA_PREFIX="$CVD_TOOLCHAIN_ROOT"
+      export PATH="$CVD_TOOLCHAIN_ROOT/bin:$PATH"
+      export LDFLAGS="-Wl,-rpath,$CVD_TOOLCHAIN_ROOT/lib ${LDFLAGS:-}"
+    fi
+    bash ./scripts/build_linux.sh \
       --backend cpu \
       --native-cpu OFF \
       --llamafile OFF \
