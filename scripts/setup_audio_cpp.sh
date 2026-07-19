@@ -6,6 +6,8 @@ PROJECT_ROOT="$(cd -- "$SCRIPT_DIR/.." && pwd -P)"
 AUDIO_ROOT="$PROJECT_ROOT/runtime/audio.cpp"
 PYTHON_BIN=""
 RELEASE_TAG="release-0.3-qwen3-tts"
+BACKEND="cpu"
+CUDA_ARCHITECTURES="native"
 PINNED_SOURCE_SHA256="fd50dc3d331357886dd0e6475e4060c165351dfcf5d33ceaa083766285c1ce59"
 
 while [[ $# -gt 0 ]]; do
@@ -20,6 +22,14 @@ while [[ $# -gt 0 ]]; do
       ;;
     --release-tag)
       RELEASE_TAG="$2"
+      shift 2
+      ;;
+    --backend)
+      BACKEND="$2"
+      shift 2
+      ;;
+    --cuda-architectures)
+      CUDA_ARCHITECTURES="$2"
       shift 2
       ;;
     *)
@@ -37,6 +47,18 @@ if [[ ! "$RELEASE_TAG" =~ ^[A-Za-z0-9._-]+$ ]]; then
   echo "The audio.cpp release tag contains unsupported characters." >&2
   exit 1
 fi
+if [[ "$BACKEND" != "cpu" && "$BACKEND" != "cuda" ]]; then
+  echo "The Linux audio.cpp backend must be cpu or cuda: $BACKEND" >&2
+  exit 1
+fi
+if [[ "$CUDA_ARCHITECTURES" != "native" && ! "$CUDA_ARCHITECTURES" =~ ^[0-9]{2,3}(\;[0-9]{2,3})*$ ]]; then
+  echo "CUDA architectures must be 'native' or a semicolon-separated list such as '86'." >&2
+  exit 1
+fi
+if [[ "$BACKEND" == "cuda" && "$(uname -m)" != "x86_64" ]]; then
+  echo "The isolated CUDA 13.0 build currently supports Linux x86_64 only." >&2
+  exit 1
+fi
 if [[ -z "$PYTHON_BIN" || ! -x "$PYTHON_BIN" ]]; then
   echo "A project-local Python executable is required: $PYTHON_BIN" >&2
   exit 1
@@ -45,7 +67,12 @@ fi
 AUDIO_ROOT="$(mkdir -p -- "$AUDIO_ROOT" && cd -- "$AUDIO_ROOT" && pwd -P)"
 RUNTIME_ROOT="$(cd -- "$AUDIO_ROOT/.." && pwd -P)"
 SOURCE_ROOT="$RUNTIME_ROOT/audio.cpp-source"
-BUILD_ROOT="$RUNTIME_ROOT/audio.cpp-build/linux-cpu-gcc13-release"
+if [[ "$BACKEND" == "cuda" ]]; then
+  CUDA_ARCHITECTURE_TAG="${CUDA_ARCHITECTURES//;/_}"
+  BUILD_ROOT="$RUNTIME_ROOT/audio.cpp-build/linux-cuda13-sm${CUDA_ARCHITECTURE_TAG}-gcc13-native-release"
+else
+  BUILD_ROOT="$RUNTIME_ROOT/audio.cpp-build/linux-cpu-gcc13-native-release"
+fi
 SERVER_BIN="$BUILD_ROOT/bin/audiocpp_server"
 MODELS_ROOT="$AUDIO_ROOT/models"
 VENV_BIN="$(cd -- "$(dirname -- "$PYTHON_BIN")" && pwd -P)"
@@ -54,6 +81,8 @@ MICROMAMBA_ROOT="$RUNTIME_ROOT/bootstrap/micromamba"
 MICROMAMBA_BIN="$MICROMAMBA_ROOT/micromamba"
 MAMBA_CACHE_ROOT="$RUNTIME_ROOT/micromamba-root"
 TOOLCHAIN_ROOT="$RUNTIME_ROOT/toolchains/gcc13"
+CUDA_TOOLKIT_ROOT="$RUNTIME_ROOT/toolchains/cuda13"
+CUDA_CHANNEL="nvidia/label/cuda-13.0.0"
 PYWORLD_REQUIREMENT="pyworld==0.3.5"
 SETUPTOOLS_REQUIREMENT="setuptools<81"
 
@@ -122,21 +151,17 @@ if actual != expected:
 PY
 }
 
-install_local_compiler() {
-  local architecture asset_name asset_sha platform_suffix compiler_suffix
+ensure_micromamba() {
+  local architecture asset_name asset_sha
   architecture="$(uname -m)"
   case "$architecture" in
     x86_64)
       asset_name="micromamba-linux-64"
       asset_sha="9689782d863c05a1bf5d2d371ba527104e7a4eb4310c1637d8653b751aed9c82"
-      platform_suffix="64"
-      compiler_suffix="64"
       ;;
     aarch64 | arm64)
       asset_name="micromamba-linux-aarch64"
       asset_sha="e5ba23b5945aa49dfd11022e592a510d2686a8feee810e00140b73c9fdf0ba2a"
-      platform_suffix="aarch64"
-      compiler_suffix="aarch64"
       ;;
     *)
       echo "No project-local compiler package is configured for $architecture." >&2
@@ -146,14 +171,34 @@ install_local_compiler() {
 
   mkdir -p -- "$MICROMAMBA_ROOT"
   if [[ ! -x "$MICROMAMBA_BIN" ]]; then
-    echo "Downloading micromamba $MICROMAMBA_VERSION for the project-local compiler..."
+    echo "Downloading micromamba $MICROMAMBA_VERSION for project-local toolchains..."
     download_file \
       "https://github.com/mamba-org/micromamba-releases/releases/download/$MICROMAMBA_VERSION/$asset_name" \
       "$MICROMAMBA_BIN"
     verify_sha256 "$MICROMAMBA_BIN" "$asset_sha"
     chmod 0755 "$MICROMAMBA_BIN"
   fi
+}
 
+install_local_compiler() {
+  local architecture platform_suffix compiler_suffix
+  architecture="$(uname -m)"
+  case "$architecture" in
+    x86_64)
+      platform_suffix="64"
+      compiler_suffix="64"
+      ;;
+    aarch64 | arm64)
+      platform_suffix="aarch64"
+      compiler_suffix="aarch64"
+      ;;
+    *)
+      echo "No project-local compiler package is configured for $architecture." >&2
+      return 1
+      ;;
+  esac
+
+  ensure_micromamba
   echo "Installing a project-local GCC 13 toolchain; the system compiler will not be changed..."
   MAMBA_ROOT_PREFIX="$MAMBA_CACHE_ROOT" "$MICROMAMBA_BIN" create \
     --yes \
@@ -164,6 +209,37 @@ install_local_compiler() {
     "gxx_linux-$compiler_suffix=13" \
     "sysroot_linux-$platform_suffix=2.17"
 }
+
+cuda_toolkit_ready() {
+  [[ -x "$CUDA_TOOLKIT_ROOT/bin/nvcc" ]] &&
+    "$CUDA_TOOLKIT_ROOT/bin/nvcc" --version 2>/dev/null | grep -q 'release 13\.0'
+}
+
+install_cuda_toolkit() {
+  local action="create"
+  ensure_micromamba
+  if [[ -d "$CUDA_TOOLKIT_ROOT/conda-meta" ]]; then
+    action="install"
+  fi
+  echo "Installing the project-local CUDA Toolkit 13.0; the NVIDIA driver and system CUDA will not be changed..."
+  MAMBA_ROOT_PREFIX="$MAMBA_CACHE_ROOT" "$MICROMAMBA_BIN" "$action" \
+    --yes \
+    --prefix "$CUDA_TOOLKIT_ROOT" \
+    --override-channels \
+    --channel "$CUDA_CHANNEL" \
+    cuda-libraries-dev \
+    cuda-nvcc \
+    cuda-nvtx \
+    cuda-cupti
+}
+
+if [[ "$BACKEND" == "cuda" ]] && ! cuda_toolkit_ready; then
+  install_cuda_toolkit
+  if ! cuda_toolkit_ready; then
+    echo "The isolated CUDA Toolkit must report release 13.0: $CUDA_TOOLKIT_ROOT/bin/nvcc" >&2
+    exit 1
+  fi
+fi
 
 if [[ ! -x "$SERVER_BIN" ]]; then
   CVD_TOOLCHAIN_ROOT=""
@@ -233,7 +309,7 @@ if [[ ! -x "$SERVER_BIN" ]]; then
     ((JOBS > 4)) && JOBS=4
     ((JOBS < 1)) && JOBS=1
   fi
-  echo "Building the portable audio.cpp CPU server with $CVD_CXX ($JOBS jobs)..."
+  echo "Building the optimized audio.cpp $BACKEND server with $CVD_CXX ($JOBS jobs)..."
   (
     cd -- "$SOURCE_ROOT"
     export PATH="$VENV_BIN:$PATH"
@@ -244,10 +320,29 @@ if [[ ! -x "$SERVER_BIN" ]]; then
       export PATH="$CVD_TOOLCHAIN_ROOT/bin:$PATH"
       export LDFLAGS="-Wl,-rpath,$CVD_TOOLCHAIN_ROOT/lib ${LDFLAGS:-}"
     fi
+    if [[ "$BACKEND" == "cuda" ]]; then
+      export CUDA_HOME="$CUDA_TOOLKIT_ROOT"
+      export CUDAToolkit_ROOT="$CUDA_TOOLKIT_ROOT"
+      export CUDACXX="$CUDA_TOOLKIT_ROOT/bin/nvcc"
+      export CUDAHOSTCXX="$CVD_CXX"
+      export CUDAARCHS="$CUDA_ARCHITECTURES"
+      export PATH="$CUDA_TOOLKIT_ROOT/bin:$PATH"
+      export CMAKE_PREFIX_PATH="$CUDA_TOOLKIT_ROOT${CMAKE_PREFIX_PATH:+:$CMAKE_PREFIX_PATH}"
+      for cuda_lib in \
+        "$CUDA_TOOLKIT_ROOT/targets/x86_64-linux/lib" \
+        "$CUDA_TOOLKIT_ROOT/lib64" \
+        "$CUDA_TOOLKIT_ROOT/lib"; do
+        if [[ -d "$cuda_lib" ]]; then
+          export LD_LIBRARY_PATH="$cuda_lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+          export LIBRARY_PATH="$cuda_lib${LIBRARY_PATH:+:$LIBRARY_PATH}"
+          export LDFLAGS="-Wl,-rpath,$cuda_lib ${LDFLAGS:-}"
+        fi
+      done
+    fi
     bash ./scripts/build_linux.sh \
-      --backend cpu \
-      --native-cpu OFF \
-      --llamafile OFF \
+      --backend "$BACKEND" \
+      --native-cpu ON \
+      --llamafile ON \
       --deployment-build \
       --build-dir "$BUILD_ROOT" \
       --jobs "$JOBS" \

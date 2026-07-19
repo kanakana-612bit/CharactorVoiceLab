@@ -35,11 +35,26 @@ chmod +x webui.sh stop_webui.sh
 The pinned audio.cpp release does not publish a Linux prebuilt package. On the first launch, the script therefore:
 
 - prepares project-local Python 3.12, CMake, Ninja, and the audio post-processing dependencies
-- downloads the pinned audio.cpp source and builds a portable CPU server
+- detects a compatible NVIDIA GPU and otherwise selects the optimized CPU backend
+- downloads the pinned audio.cpp source and builds with native CPU kernels and llamafile SGEMM
 - installs a pinned micromamba executable and a conda-forge GCC/G++ 13 toolchain with a glibc 2.17 compatibility sysroot under `runtime/toolchains/` when no compatible compiler is present
+- for NVIDIA inference, installs CUDA Toolkit 13.0 under `runtime/toolchains/cuda13/` and builds only for the detected compute capability
 - installs the same VoiceDesign model set used by the Windows launcher
 
-The Linux launcher does not replace the system compiler and does not require `sudo` for its compiler toolchain. Allow additional time for the initial native build and use at least 15 GB of free disk space. Later launches reuse the toolchain, build, models, ports, and validated process records. Run `./stop_webui.sh` to stop only launcher-owned processes. Use `./webui.sh --no-browser` on a headless machine; the local URL is printed to the terminal.
+The CUDA path is supported on Linux x86_64 with compute capability 7.5 or newer and an NVIDIA driver compatible with CUDA 13.0. The [CUDA 13.0 release notes](https://docs.nvidia.com/cuda/archive/13.0.0/cuda-toolkit-release-notes/index.html) specify driver 580.65.06 as the Linux minimum; 580.159.03 is supported. The launcher follows NVIDIA's [isolated Conda environment guidance](https://docs.nvidia.com/cuda/cuda-installation-guide-linux/#conda-installation) and never installs or replaces the NVIDIA driver or system CUDA. It uses the existing driver and keeps the exact Toolkit 13.0 build dependencies inside this project. An RTX 3060 is compiled for `sm_86`. Keep at least 6 GiB of GPU memory free before inference; the launcher warns when less is available.
+
+The Linux launcher does not replace the system compiler and does not require `sudo` for its compiler or CUDA toolchains. Allow additional time for the initial native build and use at least 20 GB of free disk space for a CUDA setup. Later launches reuse the toolchains, build, models, ports, and validated process records. Run `./stop_webui.sh` to stop only launcher-owned processes. Use `./webui.sh --no-browser` on a headless machine; the local URL is printed to the terminal.
+
+Backend and performance overrides are environment variables:
+
+```bash
+CVD_BACKEND=cuda ./webui.sh       # require CUDA; fail instead of falling back
+CVD_BACKEND=cpu ./webui.sh        # force the optimized CPU build
+CVD_INFERENCE_THREADS=10 ./webui.sh
+CVD_CUDA_ARCHITECTURES=86 ./webui.sh
+```
+
+Without an override, `CVD_BACKEND=auto` selects CUDA when the driver and GPU pass validation, then falls back to CPU when they do not. The default thread count is the smaller of 10 and the detected physical core count.
 
 Every launch verifies that `pyworld` and `praat-parselmouth` can actually be loaded, not merely that their packages are installed. The local environment pins `pyworld` and retains the compatible `setuptools` provider required by Linux source builds. If F0 correction fails after an update, run `./stop_webui.sh` followed by `./webui.sh`; the launcher repairs the local packages and reloads the WebUI bridge. The exact native-import diagnostics can be checked with `runtime/mm/bin/python audio_postprocess.py --check`.
 
@@ -75,7 +90,7 @@ not used by CharacterVoiceDesigner.
 
 Use `-Backend cuda` when a supported NVIDIA GPU and current driver are available. Model weights and the audio.cpp runtime are stored under ignored `runtime/` paths and are never included in project packages.
 
-The default Windows setup path downloads the official `balance` prebuilt package, so Visual Studio, CMake, and Ninja are not required. `-BuildFromSource` is available when a custom build is needed. CUDA prebuilts require a compatible NVIDIA GPU/driver but not the CUDA Toolkit. Both one-click launchers intentionally use the CPU baseline for broad compatibility; advanced users can configure a custom CUDA build separately.
+The default Windows setup path downloads the official `balance` prebuilt package, so Visual Studio, CMake, and Ninja are not required. `-BuildFromSource` is available when a custom build is needed. CUDA prebuilts require a compatible NVIDIA GPU/driver but not the CUDA Toolkit. The Windows launcher retains its CPU baseline; the Linux launcher now selects its isolated CUDA 13.0 build automatically when compatible hardware is available.
 
 The implementation roadmap is tracked in `IMPLEMENTATION_PLAN.md`.
 Literature and dataset gaps are tracked in `EVIDENCE_GAPS.md`.
