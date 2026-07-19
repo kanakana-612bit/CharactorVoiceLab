@@ -4,6 +4,9 @@ Current branch version: Ver 0.1
 
 CharacterVoiceDesigner converts appearance-derived and manually designed voice features into backend-neutral identity anchors and serializable control functions. The frozen Character Voice Lab physical synthesizer remains available as the profile-audition and calibration layer.
 
+This repository is a concept-implementation prototype of the design framework
+proposed in [「身体構造推定に基づくキャラクター指向音声合成の設計枠組み」](https://doi.org/10.51094/jxiv.4033).
+
 ## One-click Windows setup
 
 On 64-bit Windows 10 or 11, clone or extract the repository and run:
