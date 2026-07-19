@@ -8,6 +8,7 @@ PYTHON_BIN=""
 RELEASE_TAG="release-0.3-qwen3-tts"
 BACKEND="cpu"
 CUDA_ARCHITECTURES="native"
+CUDA_VERSION="12.4"
 PINNED_SOURCE_SHA256="fd50dc3d331357886dd0e6475e4060c165351dfcf5d33ceaa083766285c1ce59"
 
 while [[ $# -gt 0 ]]; do
@@ -56,7 +57,7 @@ if [[ "$CUDA_ARCHITECTURES" != "native" && ! "$CUDA_ARCHITECTURES" =~ ^[0-9]{2,3
   exit 1
 fi
 if [[ "$BACKEND" == "cuda" && "$(uname -m)" != "x86_64" ]]; then
-  echo "The isolated CUDA 13.0 build currently supports Linux x86_64 only." >&2
+  echo "The isolated CUDA $CUDA_VERSION build currently supports Linux x86_64 only." >&2
   exit 1
 fi
 if [[ -z "$PYTHON_BIN" || ! -x "$PYTHON_BIN" ]]; then
@@ -67,9 +68,12 @@ fi
 AUDIO_ROOT="$(mkdir -p -- "$AUDIO_ROOT" && cd -- "$AUDIO_ROOT" && pwd -P)"
 RUNTIME_ROOT="$(cd -- "$AUDIO_ROOT/.." && pwd -P)"
 SOURCE_ROOT="$RUNTIME_ROOT/audio.cpp-source"
+CUDA_VERSION_NODOT="${CUDA_VERSION//./}"
+CUDA_TOOLKIT_ROOT="$RUNTIME_ROOT/toolchains/cuda${CUDA_VERSION_NODOT}"
+CUDA_CHANNEL="nvidia/label/cuda-${CUDA_VERSION}.0"
 if [[ "$BACKEND" == "cuda" ]]; then
   CUDA_ARCHITECTURE_TAG="${CUDA_ARCHITECTURES//;/_}"
-  BUILD_ROOT="$RUNTIME_ROOT/audio.cpp-build/linux-cuda13-sm${CUDA_ARCHITECTURE_TAG}-gcc13-native-release"
+  BUILD_ROOT="$RUNTIME_ROOT/audio.cpp-build/linux-cuda${CUDA_VERSION_NODOT}-sm${CUDA_ARCHITECTURE_TAG}-gcc13-native-release"
 else
   BUILD_ROOT="$RUNTIME_ROOT/audio.cpp-build/linux-cpu-gcc13-native-release"
 fi
@@ -81,10 +85,21 @@ MICROMAMBA_ROOT="$RUNTIME_ROOT/bootstrap/micromamba"
 MICROMAMBA_BIN="$MICROMAMBA_ROOT/micromamba"
 MAMBA_CACHE_ROOT="$RUNTIME_ROOT/micromamba-root"
 TOOLCHAIN_ROOT="$RUNTIME_ROOT/toolchains/gcc13"
-CUDA_TOOLKIT_ROOT="$RUNTIME_ROOT/toolchains/cuda13"
-CUDA_CHANNEL="nvidia/label/cuda-13.0.0"
 PYWORLD_REQUIREMENT="pyworld==0.3.5"
 SETUPTOOLS_REQUIREMENT="setuptools<81"
+
+find_cuda_nvcc() {
+  [[ -d "$CUDA_TOOLKIT_ROOT" ]] || return 1
+  if [[ -x "$CUDA_TOOLKIT_ROOT/bin/nvcc" ]]; then
+    printf '%s\n' "$CUDA_TOOLKIT_ROOT/bin/nvcc"
+    return 0
+  fi
+
+  local nvcc_path
+  nvcc_path="$(find "$CUDA_TOOLKIT_ROOT" \( -type f -o -type l \) -path '*/bin/nvcc' -print | head -n 1 || true)"
+  [[ -n "$nvcc_path" && -x "$nvcc_path" ]] || return 1
+  printf '%s\n' "$nvcc_path"
+}
 
 download_file() {
   local url="$1"
@@ -211,9 +226,15 @@ install_local_compiler() {
 }
 
 cuda_toolkit_ready() {
-  [[ -x "$CUDA_TOOLKIT_ROOT/bin/nvcc" ]] &&
-    "$CUDA_TOOLKIT_ROOT/bin/nvcc" --version 2>/dev/null | grep -q 'release 13\.0'
+  local nvcc_path
+  nvcc_path="$(find_cuda_nvcc)" || return 1
+  "$nvcc_path" --version 2>/dev/null | grep -q "release ${CUDA_VERSION}" &&
+    [[ -f "$CUDA_TOOLKIT_ROOT/targets/x86_64-linux/include/cuda_runtime.h" ]] &&
+    [[ -f "$CUDA_TOOLKIT_ROOT/targets/x86_64-linux/include/cufft.h" ]] &&
+    find "$CUDA_TOOLKIT_ROOT/targets/x86_64-linux/lib" \
+      -name 'libcufft.so*' -print -quit | grep -q .
 }
+
 
 install_cuda_toolkit() {
   local action="create"
@@ -221,14 +242,20 @@ install_cuda_toolkit() {
   if [[ -d "$CUDA_TOOLKIT_ROOT/conda-meta" ]]; then
     action="install"
   fi
-  echo "Installing the project-local CUDA Toolkit 13.0; the NVIDIA driver and system CUDA will not be changed..."
+
+  echo "Installing the project-local CUDA Toolkit ${CUDA_VERSION}; the NVIDIA driver and system CUDA will not be changed..."
   MAMBA_ROOT_PREFIX="$MAMBA_CACHE_ROOT" "$MICROMAMBA_BIN" "$action" \
     --yes \
     --prefix "$CUDA_TOOLKIT_ROOT" \
     --override-channels \
+    --channel conda-forge \
     --channel "$CUDA_CHANNEL" \
-    cuda-libraries-dev \
-    cuda-nvcc \
+    "cuda-version=${CUDA_VERSION}" \
+    cuda-nvcc_linux-64 \
+    cuda-cudart-dev \
+    libcublas-dev \
+    libcurand-dev \
+    libcufft-dev \
     cuda-nvtx \
     cuda-cupti
 }
@@ -236,7 +263,7 @@ install_cuda_toolkit() {
 if [[ "$BACKEND" == "cuda" ]] && ! cuda_toolkit_ready; then
   install_cuda_toolkit
   if ! cuda_toolkit_ready; then
-    echo "The isolated CUDA Toolkit must report release 13.0: $CUDA_TOOLKIT_ROOT/bin/nvcc" >&2
+    echo "The isolated CUDA Toolkit must report release $CUDA_VERSION under $CUDA_TOOLKIT_ROOT." >&2
     exit 1
   fi
 fi
@@ -320,14 +347,23 @@ if [[ ! -x "$SERVER_BIN" ]]; then
       export PATH="$CVD_TOOLCHAIN_ROOT/bin:$PATH"
       export LDFLAGS="-Wl,-rpath,$CVD_TOOLCHAIN_ROOT/lib ${LDFLAGS:-}"
     fi
+
     if [[ "$BACKEND" == "cuda" ]]; then
+      CUDA_NVCC="$(find_cuda_nvcc)" || {
+        echo "Could not find nvcc under $CUDA_TOOLKIT_ROOT" >&2
+        exit 1
+      }
+
       export CUDA_HOME="$CUDA_TOOLKIT_ROOT"
       export CUDAToolkit_ROOT="$CUDA_TOOLKIT_ROOT"
-      export CUDACXX="$CUDA_TOOLKIT_ROOT/bin/nvcc"
+      export CUDACXX="$CUDA_NVCC"
       export CUDAHOSTCXX="$CVD_CXX"
       export CUDAARCHS="$CUDA_ARCHITECTURES"
-      export PATH="$CUDA_TOOLKIT_ROOT/bin:$PATH"
+      export CMAKE_CUDA_FLAGS="-I$CUDA_TOOLKIT_ROOT/targets/x86_64-linux/include ${CMAKE_CUDA_FLAGS:-}"
+      export CPATH="$CUDA_TOOLKIT_ROOT/targets/x86_64-linux/include${CPATH:+:$CPATH}"
+      export PATH="$(dirname "$CUDA_NVCC"):$CUDA_TOOLKIT_ROOT/bin:$PATH"
       export CMAKE_PREFIX_PATH="$CUDA_TOOLKIT_ROOT${CMAKE_PREFIX_PATH:+:$CMAKE_PREFIX_PATH}"
+
       for cuda_lib in \
         "$CUDA_TOOLKIT_ROOT/targets/x86_64-linux/lib" \
         "$CUDA_TOOLKIT_ROOT/lib64" \
@@ -339,6 +375,7 @@ if [[ ! -x "$SERVER_BIN" ]]; then
         fi
       done
     fi
+
     bash ./scripts/build_linux.sh \
       --backend "$BACKEND" \
       --native-cpu ON \

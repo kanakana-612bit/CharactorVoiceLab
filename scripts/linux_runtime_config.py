@@ -17,6 +17,7 @@ from dataclasses import asdict, dataclass
 
 MIN_CUDA_DRIVER = (580, 65, 6)
 MIN_CUDA_COMPUTE_CAPABILITY = (7, 5)
+PINNED_CUDA_TOOLKIT_VERSION = "12.4"
 DEFAULT_THREAD_CAP = 10
 RECOMMENDED_FREE_VRAM_MIB = 6144
 
@@ -165,7 +166,9 @@ def select_runtime(
     normalized_arch = architecture.lower()
     if normalized_arch not in {"x86_64", "amd64"}:
         if requested == "cuda":
-            raise RuntimeConfigError("The isolated CUDA 13.0 build currently supports Linux x86_64 only.")
+            raise RuntimeConfigError(
+                f"The isolated CUDA {PINNED_CUDA_TOOLKIT_VERSION} build currently supports Linux x86_64 only."
+            )
         return RuntimeConfig(
             "cpu", 0, threads, "", "", 0, 0, "", f"CUDA is not configured for {architecture}; using CPU."
         )
@@ -181,13 +184,13 @@ def select_runtime(
             continue
         if not version_at_least(driver, MIN_CUDA_DRIVER):
             incompatibility = (
-                f"NVIDIA driver {gpu.driver_version} is below the CUDA 13.0 minimum "
+                f"NVIDIA driver {gpu.driver_version} is below the required driver baseline "
                 f"{'.'.join(map(str, MIN_CUDA_DRIVER))}."
             )
             continue
         if not version_at_least(capability, MIN_CUDA_COMPUTE_CAPABILITY):
             incompatibility = (
-                f"GPU {gpu.name} has compute capability {gpu.compute_capability}; CUDA 13.0 builds require 7.5 or newer."
+                f"GPU {gpu.name} has compute capability {gpu.compute_capability}; this build requires 7.5 or newer."
             )
             continue
         compatible.append(gpu)
@@ -201,7 +204,10 @@ def select_runtime(
     capability = parse_version(gpu.compute_capability, field="CUDA compute capability")
     detected_architecture = f"{capability[0]}{capability[1]}"
     cuda_architectures = normalize_cuda_architectures(cuda_architectures_override) or detected_architecture
-    reason = f"Selected {gpu.name} with NVIDIA driver {gpu.driver_version} for CUDA 13.0."
+    reason = (
+        f"Selected {gpu.name} with NVIDIA driver {gpu.driver_version} "
+        f"for the pinned CUDA {PINNED_CUDA_TOOLKIT_VERSION} runtime."
+    )
     if gpu.free_memory_mib < RECOMMENDED_FREE_VRAM_MIB:
         reason += (
             f" WARNING: only {gpu.free_memory_mib} MiB VRAM is currently free; "

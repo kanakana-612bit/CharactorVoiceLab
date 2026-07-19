@@ -38,10 +38,10 @@ The pinned audio.cpp release does not publish a Linux prebuilt package. On the f
 - detects a compatible NVIDIA GPU and otherwise selects the optimized CPU backend
 - downloads the pinned audio.cpp source and builds with native CPU kernels and llamafile SGEMM
 - installs a pinned micromamba executable and a conda-forge GCC/G++ 13 toolchain with a glibc 2.17 compatibility sysroot under `runtime/toolchains/` when no compatible compiler is present
-- for NVIDIA inference, installs CUDA Toolkit 13.0 under `runtime/toolchains/cuda13/` and builds only for the detected compute capability
+- for NVIDIA inference, installs the tested CUDA Toolkit 12.4 dependency set under `runtime/toolchains/cuda124/` and builds only for the detected compute capability
 - installs the same VoiceDesign model set used by the Windows launcher
 
-The CUDA path is supported on Linux x86_64 with compute capability 7.5 or newer and an NVIDIA driver compatible with CUDA 13.0. The [CUDA 13.0 release notes](https://docs.nvidia.com/cuda/archive/13.0.0/cuda-toolkit-release-notes/index.html) specify driver 580.65.06 as the Linux minimum; 580.159.03 is supported. The launcher follows NVIDIA's [isolated Conda environment guidance](https://docs.nvidia.com/cuda/cuda-installation-guide-linux/#conda-installation) and never installs or replaces the NVIDIA driver or system CUDA. It uses the existing driver and keeps the exact Toolkit 13.0 build dependencies inside this project. An RTX 3060 is compiled for `sm_86`. Keep at least 6 GiB of GPU memory free before inference; the launcher warns when less is available.
+The CUDA path is supported on Linux x86_64 with compute capability 7.5 or newer. Driver 580.159.03 is validated with the pinned CUDA Toolkit 12.4 build. The `CUDA Version: 13.0` value reported by `nvidia-smi` describes driver capability; CharacterVoiceDesigner intentionally uses its tested project-local 12.4 toolkit. The launcher follows NVIDIA's [isolated Conda environment guidance](https://docs.nvidia.com/cuda/cuda-installation-guide-linux/#conda-installation) and never installs or replaces the NVIDIA driver or system CUDA. An RTX 3060 is compiled for `sm_86`. Keep at least 6 GiB of GPU memory free before inference; the launcher warns when less is available.
 
 The Linux launcher does not replace the system compiler and does not require `sudo` for its compiler or CUDA toolchains. Allow additional time for the initial native build and use at least 20 GB of free disk space for a CUDA setup. Later launches reuse the toolchains, build, models, ports, and validated process records. Run `./stop_webui.sh` to stop only launcher-owned processes. Use `./webui.sh --no-browser` on a headless machine; the local URL is printed to the terminal.
 
@@ -90,7 +90,7 @@ not used by CharacterVoiceDesigner.
 
 Use `-Backend cuda` when a supported NVIDIA GPU and current driver are available. Model weights and the audio.cpp runtime are stored under ignored `runtime/` paths and are never included in project packages.
 
-The default Windows setup path downloads the official `balance` prebuilt package, so Visual Studio, CMake, and Ninja are not required. `-BuildFromSource` is available when a custom build is needed. CUDA prebuilts require a compatible NVIDIA GPU/driver but not the CUDA Toolkit. The Windows launcher retains its CPU baseline; the Linux launcher now selects its isolated CUDA 13.0 build automatically when compatible hardware is available.
+The default Windows setup path downloads the official `balance` prebuilt package, so Visual Studio, CMake, and Ninja are not required. `-BuildFromSource` is available when a custom build is needed. CUDA prebuilts require a compatible NVIDIA GPU/driver but not the CUDA Toolkit. The Windows launcher retains its CPU baseline; the Linux launcher selects its isolated CUDA 12.4 build automatically when compatible hardware is available.
 
 The implementation roadmap is tracked in `IMPLEMENTATION_PLAN.md`.
 Literature and dataset gaps are tracked in `EVIDENCE_GAPS.md`.

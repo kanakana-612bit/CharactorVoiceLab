@@ -18,12 +18,13 @@ class LinuxRuntimeConfigTest(unittest.TestCase):
     def setUp(self) -> None:
         self.rtx3060 = runtime.GpuInfo(0, "NVIDIA GeForce RTX 3060", "580.159.03", "8.6", 12288, 3727)
 
-    def test_auto_selects_cuda_13_for_compatible_rtx3060(self) -> None:
+    def test_auto_selects_pinned_cuda_for_compatible_rtx3060(self) -> None:
         config = runtime.select_runtime("auto", "x86_64", [self.rtx3060], 10)
         self.assertEqual(config.backend, "cuda")
         self.assertEqual(config.cuda_architectures, "86")
         self.assertEqual(config.device, 0)
         self.assertEqual(config.threads, 10)
+        self.assertIn("CUDA 12.4", config.selection_reason)
         self.assertIn("free at least", config.selection_reason)
 
     def test_nvidia_smi_query_output_is_parsed(self) -> None:
