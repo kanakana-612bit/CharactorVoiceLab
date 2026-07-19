@@ -4,9 +4,32 @@ Current branch version: Ver 0.1
 
 CharacterVoiceDesigner converts appearance-derived and manually designed voice features into backend-neutral identity anchors and serializable control functions. The frozen Character Voice Lab physical synthesizer remains available as the profile-audition and calibration layer.
 
-The current TTS adapter targets the local `audio.cpp` server and its Japanese Irodori-TTS VoiceDesign path. The browser does not load native inference code or model weights. `designer_server.py` serves the independent WebUI and exposes a narrow same-origin bridge to `http://127.0.0.1:8080`.
+## One-click Windows setup
 
-Start the WebUI bridge:
+On 64-bit Windows 10 or 11, clone or extract the repository and run:
+
+```bat
+webui.bat
+```
+
+The first launch prepares everything under the ignored `runtime/` directory:
+
+- project-local Python 3.12
+- the tested official Windows x64 CPU `audio.cpp` balance runtime (`release-0.3-qwen3-tts`)
+- the Japanese VoiceDesign inference model, tokenizer, and codec
+- WORLD analysis and Praat PSOLA dependencies for direct F0 correction
+
+No Visual Studio, CMake, CUDA Toolkit, system Python, or pre-existing `audio.cpp` checkout is required. An internet connection is required on the first run. It downloads several gigabytes and should be started with at least 10 GB of free disk space. Later launches validate and reuse the local environment without downloading it again.
+
+The launcher starts both services on loopback-only addresses, selects nearby free ports when the defaults are occupied, and opens the WebUI. Run `stop_webui.bat` to stop only the processes owned by the launcher. Logs are stored in `runtime/logs/`.
+
+Model weights and executable packages are downloaded from their upstream projects and are not redistributed in this repository. Review the applicable upstream model and runtime licenses before redistributing a populated `runtime/` directory.
+
+## Manual and advanced startup
+
+The current TTS adapter targets a local `audio.cpp` server and Japanese VoiceDesign inference path. The browser does not load native inference code or model weights. `designer_server.py` serves the independent WebUI and exposes a narrow same-origin bridge to the selected loopback audio.cpp port.
+
+To start only the WebUI bridge:
 
 ```powershell
 .\scripts\start_designer.ps1
@@ -14,7 +37,7 @@ Start the WebUI bridge:
 
 Then open `http://127.0.0.1:8765/`. The image, landmark, physical-profile, and export features remain usable while audio.cpp is offline.
 
-To prepare audio.cpp on Windows, use the official prebuilt CPU package and install the VoiceDesign model:
+To prepare and start audio.cpp manually:
 
 ```powershell
 .\scripts\setup_audio_cpp.ps1 -Backend cpu -InstallModel
@@ -32,7 +55,7 @@ not used by CharacterVoiceDesigner.
 
 Use `-Backend cuda` when a supported NVIDIA GPU and current driver are available. Model weights and the audio.cpp runtime are stored under ignored `runtime/` paths and are never included in project packages.
 
-The default setup path downloads the official `balance` prebuilt package, so Visual Studio, CMake, and Ninja are not required. `-BuildFromSource` is available when a custom build is needed. CUDA prebuilts require a compatible NVIDIA GPU/driver but not the CUDA Toolkit.
+The default setup path downloads the official `balance` prebuilt package, so Visual Studio, CMake, and Ninja are not required. `-BuildFromSource` is available when a custom build is needed. CUDA prebuilts require a compatible NVIDIA GPU/driver but not the CUDA Toolkit. The one-click launcher intentionally uses the CPU baseline for broad compatibility; advanced users can run the setup scripts manually for CUDA.
 
 The implementation roadmap is tracked in `IMPLEMENTATION_PLAN.md`.
 Literature and dataset gaps are tracked in `EVIDENCE_GAPS.md`.

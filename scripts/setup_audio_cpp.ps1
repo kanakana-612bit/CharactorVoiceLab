@@ -4,11 +4,14 @@ param(
   [string]$Backend = "cpu",
   [ValidateSet("balance", "fast", "portable")]
   [string]$Profile = "balance",
+  [string]$ReleaseTag = "",
+  [string]$ModelPython = "",
   [switch]$InstallModel,
   [switch]$BuildFromSource
 )
 
 $ErrorActionPreference = "Stop"
+[Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
 $ProjectRoot = Split-Path -Parent $PSScriptRoot
 if (-not $AudioCppRoot) {
   $AudioCppRoot = Join-Path $ProjectRoot "runtime\audio.cpp"
@@ -17,6 +20,21 @@ $AudioCppRoot = [System.IO.Path]::GetFullPath($AudioCppRoot)
 $RuntimeRoot = Split-Path -Parent $AudioCppRoot
 New-Item -ItemType Directory -Force -Path $RuntimeRoot | Out-Null
 New-Item -ItemType Directory -Force -Path $AudioCppRoot | Out-Null
+
+$Headers = @{ "User-Agent" = "CharacterVoiceDesigner-audio.cpp-setup" }
+$script:AudioCppRelease = $null
+function Get-AudioCppRelease {
+  if (-not $script:AudioCppRelease) {
+    $ReleaseUri = if ($ReleaseTag) {
+      $EscapedTag = [Uri]::EscapeDataString($ReleaseTag)
+      "https://api.github.com/repos/0xShug0/audio.cpp/releases/tags/$EscapedTag"
+    } else {
+      "https://api.github.com/repos/0xShug0/audio.cpp/releases/latest"
+    }
+    $script:AudioCppRelease = Invoke-RestMethod -Headers $Headers -Uri $ReleaseUri
+  }
+  return $script:AudioCppRelease
+}
 
 if ($BuildFromSource) {
   foreach ($Tool in @("git", "cmake", "ninja")) {
@@ -41,8 +59,7 @@ if ($BuildFromSource) {
 } else {
   $ExistingServer = Get-ChildItem -LiteralPath $AudioCppRoot -Filter "audiocpp_server.exe" -File -Recurse -ErrorAction SilentlyContinue | Select-Object -First 1
   if (-not $ExistingServer) {
-    $Headers = @{ "User-Agent" = "CharacterVoiceDesigner-audio.cpp-setup" }
-    $Release = Invoke-RestMethod -Headers $Headers -Uri "https://api.github.com/repos/0xShug0/audio.cpp/releases/latest"
+    $Release = Get-AudioCppRelease
     $AssetPatterns = if ($Backend -eq "cuda") {
       @("audiocpp-windows-cuda-runtime.zip", "audiocpp-windows-cuda-$Profile*.zip")
     } else {
@@ -54,6 +71,10 @@ if ($BuildFromSource) {
       $ArchivePath = Join-Path ([System.IO.Path]::GetTempPath()) $Asset.name
       Write-Host "Downloading $($Asset.name) from audio.cpp $($Release.tag_name)..."
       Invoke-WebRequest -Headers $Headers -Uri $Asset.browser_download_url -OutFile $ArchivePath
+      if ($Asset.digest -match '^sha256:([a-fA-F0-9]{64})$') {
+        $ActualHash = (Get-FileHash -LiteralPath $ArchivePath -Algorithm SHA256).Hash
+        if ($ActualHash -ne $Matches[1]) { throw "The downloaded audio.cpp archive failed SHA-256 verification: $($Asset.name)" }
+      }
       Expand-Archive -LiteralPath $ArchivePath -DestinationPath $AudioCppRoot -Force
       Remove-Item -LiteralPath $ArchivePath -Force
     }
@@ -61,18 +82,31 @@ if ($BuildFromSource) {
 }
 
 if ($InstallModel) {
-  if (-not (Get-Command "git" -ErrorAction SilentlyContinue)) { throw "git is required to install the model." }
-  if (-not (Get-Command "python" -ErrorAction SilentlyContinue)) { throw "python is required to install the model." }
-  $ManagerRoot = Join-Path $RuntimeRoot "audio.cpp-model-manager"
-  if (-not (Test-Path -LiteralPath (Join-Path $ManagerRoot ".git") -PathType Container)) {
-    git clone --depth 1 https://github.com/0xShug0/audio.cpp.git $ManagerRoot
-  }
   # Keep the venv path short enough for Torch's deeply nested license tree on Windows.
   $ModelVenvRoot = Join-Path $RuntimeRoot "mm"
-  $ModelPython = Join-Path $ModelVenvRoot "Scripts\python.exe"
+  if ($ModelPython) {
+    $ModelPython = [System.IO.Path]::GetFullPath($ModelPython)
+    if (-not (Test-Path -LiteralPath $ModelPython -PathType Leaf)) {
+      throw "The supplied model Python was not found: $ModelPython"
+    }
+  } else {
+    $ModelPython = Join-Path $ModelVenvRoot "Scripts\python.exe"
+  }
   if (-not (Test-Path -LiteralPath $ModelPython -PathType Leaf)) {
+    if (-not (Get-Command "python" -ErrorAction SilentlyContinue)) {
+      throw "python is required for manual setup. Use webui.bat for automatic local Python installation."
+    }
     & python -m venv $ModelVenvRoot
     if ($LASTEXITCODE -ne 0) { throw "Model-manager virtual environment creation failed." }
+  }
+  $PreviousErrorActionPreference = $ErrorActionPreference
+  $ErrorActionPreference = "Continue"
+  & $ModelPython -m pip --version *> $null
+  $PipCheckExitCode = $LASTEXITCODE
+  $ErrorActionPreference = $PreviousErrorActionPreference
+  if ($PipCheckExitCode -ne 0) {
+    & $ModelPython -m ensurepip --upgrade
+    if ($LASTEXITCODE -ne 0) { throw "pip could not be prepared in the local Python environment." }
   }
   $PreviousErrorActionPreference = $ErrorActionPreference
   $ErrorActionPreference = "Continue"
@@ -84,27 +118,70 @@ if ($InstallModel) {
     & $ModelPython -m pip install torch safetensors PyYAML numpy pyworld praat-parselmouth
     if ($LASTEXITCODE -ne 0) { throw "Model-manager dependency installation failed." }
   }
-  Push-Location $ManagerRoot
-  try {
-    & $ModelPython ".\tools\model_manager.py" install irodori_tts_600m_v3_voice_design --models-root (Join-Path $AudioCppRoot "models")
-    if ($LASTEXITCODE -ne 0) { throw "Irodori model installation failed with exit code $LASTEXITCODE." }
-  } finally {
-    Pop-Location
+
+  $ModelsRoot = Join-Path $AudioCppRoot "models"
+  $RequiredModelFiles = @(
+    (Join-Path $ModelsRoot "Irodori-TTS-600M-v3-VoiceDesign\model.safetensors"),
+    (Join-Path $ModelsRoot "llm-jp-3-150m\model.safetensors"),
+    (Join-Path $ModelsRoot "Semantic-DACVAE-Japanese-32dim\weights.safetensors")
+  )
+  $ModelsReady = @($RequiredModelFiles | Where-Object { -not (Test-Path -LiteralPath $_ -PathType Leaf) }).Count -eq 0
+  $ModelInstalledThisRun = $false
+  if (-not $ModelsReady) {
+    $ManagerRoot = Join-Path $RuntimeRoot "audio.cpp-model-manager"
+    $ManagerScript = Join-Path $ManagerRoot "tools\model_manager.py"
+    if (-not (Test-Path -LiteralPath $ManagerScript -PathType Leaf)) {
+      if (Test-Path -LiteralPath $ManagerRoot) {
+        throw "The model-manager directory is incomplete: $ManagerRoot"
+      }
+      $Release = Get-AudioCppRelease
+      $SafeReleaseTag = $Release.tag_name -replace '[^A-Za-z0-9._-]', '_'
+      $SourceArchive = Join-Path $RuntimeRoot "audio.cpp-$SafeReleaseTag-source.zip"
+      $StageRoot = Join-Path $RuntimeRoot "audio.cpp-model-manager-stage-$PID"
+      Write-Host "Downloading audio.cpp model-manager source $($Release.tag_name)..."
+      Invoke-WebRequest -Headers $Headers -Uri "https://github.com/0xShug0/audio.cpp/archive/refs/tags/$($Release.tag_name).zip" -OutFile $SourceArchive
+      Expand-Archive -LiteralPath $SourceArchive -DestinationPath $StageRoot -Force
+      Remove-Item -LiteralPath $SourceArchive -Force
+      $SourceRoot = Get-ChildItem -LiteralPath $StageRoot -Directory | Where-Object {
+        Test-Path -LiteralPath (Join-Path $_.FullName "tools\model_manager.py") -PathType Leaf
+      } | Select-Object -First 1
+      if (-not $SourceRoot) { throw "The downloaded audio.cpp source did not contain tools\model_manager.py." }
+      $ResolvedRuntimeRoot = [System.IO.Path]::GetFullPath($RuntimeRoot).TrimEnd('\') + '\'
+      $ResolvedSourceRoot = [System.IO.Path]::GetFullPath($SourceRoot.FullName)
+      $ResolvedManagerRoot = [System.IO.Path]::GetFullPath($ManagerRoot)
+      if (-not $ResolvedSourceRoot.StartsWith($ResolvedRuntimeRoot, [System.StringComparison]::OrdinalIgnoreCase) -or
+          -not $ResolvedManagerRoot.StartsWith($ResolvedRuntimeRoot, [System.StringComparison]::OrdinalIgnoreCase)) {
+        throw "Refusing to move model-manager files outside the project runtime."
+      }
+      Move-Item -LiteralPath $ResolvedSourceRoot -Destination $ResolvedManagerRoot
+      Remove-Item -LiteralPath $StageRoot -Force
+    }
+    Push-Location $ManagerRoot
+    try {
+      & $ModelPython ".\tools\model_manager.py" install irodori_tts_600m_v3_voice_design --models-root $ModelsRoot
+      if ($LASTEXITCODE -ne 0) { throw "Irodori model installation failed with exit code $LASTEXITCODE." }
+      $ModelInstalledThisRun = $true
+    } finally {
+      Pop-Location
+    }
+  } else {
+    Write-Host "Irodori VoiceDesign model already exists; skipping model download."
   }
 
   # tempfile-created staging directories can retain protected ACLs after the
   # model manager moves them. Re-enable inheritance so the normal user server
   # process can read the installed model files.
-  $ModelsRoot = Join-Path $AudioCppRoot "models"
-  foreach ($ModelDirectory in @(
-    "Irodori-TTS-600M-v3-VoiceDesign",
-    "llm-jp-3-150m",
-    "Semantic-DACVAE-Japanese-32dim"
-  )) {
-    $ModelPath = Join-Path $ModelsRoot $ModelDirectory
-    if (Test-Path -LiteralPath $ModelPath -PathType Container) {
-      & icacls.exe $ModelPath /inheritance:e /T /C | Out-Null
-      if ($LASTEXITCODE -ne 0) { throw "Failed to restore inherited permissions for $ModelPath." }
+  if ($ModelInstalledThisRun) {
+    foreach ($ModelDirectory in @(
+      "Irodori-TTS-600M-v3-VoiceDesign",
+      "llm-jp-3-150m",
+      "Semantic-DACVAE-Japanese-32dim"
+    )) {
+      $ModelPath = Join-Path $ModelsRoot $ModelDirectory
+      if (Test-Path -LiteralPath $ModelPath -PathType Container) {
+        & icacls.exe $ModelPath /inheritance:e /T /C | Out-Null
+        if ($LASTEXITCODE -ne 0) { throw "Failed to restore inherited permissions for $ModelPath." }
+      }
     }
   }
 
