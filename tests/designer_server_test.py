@@ -97,6 +97,13 @@ class LocalProxyIntegrationTest(unittest.TestCase):
         self.stub.shutdown()
         self.stub.server_close()
 
+    def test_runtime_health_reports_f0_dependencies(self):
+        with urllib.request.urlopen(self.base_url + "/api/runtime/health") as response:
+            health = json.load(response)
+        self.assertEqual(health["app"], "CharacterVoiceDesigner")
+        self.assertIsInstance(health["psola_available"], bool)
+        self.assertIn("pyworld", health["postprocess_dependencies"])
+
     def test_models_and_wav_are_proxied(self):
         with urllib.request.urlopen(self.base_url + "/api/audio-cpp/models") as response:
             models = json.load(response)

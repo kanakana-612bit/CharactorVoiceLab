@@ -15,7 +15,12 @@ from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any
 
-from audio_postprocess import AudioPostprocessError, correct_wav_f0
+from audio_postprocess import (
+    AudioPostprocessError,
+    correct_wav_f0,
+    postprocess_dependency_status,
+    psola_available,
+)
 
 
 PROJECT_ROOT = Path(__file__).resolve().parent
@@ -58,6 +63,16 @@ class DesignerHandler(SimpleHTTPRequestHandler):
 
     def do_GET(self) -> None:  # noqa: N802 - stdlib handler API
         path = urllib.parse.urlsplit(self.path).path
+        if path == "/api/runtime/health":
+            self._send_json(
+                HTTPStatus.OK,
+                {
+                    "app": "CharacterVoiceDesigner",
+                    "psola_available": psola_available(),
+                    "postprocess_dependencies": postprocess_dependency_status(),
+                },
+            )
+            return
         if path == "/api/audio-cpp/health":
             self._proxy_get("/health")
             return

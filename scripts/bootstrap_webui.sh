@@ -134,6 +134,19 @@ bash "$SCRIPT_DIR/setup_audio_cpp.sh" \
   --python "$PYTHON_BIN" \
   --release-tag "release-0.3-qwen3-tts"
 
+DESIGNER_REVISION="$(
+  "$PYTHON_BIN" - "$PROJECT_ROOT/designer_server.py" "$PROJECT_ROOT/audio_postprocess.py" <<'PY'
+from hashlib import sha256
+import sys
+
+digest = sha256()
+for path in sys.argv[1:]:
+    with open(path, "rb") as handle:
+        digest.update(handle.read())
+print(digest.hexdigest())
+PY
+)"
+
 http_ok() {
   local url="$1"
   local expected="${2:-}"
@@ -185,6 +198,21 @@ process_matches() {
   [[ "$(readlink -f -- "/proc/$pid/exe")" == "$(readlink -f -- "$expected_exe")" ]]
 }
 
+stop_verified_process() {
+  local pid="$1"
+  local expected_ticks="$2"
+  local expected_exe="$3"
+  process_matches "$pid" "$expected_ticks" "$expected_exe" || return 0
+  kill "$pid" 2>/dev/null || true
+  local deadline=$((SECONDS + 10))
+  while ((SECONDS < deadline)); do
+    process_matches "$pid" "$expected_ticks" "$expected_exe" || return 0
+    sleep 0.2
+  done
+  echo "The previous CharacterVoiceDesigner process did not stop: PID $pid" >&2
+  return 1
+}
+
 wait_for_service() {
   local url="$1"
   local expected="$2"
@@ -213,6 +241,7 @@ PREVIOUS_AUDIO_TICKS=""
 PREVIOUS_DESIGNER_PORT=""
 PREVIOUS_DESIGNER_PID=""
 PREVIOUS_DESIGNER_TICKS=""
+PREVIOUS_DESIGNER_REVISION=""
 if [[ -f "$STATE_PATH" ]]; then
   mapfile -t STATE_VALUES < <(
     "$PYTHON_BIN" - "$STATE_PATH" <<'PY'
@@ -230,6 +259,7 @@ for key in (
     "designer_port",
     "designer_pid",
     "designer_start_ticks",
+    "designer_revision",
 ):
     value = state.get(key)
     print("" if value is None else value)
@@ -241,6 +271,7 @@ PY
   PREVIOUS_DESIGNER_PORT="${STATE_VALUES[3]:-}"
   PREVIOUS_DESIGNER_PID="${STATE_VALUES[4]:-}"
   PREVIOUS_DESIGNER_TICKS="${STATE_VALUES[5]:-}"
+  PREVIOUS_DESIGNER_REVISION="${STATE_VALUES[6]:-}"
 fi
 
 NEW_AUDIO_PID=""
@@ -306,19 +337,24 @@ fi
 
 PYTHON_REAL="$(readlink -f -- "$PYTHON_BIN")"
 if [[ -n "$PREVIOUS_DESIGNER_PORT" ]] &&
+  [[ "$PREVIOUS_DESIGNER_REVISION" == "$DESIGNER_REVISION" ]] &&
   process_matches "$PREVIOUS_DESIGNER_PID" "$PREVIOUS_DESIGNER_TICKS" "$PYTHON_REAL" &&
-  http_ok "http://127.0.0.1:$PREVIOUS_DESIGNER_PORT/" "CharacterVoiceDesigner"; then
+  http_ok "http://127.0.0.1:$PREVIOUS_DESIGNER_PORT/api/runtime/health" '"psola_available": true'; then
   DESIGNER_PORT="$PREVIOUS_DESIGNER_PORT"
   DESIGNER_PID="$PREVIOUS_DESIGNER_PID"
   DESIGNER_TICKS="$PREVIOUS_DESIGNER_TICKS"
   echo "[4/4] Reusing CharacterVoiceDesigner on port $DESIGNER_PORT."
 else
+  stop_verified_process "$PREVIOUS_DESIGNER_PID" "$PREVIOUS_DESIGNER_TICKS" "$PYTHON_REAL"
   DESIGNER_PORT="$(find_free_port 8765)"
   DESIGNER_OUT_LOG="$LOG_ROOT/designer.stdout.log"
   DESIGNER_ERROR_LOG="$LOG_ROOT/designer.stderr.log"
   echo "[4/4] Starting CharacterVoiceDesigner on port $DESIGNER_PORT..."
   (
     cd -- "$PROJECT_ROOT"
+    if [[ -d "$LOCAL_TOOLCHAIN_ROOT/lib" ]]; then
+      export LD_LIBRARY_PATH="$LOCAL_TOOLCHAIN_ROOT/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+    fi
     exec nohup "$PYTHON_BIN" -u "$PROJECT_ROOT/designer_server.py" \
       --host 127.0.0.1 \
       --port "$DESIGNER_PORT" \
@@ -330,7 +366,7 @@ else
   wait_for_service "http://127.0.0.1:$DESIGNER_PORT/" "CharacterVoiceDesigner" 30 "$DESIGNER_PID" "$DESIGNER_ERROR_LOG"
 fi
 
-"$PYTHON_BIN" - "$STATE_PATH" "$AUDIO_PORT" "$AUDIO_PID" "$AUDIO_TICKS" "$DESIGNER_PORT" "$DESIGNER_PID" "$DESIGNER_TICKS" "$AUDIO_SERVER" "$PYTHON_REAL" <<'PY'
+"$PYTHON_BIN" - "$STATE_PATH" "$AUDIO_PORT" "$AUDIO_PID" "$AUDIO_TICKS" "$DESIGNER_PORT" "$DESIGNER_PID" "$DESIGNER_TICKS" "$AUDIO_SERVER" "$PYTHON_REAL" "$DESIGNER_REVISION" <<'PY'
 from datetime import datetime, timezone
 import json
 import sys
@@ -345,6 +381,7 @@ import sys
     designer_ticks,
     audio_exe,
     python_exe,
+    designer_revision,
 ) = sys.argv[1:]
 state = {
     "app": "CharacterVoiceDesigner",
@@ -357,6 +394,7 @@ state = {
     "designer_pid": int(designer_pid),
     "designer_start_ticks": designer_ticks,
     "designer_executable": python_exe,
+    "designer_revision": designer_revision,
     "updated_at": datetime.now(timezone.utc).isoformat(),
 }
 with open(state_path, "w", encoding="utf-8") as handle:

@@ -118,6 +118,15 @@ if ($InstallModel) {
     & $ModelPython -m pip install torch safetensors PyYAML numpy pyworld praat-parselmouth
     if ($LASTEXITCODE -ne 0) { throw "Model-manager dependency installation failed." }
   }
+  $PostprocessCheck = Join-Path $ProjectRoot "audio_postprocess.py"
+  & $ModelPython $PostprocessCheck --check
+  if ($LASTEXITCODE -ne 0) {
+    Write-Host "Repairing the local F0-correction dependencies..."
+    & $ModelPython -m pip install --upgrade --force-reinstall --no-cache-dir numpy pyworld praat-parselmouth
+    if ($LASTEXITCODE -ne 0) { throw "F0-correction dependency repair failed." }
+    & $ModelPython $PostprocessCheck --check
+    if ($LASTEXITCODE -ne 0) { throw "The local PSOLA F0-correction runtime is incomplete." }
+  }
 
   $ModelsRoot = Join-Path $AudioCppRoot "models"
   $RequiredModelFiles = @(

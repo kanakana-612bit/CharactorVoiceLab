@@ -2,8 +2,39 @@ import io
 import math
 import unittest
 import wave
+from unittest import mock
 
-from audio_postprocess import correct_wav_f0, psola_available
+import audio_postprocess
+from audio_postprocess import correct_wav_f0, postprocess_dependency_status, psola_available
+
+
+class PostprocessDependencyTest(unittest.TestCase):
+    def test_dependency_status_reports_each_runtime_component(self):
+        status = postprocess_dependency_status()
+        self.assertEqual(
+            set(status),
+            {"numpy", "pyworld", "praat-parselmouth", "praat-parselmouth.praat"},
+        )
+        for dependency in status.values():
+            self.assertIsInstance(dependency["available"], bool)
+            self.assertIn("error", dependency)
+
+    def test_linux_error_identifies_dependency_and_launcher(self):
+        with (
+            mock.patch.multiple(
+                audio_postprocess,
+                np=None,
+                pyworld=None,
+                parselmouth=None,
+                praat_call=None,
+            ),
+            mock.patch.object(audio_postprocess.importlib, "import_module", side_effect=OSError("missing lib")),
+            mock.patch.object(audio_postprocess.platform, "system", return_value="Linux"),
+            mock.patch.dict(audio_postprocess._DEPENDENCY_ERRORS, {}, clear=True),
+        ):
+            message = audio_postprocess.psola_unavailable_message()
+        self.assertIn("pyworld: OSError: missing lib", message)
+        self.assertIn("./webui.sh", message)
 
 
 @unittest.skipUnless(psola_available(), "pyworld and praat-parselmouth are not installed")

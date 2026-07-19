@@ -195,11 +195,30 @@ if [[ ! -x "$SERVER_BIN" ]]; then
   fi
 fi
 
-if ! "$PYTHON_BIN" -c "import torch, safetensors, yaml, numpy, pyworld, parselmouth" >/dev/null 2>&1 ||
+postprocess_dependencies_ready() {
+  (
+    if [[ -d "$TOOLCHAIN_ROOT/lib" ]]; then
+      export LD_LIBRARY_PATH="$TOOLCHAIN_ROOT/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+    fi
+    "$PYTHON_BIN" "$PROJECT_ROOT/audio_postprocess.py" --check
+  )
+}
+
+if ! "$PYTHON_BIN" -c "import torch, safetensors, yaml" >/dev/null 2>&1 ||
+  ! postprocess_dependencies_ready >/dev/null 2>&1 ||
   [[ ! -x "$VENV_BIN/cmake" || ! -x "$VENV_BIN/ninja" ]]; then
   echo "Installing model-manager, build, and F0-correction dependencies..."
   "$PYTHON_BIN" -m pip install --upgrade pip
   "$PYTHON_BIN" -m pip install torch safetensors PyYAML numpy pyworld praat-parselmouth cmake ninja
+fi
+
+if ! postprocess_dependencies_ready >/dev/null 2>&1; then
+  echo "Repairing the local F0-correction dependencies..."
+  "$PYTHON_BIN" -m pip install --upgrade --force-reinstall --no-cache-dir numpy pyworld praat-parselmouth
+fi
+if ! postprocess_dependencies_ready; then
+  echo "The local PSOLA F0-correction runtime is incomplete. See the dependency diagnostics above." >&2
+  exit 1
 fi
 
 if [[ ! -x "$SERVER_BIN" ]]; then

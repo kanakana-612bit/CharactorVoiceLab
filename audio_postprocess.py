@@ -2,33 +2,98 @@
 
 from __future__ import annotations
 
+import importlib
 import io
+import json
 import math
+import platform
+import sys
 import wave
+from collections.abc import Callable
 from typing import Any
 
-try:
-    import numpy as np
-    import parselmouth
-    import pyworld
-    from parselmouth.praat import call as praat_call
-except ImportError:  # The static WebUI and plain proxy remain usable without WORLD.
-    np = None
-    parselmouth = None
-    pyworld = None
-    praat_call = None
+np: Any = None
+parselmouth: Any = None
+pyworld: Any = None
+praat_call: Any = None
+_DEPENDENCY_ERRORS: dict[str, str] = {}
 
 
 class AudioPostprocessError(ValueError):
     """Raised when a requested audio correction cannot be completed."""
 
 
+def _load_dependency(name: str, loader: Callable[[], Any]) -> Any:
+    try:
+        dependency = loader()
+    except Exception as error:  # Binary wheels can fail with ImportError or OSError.
+        detail = str(error).strip() or "no diagnostic was provided"
+        _DEPENDENCY_ERRORS[name] = f"{type(error).__name__}: {detail}"
+        return None
+    _DEPENDENCY_ERRORS.pop(name, None)
+    return dependency
+
+
+def _load_optional_dependencies() -> None:
+    """Retry optional imports so a running WebUI sees dependencies installed later."""
+
+    global np, parselmouth, pyworld, praat_call
+    if np is None:
+        np = _load_dependency("numpy", lambda: importlib.import_module("numpy"))
+    if pyworld is None:
+        pyworld = _load_dependency("pyworld", lambda: importlib.import_module("pyworld"))
+    if parselmouth is None:
+        parselmouth = _load_dependency(
+            "praat-parselmouth",
+            lambda: importlib.import_module("parselmouth"),
+        )
+    if parselmouth is not None and praat_call is None:
+        praat_call = _load_dependency(
+            "praat-parselmouth.praat",
+            lambda: getattr(importlib.import_module("parselmouth.praat"), "call"),
+        )
+
+
+def postprocess_dependency_status() -> dict[str, dict[str, bool | str | None]]:
+    _load_optional_dependencies()
+    dependencies = {
+        "numpy": np,
+        "pyworld": pyworld,
+        "praat-parselmouth": parselmouth,
+        "praat-parselmouth.praat": praat_call,
+    }
+    return {
+        name: {
+            "available": dependency is not None,
+            "error": _DEPENDENCY_ERRORS.get(name),
+        }
+        for name, dependency in dependencies.items()
+    }
+
+
 def world_available() -> bool:
+    _load_optional_dependencies()
     return np is not None and pyworld is not None
 
 
 def psola_available() -> bool:
-    return world_available() and parselmouth is not None and praat_call is not None
+    _load_optional_dependencies()
+    return np is not None and pyworld is not None and parselmouth is not None and praat_call is not None
+
+
+def psola_unavailable_message() -> str:
+    status = postprocess_dependency_status()
+    failures = []
+    for name, dependency in status.items():
+        if not dependency["available"]:
+            detail = dependency["error"] or "not installed"
+            failures.append(f"{name}: {detail}")
+    command = ".\\webui.bat" if platform.system() == "Windows" else "./webui.sh"
+    diagnostic = "; ".join(failures) or "dependency state is inconsistent"
+    return (
+        f"PSOLA F0 correction is unavailable ({diagnostic}). "
+        f"Stop the local services, then re-run {command} to repair and restart them."
+    )
 
 
 def _decode_pcm16_mono(wav_bytes: bytes) -> tuple[Any, int]:
@@ -89,9 +154,7 @@ def correct_wav_f0(
     """Move median voiced F0 to target_hz while retaining its relative contour."""
 
     if not psola_available():
-        raise AudioPostprocessError(
-            "PSOLA F0 correction is unavailable. Run setup_audio_cpp.ps1 -InstallModel to install pyworld and praat-parselmouth."
-        )
+        raise AudioPostprocessError(psola_unavailable_message())
     if not 60.0 <= target_hz <= 500.0:
         raise AudioPostprocessError("F0 target must be between 60 and 500 Hz.")
     if not 0.0 <= strength <= 1.0:
@@ -131,3 +194,20 @@ def correct_wav_f0(
         "applied_semitones": round(applied_semitones, 4),
     }
     return output_bytes, metadata
+
+
+def _dependency_check() -> int:
+    status = postprocess_dependency_status()
+    print(json.dumps(status, ensure_ascii=False, indent=2))
+    if not psola_available():
+        print(psola_unavailable_message(), file=sys.stderr)
+        return 1
+    print("PSOLA F0 correction dependencies are available.")
+    return 0
+
+
+if __name__ == "__main__":
+    if sys.argv[1:] != ["--check"]:
+        print("Usage: python audio_postprocess.py --check", file=sys.stderr)
+        raise SystemExit(2)
+    raise SystemExit(_dependency_check())
