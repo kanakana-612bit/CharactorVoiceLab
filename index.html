@@ -9,18 +9,18 @@
   <body>
     <header class="app-header">
       <div class="header-leading">
-        <button id="loadProjectBtn" type="button">プロファイル読込</button>
         <div>
           <h1>CharacterVoiceDesigner <span class="version-badge">Ver 0.1</span></h1>
-          <p>外見的音声同一性をTTS用の中間制御関数へ変換</p>
+          <p>外見的特徴をTTS用の中間制御関数へ変換</p>
         </div>
       </div>
       <div class="header-actions">
+                <button id="loadProjectBtn" type="button">プロファイル読込</button>
         <label class="header-field project-title-field">
           名称
           <input id="projectTitleInput" type="text" value="voice_profile" maxlength="80" />
         </label>
-        <button id="saveProjectBtn">プロフィール保存</button>
+        <button id="saveProjectBtn">保存</button>
         <input id="loadProjectInput" type="file" accept=".zip,.json,application/zip,application/json" hidden />
       </div>
     </header>
@@ -241,7 +241,6 @@
                   <h3>&#20840;&#36523;&#27491;&#38754;</h3>
                   <div class="layer-toggle" aria-label="全身正面レイヤー">
                     <label><input id="bodyShowLandmarks" type="checkbox" checked /> 基本参照点群</label>
-                    <label><input id="bodyShowModel" type="checkbox" /> 低ポリモデル</label>
                   </div>
                 </div>
                 <div class="canvas-stack">
@@ -283,7 +282,6 @@
           <aside id="landmarkHintPanel" class="landmark-hint" aria-live="polite">
             <strong id="landmarkHintTitle">ランドマーク定義</strong>
             <span id="landmarkHintDefinition">点をつかむか、カーソルを重ねると定義を表示します。</span>
-            <small id="landmarkHintRole">全身・頭頚部・側面の点名は解剖学的表現へ統一します。</small>
           </aside>
         </section>
       </section>
@@ -692,13 +690,13 @@
 
         <section class="pane output-dataset-panel">
           <details class="advanced-settings">
-            <summary>物理モデル素材の書き出し</summary>
+            <summary>物理モデル素材の書き出し※凍結中</summary>
           <div class="pane-head">
             <div>
               <span class="section-kicker">Dataset export</span>
               <h2>音素・音節素材</h2>
             </div>
-            <span>凍結した物理合成系の評価・学習素材</span>
+            <span>物理合成系の評価・学習素材※開発凍結中</span>
           </div>
           <div class="output-settings-grid">
             <label>

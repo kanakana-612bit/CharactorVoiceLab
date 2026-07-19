@@ -11,7 +11,7 @@ window.CVL_REFERENCE = {
       "Do not infer, collect, cache, export, or link participant-level records from external dataset views.",
       "Do not present preview parameters as medical diagnosis, treatment advice, or individual biological identification.",
     ],
-    disclosure: "All embedded values are engineering priors for non-medical character voice design. Clinical aggregate references must remain aggregate-only and source-labeled.",
+    disclosure: "すべての埋め込み値は、音声設計に関する工学的知見に基づきます。実在人物に基づく知見は統計的参照に限定し、出典および利用範囲を明記する必要があります。",
   },
   sources: {
     audioCpp2026: {
