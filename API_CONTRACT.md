@@ -1,6 +1,6 @@
-# Character Voice Lab API Boundary
+# CharacterVoiceDesigner API Boundary
 
-The WebUI is intentionally independent from Open WebUI and from the eventual TTS runtime.
+The WebUI is intentionally independent from Open WebUI and from the native TTS runtime. The browser produces a backend-neutral `voice_control_profile`; model-specific adapters translate it at the local service boundary.
 It owns only:
 
 - image and manual landmark input
@@ -12,8 +12,31 @@ It owns only:
 - 2.5D vocal-tract geometry and source-assumption export
 - vowel A(x)/W(x), nasal-articulation, and auditory-evaluation calibration export
 - reproducible project-package import/export
+- appearance-estimate and design-override separation
+- serializable voice-identity control functions
 
-The TTS core should be connected later through a small HTTP API or local adapter.
+## Local audio.cpp Bridge
+
+`designer_server.py` serves the WebUI and proxies only these fixed local routes:
+
+- `GET /api/audio-cpp/health` -> `GET http://127.0.0.1:8080/health`
+- `GET /api/audio-cpp/models` -> `GET http://127.0.0.1:8080/v1/models`
+- `POST /api/audio-cpp/speech` -> `POST http://127.0.0.1:8080/v1/audio/speech`
+
+The bridge accepts a configured model id, up to 5000 text characters, language, seed, inference-step count, and a small allowlist of VoiceDesign options. The upstream origin must be loopback HTTP; arbitrary URLs and unrecognized request fields are not forwarded.
+
+## VoiceControlProfile
+
+`character_voice_identity_function_0.1` contains:
+
+- `identity_anchor`: effective F0, F0 range, breathiness, spectral tilt, vocal-tract-length scale, brightness, energy, speaking rate, articulation clarity, and breath-phrase scale
+- `evidence[*].appearance_estimate`: the current physical/image/statistical proxy
+- `evidence[*].design_override`: an explicit user choice, or `null`
+- `evidence[*].effective_value`: the value consumed by downstream adapters
+- `control_functions`: backend-neutral, serializable response functions over normalized performance input
+- `tts_adapters.audio_cpp`: the deterministic Irodori VoiceDesign caption and its mapping limitation
+
+Irodori caption conditioning is an approximate interface to a learned latent space. It must not be described as direct enforcement of the exported physical parameters.
 
 ## Terminology
 
@@ -198,16 +221,17 @@ Nasal CV syllables export `nasal_consonant_model_1.1` metadata and use `branched
 
 Moraic `/N/` temporarily retains `nasal_consonant_model_0.7` as a terminal nasal hold without following-vowel anchors or CV level matching. `attack_fade_ms` applies a half-cosine onset fade in all three profiles. All defaults and nasal-path geometries are synthetic engineering design values, not measurements of an individual or population.
 
-## External TTS Integration Target
+## TTS Adapter Boundary
 
-External TTS engines should not be coupled to the WebUI directly.
-Use a separate core service that accepts either:
+Native TTS engines are not coupled directly to browser code. The current local service converts `voice_control_profile` into an audio.cpp request; future adapters may also consume:
 
 - `voice_constraints[*].center` as the character's neutral/baseline design value
 - `voice_constraints[*].constraint_range` as the dynamic performance range available to acting or prosody control
 - `voice_constraints[*].edit_range` only for WebUI editing and validation
 - curated WAV/material paths for cloning or fine-tuning
 - a saved `character_voice_profile.json` as the reproducible experiment record
+
+The current Irodori adapter consumes non-pitch identity anchors through caption descriptors and maps speaking rate to `duration_scale`. Pitch wording is intentionally excluded from the caption. When enabled, the local bridge measures the generated voiced contour with WORLD, then uses Praat PSOLA overlap-add to shift its median to `voice_control_profile.identity_anchor.f0_mean_hz` while retaining the relative intonation, original waveform texture, and duration. Response headers report measured, target, and output F0. This is an explicit waveform postprocess, not native control of Irodori's learned latent space. Breathiness, spectral tilt, and articulation trajectories remain approximate caption mappings.
 
 The WebUI should remain useful even when no external synthesis backend is available. In that mode it exports constraints, vowel-specific area/width tuning, nasal-articulation tuning, local auditory-evaluation records, and synthetic phoneme/syllable datasets using the browser 2.5D-derived tube preview. Nasal `/m/`, `/n/`, and moraic `/N/` use a dedicated initial model; other CV onset generation remains experimental scaffolding rather than a validated consonant model. Tokens are evaluated individually before a set is accepted. Profiles saved by older versions may still contain `formant` or `hybrid` preview selections and hybrid-only controls; version 1.1 ignores those retired fields and exports `preview_synthesis_backend: "tube"`.
 

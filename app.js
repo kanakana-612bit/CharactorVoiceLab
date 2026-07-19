@@ -76,15 +76,21 @@ const state = {
   nasalEvaluationLog: [],
   nasalPreviewDiagnostics: {},
   nasalProfileDrag: null,
+  voiceControlOverrides: {},
+  ttsCaptionManual: false,
+  ttsResultBlob: null,
+  ttsResultUrl: null,
+  audioCppModels: [],
 };
 
 const referenceData = window.CVL_REFERENCE;
 const priorResolver = window.CVL_PRIOR_RESOLVER;
 const projectPackage = window.CVL_PROJECT_PACKAGE;
 const landmarkSystem = window.CVL_LANDMARKS;
+const voiceControlProfile = window.CVD_PROFILE;
 const labels = landmarkSystem.labels;
 const featureDefs = referenceData.anthropometricFeaturePriors;
-const APP_VERSION = "1.1";
+const APP_VERSION = "0.1";
 const GESTURE_EXECUTION_INPUT_MIN = 0.35;
 const GESTURE_EXECUTION_INPUT_MAX = 1.35;
 const LEGACY_GESTURE_EXECUTION_EFFECTIVE_MAX = 1.45;
@@ -371,6 +377,31 @@ const els = {
   syllableSetSummary: document.getElementById("syllableSetSummary"),
   syllableTokenList: document.getElementById("syllableTokenList"),
   datasetExportStatus: document.getElementById("datasetExportStatus"),
+  voiceControlSliders: document.getElementById("voiceControlSliders"),
+  resetVoiceControlOverridesBtn: document.getElementById("resetVoiceControlOverridesBtn"),
+  identityF0Summary: document.getElementById("identityF0Summary"),
+  identityVtlSummary: document.getElementById("identityVtlSummary"),
+  identityOverrideSummary: document.getElementById("identityOverrideSummary"),
+  refreshTtsModelsBtn: document.getElementById("refreshTtsModelsBtn"),
+  audioCppStatusDot: document.getElementById("audioCppStatusDot"),
+  audioCppStatus: document.getElementById("audioCppStatus"),
+  ttsModelSelect: document.getElementById("ttsModelSelect"),
+  ttsSeedInput: document.getElementById("ttsSeedInput"),
+  ttsInferenceStepsInput: document.getElementById("ttsInferenceStepsInput"),
+  ttsCaptionGuidanceInput: document.getElementById("ttsCaptionGuidanceInput"),
+  ttsF0CorrectionEnabled: document.getElementById("ttsF0CorrectionEnabled"),
+  ttsF0CorrectionStrength: document.getElementById("ttsF0CorrectionStrength"),
+  ttsF0CorrectionStrengthValue: document.getElementById("ttsF0CorrectionStrengthValue"),
+  ttsF0CorrectionGuide: document.getElementById("ttsF0CorrectionGuide"),
+  ttsCaptionInput: document.getElementById("ttsCaptionInput"),
+  regenerateTtsCaptionBtn: document.getElementById("regenerateTtsCaptionBtn"),
+  ttsDemoTextInput: document.getElementById("ttsDemoTextInput"),
+  ttsRequestSummary: document.getElementById("ttsRequestSummary"),
+  generateTtsDemoBtn: document.getElementById("generateTtsDemoBtn"),
+  downloadTtsDemoBtn: document.getElementById("downloadTtsDemoBtn"),
+  exportVoiceControlProfileBtn: document.getElementById("exportVoiceControlProfileBtn"),
+  ttsDemoAudio: document.getElementById("ttsDemoAudio"),
+  ttsDemoStatus: document.getElementById("ttsDemoStatus"),
 };
 
 function num(el, fallback = 0) {
@@ -4484,6 +4515,291 @@ function renderConstraints() {
   els.constraintOutput.textContent = JSON.stringify(buildExport(), null, 2);
 }
 
+function voiceControlProfileContext() {
+  return {
+    app_version: APP_VERSION,
+    project_title: els.projectTitleInput?.value?.trim() || "voice_profile",
+    age: num(els.ageInput, 17),
+    sex_reference_class: els.sexInput?.value ?? "neutral",
+    reference_image_style: normalizeReferenceImageStyle(els.referenceImageStyleInput?.value),
+    constraints: withoutRetiredConstraints(state.constraints),
+    performance_range_overrides: withoutReadOnlyDerivedOverrides(withoutRetiredConstraints(state.performanceRangeOverrides)),
+    design_overrides: state.voiceControlOverrides,
+  };
+}
+
+function buildVoiceControlProfile() {
+  if (!voiceControlProfile?.build) return null;
+  return voiceControlProfile.build(voiceControlProfileContext());
+}
+
+function buildTtsConfiguration() {
+  return {
+    schema_version: "character_voice_designer_tts_configuration_0.1",
+    transport: "audio_cpp_http",
+    selected_model: els.ttsModelSelect?.value || "irodori-vdes",
+    seed: Math.trunc(num(els.ttsSeedInput, 20260719)),
+    num_inference_steps: Math.trunc(num(els.ttsInferenceStepsInput, 40)),
+    caption_guidance_scale: num(els.ttsCaptionGuidanceInput, 2),
+    f0_postprocess: {
+      enabled: els.ttsF0CorrectionEnabled?.checked !== false,
+      strength: num(els.ttsF0CorrectionStrength, 1),
+      method: "praat_psola_contour_preserving_median_shift",
+    },
+    caption_override: state.ttsCaptionManual ? els.ttsCaptionInput?.value?.trim() || null : null,
+    endpoint: "/api/audio-cpp/speech",
+  };
+}
+
+function activeTtsCaption(profile = buildVoiceControlProfile()) {
+  const manual = state.ttsCaptionManual ? els.ttsCaptionInput?.value?.trim() : "";
+  return manual || profile?.tts_adapters?.audio_cpp?.caption_ja || "";
+}
+
+function renderVoiceDesignerControls() {
+  const profile = buildVoiceControlProfile();
+  if (!profile) return;
+  renderVoiceDesignerDerivedViews(profile);
+  if (!els.voiceControlSliders) return;
+  els.voiceControlSliders.innerHTML = "";
+
+  for (const definition of voiceControlProfile.controlDefinitions) {
+    const evidence = profile.evidence[definition.key];
+    const row = document.createElement("div");
+    const hasOverride = evidence.design_override != null;
+    row.className = `voice-control-row${hasOverride ? " is-overridden" : ""}`;
+
+    const heading = document.createElement("div");
+    heading.className = "voice-control-heading";
+    const title = document.createElement("strong");
+    title.textContent = definition.label;
+    const origin = document.createElement("span");
+    origin.className = "voice-control-origin";
+    origin.textContent = hasOverride ? "設計上書き" : "推定値";
+    origin.title = `${evidence.estimate_origin} / confidence ${evidence.confidence}`;
+    heading.append(title, origin);
+
+    const input = document.createElement("input");
+    input.type = "range";
+    input.min = String(definition.min);
+    input.max = String(definition.max);
+    input.step = String(definition.step);
+    input.value = String(evidence.effective_value);
+    input.setAttribute("aria-label", definition.label);
+
+    const value = document.createElement("output");
+    value.textContent = voiceControlProfile.formatControlValue(definition.key, evidence.effective_value);
+
+    const footer = document.createElement("div");
+    footer.className = "voice-control-footer";
+    const estimate = document.createElement("span");
+    estimate.textContent = `推定 ${voiceControlProfile.formatControlValue(definition.key, evidence.appearance_estimate)}`;
+    const reset = document.createElement("button");
+    reset.type = "button";
+    reset.className = "voice-control-reset";
+    reset.textContent = "戻す";
+    reset.hidden = !hasOverride;
+    footer.append(estimate, reset);
+
+    input.addEventListener("input", () => {
+      state.voiceControlOverrides[definition.key] = Number(input.value);
+      const updated = buildVoiceControlProfile().evidence[definition.key];
+      value.textContent = voiceControlProfile.formatControlValue(definition.key, updated.effective_value);
+      row.classList.add("is-overridden");
+      origin.textContent = "設計上書き";
+      reset.hidden = false;
+      renderVoiceDesignerDerivedViews();
+      renderConstraints();
+    });
+    reset.addEventListener("click", () => {
+      delete state.voiceControlOverrides[definition.key];
+      renderVoiceDesignerControls();
+      renderConstraints();
+    });
+
+    row.append(heading, input, value, footer);
+    els.voiceControlSliders.appendChild(row);
+  }
+}
+
+function renderVoiceDesignerDerivedViews(profile = buildVoiceControlProfile()) {
+  if (!profile) return;
+  const anchor = profile.identity_anchor;
+  if (els.identityF0Summary) els.identityF0Summary.textContent = `${Math.round(anchor.f0_mean_hz)} Hz`;
+  if (els.identityVtlSummary) els.identityVtlSummary.textContent = `${Number(anchor.vocal_tract_length_scale).toFixed(2)}x`;
+  if (els.identityOverrideSummary) els.identityOverrideSummary.textContent = String(Object.keys(state.voiceControlOverrides).length);
+  if (els.ttsCaptionInput && !state.ttsCaptionManual) {
+    els.ttsCaptionInput.value = profile.tts_adapters.audio_cpp.caption_ja;
+  }
+  if (els.ttsF0CorrectionStrengthValue) {
+    els.ttsF0CorrectionStrengthValue.textContent = `${Math.round(num(els.ttsF0CorrectionStrength, 1) * 100)}%`;
+  }
+  if (els.ttsF0CorrectionGuide) {
+    const enabled = els.ttsF0CorrectionEnabled?.checked !== false;
+    els.ttsF0CorrectionGuide.textContent = enabled
+      ? `Praat PSOLAで抑揚と元波形を保持し、有声区間中央値を ${Math.round(anchor.f0_mean_hz)} Hzへ補正します。`
+      : "F0後処理は無効です。生成モデル側のF0をそのまま使用します。";
+  }
+  renderTtsRequestSummary(profile);
+}
+
+function ttsF0CorrectionSettings() {
+  return {
+    f0_correction_enabled: els.ttsF0CorrectionEnabled?.checked !== false,
+    f0_correction_strength: num(els.ttsF0CorrectionStrength, 1),
+  };
+}
+
+function renderTtsRequestSummary(profile = buildVoiceControlProfile()) {
+  if (!els.ttsRequestSummary || !profile) return;
+  const request = voiceControlProfile.buildAudioCppRequest(profile, {
+    model: els.ttsModelSelect?.value,
+    text: els.ttsDemoTextInput?.value,
+    seed: num(els.ttsSeedInput, 20260719),
+    num_inference_steps: num(els.ttsInferenceStepsInput, 40),
+    caption_guidance_scale: num(els.ttsCaptionGuidanceInput, 2),
+    caption: activeTtsCaption(profile),
+    ...ttsF0CorrectionSettings(),
+  });
+  const items = [
+    ["MODEL", request.model],
+    ["F0 TARGET", `${Math.round(profile.identity_anchor.f0_mean_hz)} Hz`],
+    ["RATE", `${Number(profile.identity_anchor.speaking_rate).toFixed(2)}x`],
+    ["DURATION", `${Number(request.options.duration_scale).toFixed(2)}x`],
+  ];
+  els.ttsRequestSummary.innerHTML = "";
+  for (const [labelText, valueText] of items) {
+    const item = document.createElement("div");
+    const label = document.createElement("span");
+    const value = document.createElement("strong");
+    label.textContent = labelText;
+    value.textContent = valueText;
+    item.append(label, value);
+    els.ttsRequestSummary.appendChild(item);
+  }
+}
+
+function setAudioCppStatus(kind, message) {
+  if (els.audioCppStatus) els.audioCppStatus.textContent = message;
+  if (els.audioCppStatusDot) els.audioCppStatusDot.dataset.status = kind;
+}
+
+function audioCppModelIds(payload) {
+  const source = Array.isArray(payload) ? payload : payload?.data ?? payload?.models ?? [];
+  if (!Array.isArray(source)) return [];
+  return source
+    .map((item) => typeof item === "string" ? item : item?.id ?? item?.model ?? item?.name)
+    .filter((id) => typeof id === "string" && id.trim())
+    .map((id) => id.trim());
+}
+
+async function refreshAudioCppModels() {
+  setAudioCppStatus("pending", "接続確認中");
+  if (els.refreshTtsModelsBtn) els.refreshTtsModelsBtn.disabled = true;
+  try {
+    const response = await fetch("/api/audio-cpp/models", { headers: { Accept: "application/json" } });
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(payload.error || payload.message || `HTTP ${response.status}`);
+    const modelIds = audioCppModelIds(payload);
+    state.audioCppModels = modelIds;
+    const selected = els.ttsModelSelect?.value || "irodori-vdes";
+    if (els.ttsModelSelect && modelIds.length) {
+      els.ttsModelSelect.innerHTML = "";
+      for (const id of modelIds) {
+        const option = document.createElement("option");
+        option.value = id;
+        option.textContent = id;
+        els.ttsModelSelect.appendChild(option);
+      }
+      els.ttsModelSelect.value = modelIds.includes(selected) ? selected : modelIds[0];
+    }
+    setAudioCppStatus("ready", modelIds.length ? `接続済み / ${modelIds.length}モデル` : "接続済み / モデル未登録");
+    renderTtsRequestSummary();
+    return modelIds;
+  } catch (error) {
+    state.audioCppModels = [];
+    setAudioCppStatus("error", `未接続: ${error.message}`);
+    return [];
+  } finally {
+    if (els.refreshTtsModelsBtn) els.refreshTtsModelsBtn.disabled = false;
+  }
+}
+
+async function generateTtsDemo() {
+  const text = els.ttsDemoTextInput?.value?.trim() || "";
+  if (!text) {
+    if (els.ttsDemoStatus) els.ttsDemoStatus.textContent = "読み上げテキストを入力してください。";
+    return;
+  }
+  const profile = buildVoiceControlProfile();
+  const request = voiceControlProfile.buildAudioCppRequest(profile, {
+    model: els.ttsModelSelect?.value,
+    text,
+    seed: num(els.ttsSeedInput, 20260719),
+    num_inference_steps: num(els.ttsInferenceStepsInput, 40),
+    caption_guidance_scale: num(els.ttsCaptionGuidanceInput, 2),
+    caption: activeTtsCaption(profile),
+    ...ttsF0CorrectionSettings(),
+  });
+  if (els.generateTtsDemoBtn) els.generateTtsDemoBtn.disabled = true;
+  if (els.ttsDemoStatus) els.ttsDemoStatus.textContent = "audio.cppで生成中です。初回はモデル読み込みに時間がかかります。";
+  try {
+    const response = await fetch("/api/audio-cpp/speech", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Accept: "audio/wav" },
+      body: JSON.stringify(request),
+    });
+    if (!response.ok) {
+      const contentType = response.headers.get("content-type") || "";
+      const detail = contentType.includes("application/json")
+        ? (await response.json().catch(() => ({}))).error
+        : await response.text();
+      throw new Error(detail || `HTTP ${response.status}`);
+    }
+    const responseNumber = (name) => {
+      const raw = response.headers.get(name);
+      return raw == null ? Number.NaN : Number(raw);
+    };
+    const measuredF0 = responseNumber("X-CVD-F0-Measured-Hz");
+    const targetF0 = responseNumber("X-CVD-F0-Target-Hz");
+    const outputF0 = responseNumber("X-CVD-F0-Output-Hz");
+    const shiftSemitones = responseNumber("X-CVD-F0-Shift-Semitones");
+    const blob = await response.blob();
+    if (!blob.size) throw new Error("空の音声応答を受信しました。");
+    if (state.ttsResultUrl) URL.revokeObjectURL(state.ttsResultUrl);
+    state.ttsResultBlob = blob;
+    state.ttsResultUrl = URL.createObjectURL(blob);
+    if (els.ttsDemoAudio) {
+      els.ttsDemoAudio.src = state.ttsResultUrl;
+      els.ttsDemoAudio.load();
+      els.ttsDemoAudio.play().catch(() => {});
+    }
+    if (els.downloadTtsDemoBtn) els.downloadTtsDemoBtn.disabled = false;
+    if (els.ttsDemoStatus) {
+      const correctionSummary = [measuredF0, targetF0, outputF0, shiftSemitones].every(Number.isFinite)
+        ? ` / F0 ${measuredF0.toFixed(1)} → ${outputF0.toFixed(1)} Hz（目標 ${targetF0.toFixed(1)} Hz, ${shiftSemitones.toFixed(2)} st）`
+        : "";
+      els.ttsDemoStatus.textContent = `生成完了 / ${request.model} / seed ${request.seed}${correctionSummary}`;
+    }
+    setAudioCppStatus("ready", "接続済み");
+  } catch (error) {
+    if (els.ttsDemoStatus) els.ttsDemoStatus.textContent = `生成失敗: ${error.message}`;
+    setAudioCppStatus("error", `生成失敗: ${error.message}`);
+  } finally {
+    if (els.generateTtsDemoBtn) els.generateTtsDemoBtn.disabled = false;
+  }
+}
+
+function downloadTtsDemo() {
+  if (!state.ttsResultBlob) return;
+  download(`${localDateStamp()}-${safeFilePart(els.projectTitleInput?.value)}-tts.wav`, state.ttsResultBlob);
+}
+
+function exportVoiceControlProfile() {
+  const blob = new Blob([JSON.stringify(buildVoiceControlProfile(), null, 2)], { type: "application/json" });
+  download(`${localDateStamp()}-${safeFilePart(els.projectTitleInput?.value)}-voice-control-profile.json`, blob);
+}
+
 function renderSyllableDatasetPreview() {
   const tokens = selectedSyllableTokens();
   if (!tokens.includes(state.selectedSyllableToken)) state.selectedSyllableToken = tokens[0] ?? "a";
@@ -4826,7 +5142,8 @@ function recenteredConstraint(item, center) {
 
 function buildExport() {
   return {
-    schema_version: "character_voice_lab_mvp_0.3",
+    schema_version: "character_voice_designer_0.1",
+    app: "CharacterVoiceDesigner",
     app_version: APP_VERSION,
     project: {
       title: els.projectTitleInput.value.trim() || "voice_profile",
@@ -4856,6 +5173,7 @@ function buildExport() {
       tts_output_language: els.ttsOutputLanguageInput?.value ?? "ja-JP",
       syllable_dataset_set: selectedSyllableSetKey(),
       dataset_prefix: els.datasetPrefixInput?.value?.trim() || "voice_profile",
+      tts_model: els.ttsModelSelect?.value || "irodori-vdes",
     },
     landmark_schema: landmarkSystem.schema,
     landmarks: state.landmarks,
@@ -4871,6 +5189,8 @@ function buildExport() {
     auditory_evaluation_log: state.auditoryEvaluationLog,
     nasal_articulation_tuning: exportNasalTuning(),
     nasal_auditory_evaluation_log: state.nasalEvaluationLog,
+    voice_control_profile: buildVoiceControlProfile(),
+    tts_configuration: buildTtsConfiguration(),
     voice_constraints: withoutRetiredConstraints(state.constraints),
     constraint_overrides: withoutReadOnlyDerivedOverrides(withoutRetiredConstraints(state.constraintOverrides)),
     performance_range_overrides: withoutReadOnlyDerivedOverrides(withoutRetiredConstraints(state.performanceRangeOverrides)),
@@ -4906,6 +5226,8 @@ function buildExport() {
       "F0 is a read-only value derived from the reference center, vocal-fold spring constant, baseline muscle tension, and the current provisional inflammation mapping.",
       "Thoracic and abdominal volumes limit estimated maximum ventilation; VC/FVC/FEV1/PEF, ventilation, respiratory pressure, and speech-support utilization feed the preview respiratory drive once.",
       "Body-resonance frequency starts from thoracic volume, remains user-editable, and is persisted as the frequency used by preview synthesis.",
+      "CharacterVoiceDesigner exports backend-neutral identity anchors and serializable control functions separately from model-specific TTS adapter settings.",
+      "The audio.cpp Irodori adapter maps identity anchors to a deterministic Japanese VoiceDesign caption; it does not claim direct physical control of the learned TTS latent space.",
     ],
   };
 }
@@ -4928,6 +5250,7 @@ function setActiveTab(tabId) {
     panel.hidden = !active;
   }
   if (els.floatingPreviewDock) els.floatingPreviewDock.hidden = tabId !== "vowelTab";
+  if (tabId === "ttsModelTab" || tabId === "outputTab") renderVoiceDesignerControls();
   draw();
 }
 
@@ -8449,7 +8772,8 @@ async function saveProject() {
     imageManifest[target] = { path, original_name: state.imageNames[target], mime_type: file.type || projectPackage.mimeFromName(path) };
   }
   const manifest = {
-    schema_version: "character_voice_lab_project_0.2",
+    schema_version: "character_voice_designer_project_0.1",
+    app: "CharacterVoiceDesigner",
     app_version: APP_VERSION,
     title,
     saved_at: new Date().toISOString(),
@@ -8511,6 +8835,38 @@ function normalizeLoadedVocalTractGeometry(savedGeometry) {
 
 function applyProfile(data) {
   if (data.project?.title) els.projectTitleInput.value = data.project.title;
+  const savedVoiceOverrides = {};
+  for (const [key, item] of Object.entries(data.voice_control_profile?.evidence ?? {})) {
+    if (Number.isFinite(Number(item?.design_override))) savedVoiceOverrides[key] = Number(item.design_override);
+  }
+  state.voiceControlOverrides = voiceControlProfile?.normalizeOverrides(savedVoiceOverrides) ?? {};
+  const savedTtsConfiguration = data.tts_configuration ?? {};
+  state.ttsCaptionManual = Boolean(savedTtsConfiguration.caption_override);
+  if (els.ttsCaptionInput && state.ttsCaptionManual) els.ttsCaptionInput.value = savedTtsConfiguration.caption_override;
+  if (els.ttsSeedInput && Number.isFinite(Number(savedTtsConfiguration.seed))) els.ttsSeedInput.value = String(savedTtsConfiguration.seed);
+  if (els.ttsInferenceStepsInput && Number.isFinite(Number(savedTtsConfiguration.num_inference_steps))) {
+    els.ttsInferenceStepsInput.value = String(savedTtsConfiguration.num_inference_steps);
+  }
+  if (els.ttsCaptionGuidanceInput && Number.isFinite(Number(savedTtsConfiguration.caption_guidance_scale))) {
+    els.ttsCaptionGuidanceInput.value = String(savedTtsConfiguration.caption_guidance_scale);
+  }
+  const savedF0Postprocess = savedTtsConfiguration.f0_postprocess ?? {};
+  if (els.ttsF0CorrectionEnabled && typeof savedF0Postprocess.enabled === "boolean") {
+    els.ttsF0CorrectionEnabled.checked = savedF0Postprocess.enabled;
+  }
+  if (els.ttsF0CorrectionStrength && Number.isFinite(Number(savedF0Postprocess.strength))) {
+    els.ttsF0CorrectionStrength.value = String(savedF0Postprocess.strength);
+  }
+  const savedTtsModel = savedTtsConfiguration.selected_model ?? data.inputs?.tts_model;
+  if (els.ttsModelSelect && savedTtsModel) {
+    if (!Array.from(els.ttsModelSelect.options ?? []).some((option) => option.value === savedTtsModel)) {
+      const option = document.createElement("option");
+      option.value = savedTtsModel;
+      option.textContent = savedTtsModel;
+      els.ttsModelSelect.appendChild(option);
+    }
+    els.ttsModelSelect.value = savedTtsModel;
+  }
   const rawSavedConstraints = data.voice_constraints ?? null;
   const rawSavedOverrides = data.constraint_overrides ?? overridesFromConstraints(rawSavedConstraints);
   const migratedDevelopmentControls = migrateLegacyDevelopmentControls(rawSavedConstraints, rawSavedOverrides);
@@ -8580,6 +8936,7 @@ function applyProfile(data) {
   updateTractEditStatus();
   renderAuditoryEvaluation();
   renderNasalCalibration();
+  renderVoiceDesignerControls();
   draw();
 }
 
@@ -8726,6 +9083,39 @@ function init() {
   });
   els.ttsOutputLanguageInput?.addEventListener("input", renderConstraints);
   els.datasetPrefixInput?.addEventListener("input", renderConstraints);
+  els.resetVoiceControlOverridesBtn?.addEventListener("click", () => {
+    state.voiceControlOverrides = {};
+    renderVoiceDesignerControls();
+    renderConstraints();
+  });
+  els.refreshTtsModelsBtn?.addEventListener("click", refreshAudioCppModels);
+  els.ttsCaptionInput?.addEventListener("input", () => {
+    state.ttsCaptionManual = true;
+    renderTtsRequestSummary();
+    renderConstraints();
+  });
+  els.regenerateTtsCaptionBtn?.addEventListener("click", () => {
+    state.ttsCaptionManual = false;
+    renderVoiceDesignerDerivedViews();
+    renderConstraints();
+  });
+  for (const input of [
+    els.ttsModelSelect,
+    els.ttsSeedInput,
+    els.ttsInferenceStepsInput,
+    els.ttsCaptionGuidanceInput,
+    els.ttsF0CorrectionEnabled,
+    els.ttsF0CorrectionStrength,
+  ].filter(Boolean)) {
+    input.addEventListener("input", () => {
+      renderVoiceDesignerDerivedViews();
+      renderConstraints();
+    });
+  }
+  els.ttsDemoTextInput?.addEventListener("input", renderTtsRequestSummary);
+  els.generateTtsDemoBtn?.addEventListener("click", generateTtsDemo);
+  els.downloadTtsDemoBtn?.addEventListener("click", downloadTtsDemo);
+  els.exportVoiceControlProfileBtn?.addEventListener("click", exportVoiceControlProfile);
   els.previewSyllableBtn?.addEventListener("click", () => playSelectedSyllablePreview().catch((error) => {
     if (els.datasetExportStatus) els.datasetExportStatus.textContent = `再生失敗: ${error.message}`;
   }));
@@ -8747,6 +9137,7 @@ function init() {
   updateTractEditStatus();
   renderAuditoryEvaluation();
   renderNasalCalibration();
+  renderVoiceDesignerControls();
   draw();
 }
 

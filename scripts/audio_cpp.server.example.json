@@ -1,0 +1,17 @@
+{
+  "host": "127.0.0.1",
+  "port": 8080,
+  "backend": "cpu",
+  "device": 0,
+  "threads": 4,
+  "lazy_load": true,
+  "models": [
+    {
+      "id": "irodori-vdes",
+      "family": "irodori_tts",
+      "path": "models/Irodori-TTS-600M-v3-VoiceDesign",
+      "task": "vdes",
+      "mode": "offline"
+    }
+  ]
+}

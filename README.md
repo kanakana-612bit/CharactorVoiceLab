@@ -1,10 +1,38 @@
-# Character Voice Lab
+# CharacterVoiceDesigner
 
-Current release version: Ver 1.1
+Current branch version: Ver 0.1
 
-This is a dependency-free MVP for the character-oriented voice design experiment.
+CharacterVoiceDesigner converts appearance-derived and manually designed voice features into backend-neutral identity anchors and serializable control functions. The frozen Character Voice Lab physical synthesizer remains available as the profile-audition and calibration layer.
 
-Open `index.html` in a browser. It is intentionally independent from the Open WebUI runtime so the experimental data model can evolve without coupling to the main app. Future TTS integration should happen through the API boundary described in `API_CONTRACT.md`, not by embedding a specific TTS engine or VocalTractLab directly in this UI.
+The current TTS adapter targets the local `audio.cpp` server and its Japanese Irodori-TTS VoiceDesign path. The browser does not load native inference code or model weights. `designer_server.py` serves the independent WebUI and exposes a narrow same-origin bridge to `http://127.0.0.1:8080`.
+
+Start the WebUI bridge:
+
+```powershell
+.\scripts\start_designer.ps1
+```
+
+Then open `http://127.0.0.1:8765/`. The image, landmark, physical-profile, and export features remain usable while audio.cpp is offline.
+
+To prepare audio.cpp on Windows, use the official prebuilt CPU package and install the VoiceDesign model:
+
+```powershell
+.\scripts\setup_audio_cpp.ps1 -Backend cpu -InstallModel
+.\scripts\start_audio_cpp.ps1
+```
+
+The setup also installs `pyworld` and `praat-parselmouth` in the local runtime
+for optional direct F0 normalization. WORLD measures the voiced contour and
+Praat PSOLA moves its median to the VoiceControlProfile target without
+vocoder-resynthesizing the complete waveform.
+
+The setup keeps only the inference model, tokenizer, and codec. Model-card
+demonstration audio downloaded by the upstream model manager is removed and is
+not used by CharacterVoiceDesigner.
+
+Use `-Backend cuda` when a supported NVIDIA GPU and current driver are available. Model weights and the audio.cpp runtime are stored under ignored `runtime/` paths and are never included in project packages.
+
+The default setup path downloads the official `balance` prebuilt package, so Visual Studio, CMake, and Ninja are not required. `-BuildFromSource` is available when a custom build is needed. CUDA prebuilts require a compatible NVIDIA GPU/driver but not the CUDA Toolkit.
 
 The implementation roadmap is tracked in `IMPLEMENTATION_PLAN.md`.
 Literature and dataset gaps are tracked in `EVIDENCE_GAPS.md`.
@@ -26,9 +54,16 @@ The legacy `tension_response_curve` preview control is also retired. It conflate
 
 The former `glottal_closure` and `side_branch_loss_coupling` master controls are also retired from the live model. They remain named only in one-way development migration code so older projects can be converted to explicit glottal-source and branch-local controls.
 
-Implemented:
+Implemented on this branch:
 
-- publication-oriented six-tab workflow: basic information, detailed settings, vowel calibration, consonant calibration, reserved TTS settings, and references/publication policy
+- workflow tabs for image/landmark input, vocal-tract profile audition, phoneme calibration, TTS model selection, and output demo
+- `character_voice_identity_function_0.1`, which keeps appearance estimates, explicit design overrides, effective anchors, confidence, and source keys separate
+- serializable pitch, breathiness, energy, speaking-rate, articulation, and breath-phrase control functions
+- deterministic mapping of the intermediate profile to an Irodori VoiceDesign caption, fixed seed, inference steps, caption guidance, and duration scale
+- local audio.cpp model discovery and WAV generation through a validated same-origin HTTP bridge
+- backward-compatible loading of Character Voice Lab Ver 1.1 physical profiles
+
+- publication-oriented physical-profile workflow: basic information, detailed settings, vowel calibration, consonant calibration, and references/publication policy
 - header-level profile load, `voice_profile` naming, and reproducible package save
 - detailed-setting classification by design role and anatomical domain: baseline vocal tract, glottal physiology, trunk/respiration, PerformanceControlRange, execution control, and advanced acoustic preview
 - per-parameter `PerformanceControlRange` editors with independently stored minimum, baseline, and maximum values
@@ -89,7 +124,7 @@ Not implemented in this MVP:
 
 - SMPL-X, MediaPipe Face Mesh, DensePose, or robust background removal
 - VocalTractLab adapter
-- final external TTS engine integration
+- direct low-level control of learned TTS latent variables beyond the current caption/duration adapter; exact median F0 is available only as an explicit WORLD-measured, Praat-PSOLA waveform postprocess
 - validated anthropometric database
 - validated mapping from external neck breadth to internal airway dimensions; the prototype deliberately does not make that inference
 - participant-level linkage across external data sources
@@ -136,8 +171,11 @@ External cohort acquisition policy:
 - A new source may be added only after it is reviewed against the project ethics policy.
 - Approved sources must be aggregate-only and must not include participant IDs, sample IDs, row-level records, clinical images, or cross-source linkage keys.
 
-Calibration regression test:
+Regression tests:
 
 ```powershell
 node tests/landmark_schema.test.js
+node tests/voice_control_profile.test.js
+node tests/tube_synthesis_smoke.test.js
+runtime/mm/Scripts/python.exe -m unittest tests/designer_server_test.py tests/audio_postprocess_test.py
 ```

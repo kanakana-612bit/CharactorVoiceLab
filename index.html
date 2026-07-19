@@ -3,7 +3,7 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Character Voice Lab</title>
+    <title>CharacterVoiceDesigner</title>
     <link rel="stylesheet" href="./styles.css" />
   </head>
   <body>
@@ -11,8 +11,8 @@
       <div class="header-leading">
         <button id="loadProjectBtn" type="button">プロファイル読込</button>
         <div>
-          <h1>Character Voice Lab <span class="version-badge">Ver 1.1</span></h1>
-          <p>身体推定値と統計事前分布から音声制約を作る実験UI</p>
+          <h1>CharacterVoiceDesigner <span class="version-badge">Ver 0.1</span></h1>
+          <p>外見的音声同一性をTTS用の中間制御関数へ変換</p>
         </div>
       </div>
       <div class="header-actions">
@@ -26,12 +26,13 @@
     </header>
 
     <nav class="tabbar" aria-label="解析タブ">
-      <button class="tab-button active" data-tab-target="setupTab">基本情報</button>
-      <button class="tab-button" data-tab-target="detailTab">詳細設定</button>
-      <button class="tab-button" data-tab-target="vowelTab">母音調整</button>
-      <button class="tab-button" data-tab-target="consonantTab">子音調整</button>
-      <button class="tab-button" data-tab-target="outputTab">TTS設定</button>
-      <button class="tab-button" data-tab-target="referenceTab">参考文献・公開方針</button>
+      <button class="tab-button active" data-tab-target="setupTab">画像・特徴点</button>
+      <button class="tab-button" data-tab-target="detailTab">声道プロファイル</button>
+      <button class="tab-button" data-tab-target="vowelTab">母音試聴</button>
+      <button class="tab-button" data-tab-target="consonantTab">子音試聴</button>
+      <button class="tab-button" data-tab-target="ttsModelTab">TTSモデル</button>
+      <button class="tab-button" data-tab-target="outputTab">出力デモ</button>
+      <button class="tab-button" data-tab-target="referenceTab">参考文献</button>
     </nav>
 
     <main class="workspace">
@@ -593,14 +594,111 @@
         </section>
       </section>
 
-      <section id="outputTab" class="tab-panel" aria-label="TTS設定" hidden>
+      <section id="ttsModelTab" class="tab-panel tts-model-workspace" aria-label="TTSモデル" hidden>
+        <section class="pane voice-identity-panel">
+          <div class="pane-head">
+            <div>
+              <span class="section-kicker">VoiceControlProfile</span>
+              <h2>外見的音声同一性</h2>
+            </div>
+            <button id="resetVoiceControlOverridesBtn" type="button">推定値に戻す</button>
+          </div>
+          <div class="identity-summary-strip" aria-label="中間プロファイル要約">
+            <div><span>基準F0</span><strong id="identityF0Summary">-</strong></div>
+            <div><span>声道長</span><strong id="identityVtlSummary">-</strong></div>
+            <div><span>設計上書き</span><strong id="identityOverrideSummary">0</strong></div>
+          </div>
+          <div id="voiceControlSliders" class="voice-control-list"></div>
+          <p class="note">推定値は外見・物理プロファイルから得た中間表現です。TTSへはモデル固有アダプタで近似的に写像します。</p>
+        </section>
+
+        <section class="pane tts-backend-panel">
+          <div class="pane-head">
+            <div>
+              <span class="section-kicker">Local inference</span>
+              <h2>audio.cpp</h2>
+            </div>
+            <button id="refreshTtsModelsBtn" type="button">接続確認</button>
+          </div>
+          <div class="backend-status-line">
+            <span id="audioCppStatusDot" class="status-dot" aria-hidden="true"></span>
+            <strong id="audioCppStatus">未接続</strong>
+          </div>
+          <div class="form-grid tts-model-settings">
+            <label>
+              モデル
+              <select id="ttsModelSelect">
+                <option value="irodori-vdes" selected>Irodori VoiceDesign / Japanese</option>
+              </select>
+            </label>
+            <label>
+              乱数シード
+              <input id="ttsSeedInput" type="number" min="0" max="2147483647" step="1" value="20260719" />
+            </label>
+            <label>
+              推論ステップ
+              <input id="ttsInferenceStepsInput" type="number" min="4" max="100" step="1" value="40" />
+            </label>
+            <label>
+              Caption CFG
+              <input id="ttsCaptionGuidanceInput" type="number" min="0.5" max="10" step="0.1" value="2" />
+            </label>
+          </div>
+          <div class="f0-correction-control">
+            <label class="check-line">
+              <input id="ttsF0CorrectionEnabled" type="checkbox" checked />
+              <span>生成後F0を中間プロファイルへ合わせる</span>
+            </label>
+            <label>
+              <span>補正強度</span>
+              <input id="ttsF0CorrectionStrength" type="range" min="0" max="1" step="0.05" value="1" />
+              <output id="ttsF0CorrectionStrengthValue">100%</output>
+            </label>
+            <p id="ttsF0CorrectionGuide" class="note">目標F0は中間プロファイルから取得します。</p>
+          </div>
+          <label class="stacked-field">
+            VoiceDesign caption
+            <textarea id="ttsCaptionInput" rows="6" maxlength="1000"></textarea>
+          </label>
+          <div class="audio-actions">
+            <button id="regenerateTtsCaptionBtn" type="button">設計値から再生成</button>
+          </div>
+          <p class="note">現在の第一候補は日本語のIrodori-TTS-600M-v3-VoiceDesignです。モデルはaudio.cppサーバー側で管理します。</p>
+        </section>
+      </section>
+
+      <section id="outputTab" class="tab-panel" aria-label="出力デモ" hidden>
+        <section class="pane tts-demo-panel">
+          <div class="pane-head">
+            <div>
+              <span class="section-kicker">TTS demo</span>
+              <h2>出力デモ</h2>
+            </div>
+            <span>選択モデルへ中間プロファイルを適用</span>
+          </div>
+          <label class="stacked-field">
+            読み上げテキスト
+            <textarea id="ttsDemoTextInput" rows="7" maxlength="5000">こんにちは。これはキャラクター音声デザインの確認用サンプルです。</textarea>
+          </label>
+          <div class="tts-request-summary" id="ttsRequestSummary"></div>
+          <div class="audio-actions tts-demo-actions">
+            <button id="generateTtsDemoBtn" class="primary" type="button">音声を生成</button>
+            <button id="downloadTtsDemoBtn" type="button" disabled>WAV保存</button>
+            <button id="exportVoiceControlProfileBtn" type="button">中間プロファイル保存</button>
+          </div>
+          <audio id="ttsDemoAudio" class="tts-demo-audio" controls></audio>
+          <p id="ttsDemoStatus" class="status-line">audio.cppへ接続するとローカルで音声を生成できます。</p>
+        </section>
+
         <section class="pane output-dataset-panel">
+          <details class="advanced-settings">
+            <summary>物理モデル素材の書き出し</summary>
           <div class="pane-head">
             <div>
               <span class="section-kicker">Dataset export</span>
-              <h2>TTS設定</h2>
+              <h2>音素・音節素材</h2>
             </div>
-            <span>外部TTSに接続する前段として、音素・音節サンプルとメタデータを書き出します。</span>
+            <span>凍結した物理合成系の評価・学習素材</span>
           </div>
           <div class="output-settings-grid">
             <label>
@@ -635,6 +733,7 @@
             <div id="syllableTokenList" class="syllable-token-list"></div>
           </div>
           <p id="datasetExportStatus" class="status-line">TTSエンジン非依存のWAV + metadata.jsonとして書き出します。</p>
+          </details>
         </section>
       </section>
 
@@ -696,6 +795,7 @@
     <script src="./prior_resolver.js"></script>
     <script src="./project_package.js"></script>
     <script src="./landmark_schema.js"></script>
+    <script src="./voice_control_profile.js"></script>
     <script src="./app.js"></script>
   </body>
 </html>

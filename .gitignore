@@ -4,3 +4,5 @@ preview_*.wav
 *.log
 data/source_pdfs/
 tmp/
+runtime/
+server.character_voice_designer.json

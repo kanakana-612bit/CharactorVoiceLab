@@ -1,6 +1,19 @@
-# Character Voice Lab Implementation Plan
+# CharacterVoiceDesigner Implementation Plan
 
 This plan turns the current research ideas into implementable stages. The main rule is that population data enters the app as aggregate priors, while character-specific values remain user-controlled design parameters.
+
+## 2026-07-19 ML-TTS Control Designer Branch
+
+Current implementation order:
+
+1. preserve the physical Character Voice Lab prototype as the audition and evidence layer
+2. separate appearance estimates from explicit voice-design overrides
+3. generate backend-neutral identity anchors and performance control functions
+4. map those anchors through an adapter rather than coupling the UI to one learned TTS latent space
+5. use audio.cpp as the persistent local inference runtime
+6. begin with Japanese Irodori-TTS VoiceDesign and retain the adapter boundary for future local models
+
+The first adapter uses deterministic Japanese caption generation, fixed-seed reproducibility, duration scaling, and explicit disclosure that caption conditioning is approximate. Direct F0, breathiness, and spectral controls may be added only when a selected TTS backend exposes stable inference-time controls for them.
 
 ## 2026-07-14 Workflow And Geometry Plan
 

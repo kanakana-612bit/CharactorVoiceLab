@@ -5,11 +5,12 @@ const projectRoot = path.resolve(__dirname, "..");
 const indexHtml = fs.readFileSync(path.join(projectRoot, "index.html"), "utf8");
 const styleSheet = fs.readFileSync(path.join(projectRoot, "styles.css"), "utf8");
 
-if (!/<h1>Character Voice Lab <span class="version-badge">Ver 1\.1<\/span><\/h1>/.test(indexHtml)) {
-  throw new Error("The release version badge is not Ver 1.1");
+if (!/<h1>CharacterVoiceDesigner <span class="version-badge">Ver 0\.1<\/span><\/h1>/.test(indexHtml)) {
+  throw new Error("The designer branch version badge is not Ver 0.1");
 }
-if (/話出力設定/.test(indexHtml) || !/<button class="tab-button" data-tab-target="outputTab">TTS設定<\/button>/.test(indexHtml)) {
-  throw new Error("The output workflow tab is not consistently labeled TTS設定");
+if (!/<button class="tab-button" data-tab-target="ttsModelTab">TTSモデル<\/button>/.test(indexHtml)
+  || !/<button class="tab-button" data-tab-target="outputTab">出力デモ<\/button>/.test(indexHtml)) {
+  throw new Error("The TTS model and output demo workflow tabs are missing");
 }
 if (!/<select id="referenceImageStyleInput">\s*<option value="illustration" selected>/.test(indexHtml)) {
   throw new Error("Illustration is not the default reference-image style");
@@ -20,9 +21,10 @@ if (!/<select id="phoneticTargetProfileInput">\s*<option value="ja_JP_standard_n
 if (/id="synthesisBackendSelect"|value="hybrid"|value="formant"/.test(indexHtml)) {
   throw new Error("Retired synthesis backend choices remain in the UI");
 }
-const retiredEnginePattern = new RegExp(["Iro", "dori"].join("") + "|" + ["iro", "dori"].join(""));
-if (retiredEnginePattern.test(indexHtml + fs.readFileSync(path.join(projectRoot, "README.md"), "utf8") + fs.readFileSync(path.join(projectRoot, "API_CONTRACT.md"), "utf8"))) {
-  throw new Error("A specific TTS engine name remains in the public UI/docs");
+if (!/id="ttsModelSelect"[\s\S]*value="irodori-vdes"/.test(indexHtml)
+  || !/id="generateTtsDemoBtn"/.test(indexHtml)
+  || !/id="voiceControlSliders"/.test(indexHtml)) {
+  throw new Error("The audio.cpp VoiceDesign workflow is incomplete");
 }
 if (!/id="syllableSetInput"[\s\S]*value="japanese_core_cv"/.test(indexHtml)
   || !/id="exportSyllableDatasetBtn"/.test(indexHtml)
@@ -31,8 +33,8 @@ if (!/id="syllableSetInput"[\s\S]*value="japanese_core_cv"/.test(indexHtml)
   || !/id="recordAuditoryEvaluationBtn"/.test(indexHtml)) {
   throw new Error("Syllable dataset export or vowel A(x) tuning controls are missing from the UI");
 }
-if (!/data-tab-target="vowelTab">母音調整<\/button>/.test(indexHtml)
-  || !/data-tab-target="consonantTab">子音調整<\/button>/.test(indexHtml)
+if (!/data-tab-target="vowelTab">母音試聴<\/button>/.test(indexHtml)
+  || !/data-tab-target="consonantTab">子音試聴<\/button>/.test(indexHtml)
   || !/id="vowelExecutionSliders"/.test(indexHtml)
   || !/id="consonantExecutionSliders"/.test(indexHtml)
   || !/id="vowelCalibrationMount"/.test(indexHtml)
@@ -169,6 +171,7 @@ for (const file of [
   "prior_resolver.js",
   "project_package.js",
   "landmark_schema.js",
+  "voice_control_profile.js",
 ]) {
   eval(fs.readFileSync(path.join(projectRoot, file), "utf8"));
 }
@@ -1190,11 +1193,11 @@ state.constraints.body_resonance_frequency_hz.center = 245;
 state.constraintOverrides.body_resonance_frequency_hz = 245;
 state.constraintOverrides.f0_mean_hz = 123;
 const rangeExport = buildExport();
-if (rangeExport.schema_version !== "character_voice_lab_mvp_0.3") {
+if (rangeExport.schema_version !== "character_voice_designer_0.1") {
   throw new Error("Export schema was not upgraded for the range-semantics revision");
 }
-if (rangeExport.app_version !== "1.1") {
-  throw new Error("Export metadata is not marked as app version 1.1");
+if (rangeExport.app_version !== "0.1" || rangeExport.app !== "CharacterVoiceDesigner") {
+  throw new Error("Export metadata is not marked as CharacterVoiceDesigner 0.1");
 }
 if (rangeExport.performance_range_overrides?.respiratory_support?.min !== 0.72
   || state.constraints.respiratory_support.constraint_range?.max !== 1.28) {
