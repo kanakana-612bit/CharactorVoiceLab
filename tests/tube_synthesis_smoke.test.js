@@ -210,10 +210,6 @@ els.bodyFatInput.value = "";
 els.populationInput.value = "General";
 els.referenceImageStyleInput.value = "illustration";
 els.dataSourceInput.value = "public_default";
-els.smokingInput.value = "unknown";
-els.exerciseInput.value = "unknown";
-els.dietInput.value = "unknown";
-els.respiratoryHistoryInput.value = "unknown";
 els.globalImageWeight.value = 0.7;
 els.profileDirectionInput.value = "right";
 els.vowelSelect.value = "a";
@@ -1252,6 +1248,12 @@ if (els.phoneticTargetProfileInput.value !== "ja_JP_standard_neutral_aggregate_0
   throw new Error("Legacy profile migration did not choose the Japanese aggregate phonetic target for Japanese primary language");
 }
 const migratedExport = buildExport();
+for (const key of ["smoking_history", "exercise_habit", "diet_habit", "respiratory_history"]) {
+  if (key in migratedExport.inputs) throw new Error("Sensitive lifestyle/history input remains exported: " + key);
+}
+for (const key of ["inflammation_index", "airway_lumen_narrowing", "pediatric_vocal_cord_to_carina_cm", "pediatric_safe_airway_insertion_cm"]) {
+  if (key in migratedExport.voice_constraints) throw new Error("Retired clinical constraint remains exported: " + key);
+}
 if (migratedExport.inputs.phonetic_target_profile !== "ja_JP_standard_neutral_aggregate_0_1") {
   throw new Error("Export did not preserve the active phonetic target profile");
 }

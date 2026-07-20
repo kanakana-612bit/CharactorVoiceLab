@@ -71,14 +71,14 @@ Articulatory-control modifiers include:
 
 Preview source/acoustic-loss controls include:
 
-- `f0_mean_hz`: read-only output derived from `f0_reference_hz`, vocal-fold spring constant, baseline muscle tension, and the provisional inflammation mapping. It is not an independent design slider.
-- `glottal_open_quotient`, `glottal_speed_quotient`, `glottal_return_phase`, `glottal_spectral_tilt_db`, and `glottal_breathiness`: explicit LF-style glottal-source approximation controls initialized from tension and provisional inflammation/lumen mappings.
+- `f0_mean_hz`: read-only output derived from `f0_reference_hz`, vocal-fold spring constant, and baseline muscle tension. It is not an independent design slider.
+- `glottal_open_quotient`, `glottal_speed_quotient`, `glottal_return_phase`, `glottal_spectral_tilt_db`, and `glottal_breathiness`: explicit LF-style glottal-source approximation controls initialized from baseline tension and engineering defaults.
 - `glottal_volume_velocity_drive`, `glottal_flow_smoothing`, and `glottal_flow_inertance`: preview controls that blend the tube excitation toward a smoothed glottal volume-velocity input.
 - `vocal_tract_wall_loss`, `vocal_tract_viscothermal_loss`, `vocal_tract_high_frequency_damping`, `vocal_tract_wall_compliance`, `vocal_tract_resonance_broadening`, and `lip_radiation_smoothing`: generalized human-default loss/compliance controls for the lightweight 1D tube preview.
 - `sinus_coupling`, `velopharyngeal_loss_coupling`, `piriform_fossa_loss_coupling`, `piriform_fossa_frequency_hz`, and `nasal_branch_damping`: independent side-branch controls for paranasal sinus, velopharyngeal/nasal, and piriform-fossa coloring. The former global `side_branch_loss_coupling` master is migration-only.
 - `body_resonance_frequency_hz`, `body_resonance_gain_db`, and `body_resonance_coupling`: respectively the stored branch frequency, branch peak gain, and parallel wet/dry coupling. Frequency is initially derived from thoracic volume but becomes an explicit persisted override when edited.
 
-`inflammation_index` and `airway_lumen_narrowing` are not exposed as editable controls in the 1.1 UI. Their provisional internal mappings remain under review and must not be interpreted as validated medical quantities.
+`inflammation_index`, `airway_lumen_narrowing`, lifestyle/disease-history fields, and pediatric intubation-depth fields are retired import keys. They are discarded when old profiles are loaded and have no effect on analysis, synthesis, or export. These topics may be discussed as future research but are excluded from the public implementation.
 
 Respiratory flow is ordered as follows: thoracic and abdominal volumes limit the initial maximum-ventilation estimate; VC/FVC, FEV1/PEF, maximum ventilation, and maximum respiratory pressure define available source capacity; `respiratory_support` specifies how much of that capacity is used during the current speech performance. Structural volumes are therefore not reapplied directly to `respiratory_support`.
 
@@ -267,5 +267,8 @@ For public releases, embedded evidence should be limited to:
 - public aggregate statistics
 - formula-level or parameterized mappings already generalized by the source
 - medical/anatomical references used only to check the plausibility of computed values
+- treatment-oriented clinical values, including pediatric intubation depth, are not encoded or calculated
+- real-person images require explicit consent or another lawful basis; medical history must not be entered
+- analysis and synthesis use loopback-bound local services and do not upload project data
 
 Do not include case reports, individual patient values, clinical images, row-level records, ID-like values, or any data that requires participant-level linkage. The TTS core API should accept only source-labeled aggregate priors, user-edited design parameters, and generated constraints.

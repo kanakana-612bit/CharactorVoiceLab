@@ -130,28 +130,6 @@
     };
   }
 
-  function resolvePediatricAirway(context) {
-    const airway = localPdfPriors?.pediatric_airway;
-    if (!airway || context.age >= 18) return null;
-    const height = context.height_cm;
-    if (!Number.isFinite(height)) return null;
-    const regression = airway.equation_vocal_cord_to_carina_cm;
-    const safe = airway.simplified_safe_insertion_from_vocal_cord_cm;
-    const center = regression.slope * height + regression.intercept;
-    const safeInsertion = safe.slope * height + safe.intercept;
-    const inRange = height >= airway.height_range_cm[0] && height <= airway.height_range_cm[1];
-    return {
-      vocal_cord_to_carina_cm: Number(center.toFixed(4)),
-      safe_insertion_from_vocal_cord_cm: Number(safeInsertion.toFixed(4)),
-      half_width_cm: Number(Math.max(0.8, center * 0.12 * airway.uncertainty_multiplier).toFixed(4)),
-      source: regression.source,
-      uncertainty_source: airway.uncertainty_source,
-      confidence: inRange ? 0.46 : 0.24,
-      warning: inRange ? null : "Height is outside the extracted pediatric airway source range.",
-      note: regression.note,
-    };
-  }
-
   function resolveSinusDevelopment(context) {
     const table = localPdfPriors?.pediatric_sinus_development;
     if (!table) return null;
@@ -220,7 +198,6 @@
   function resolveGrowthReferences(context) {
     return {
       head_growth: resolveHeadGrowth(context),
-      pediatric_airway: resolvePediatricAirway(context),
       sinus_development: resolveSinusDevelopment(context),
       young_respiratory: resolveYoungRespiratory(context),
     };

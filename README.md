@@ -26,6 +26,8 @@ No Visual Studio, CMake, CUDA Toolkit, system Python, or pre-existing `audio.cpp
 
 The launcher starts both services on loopback-only addresses, selects nearby free ports when the defaults are occupied, and opens the WebUI. Run `stop_webui.bat` to stop only the processes owned by the launcher. Logs are stored in `runtime/logs/`.
 
+Analysis, profile handling, speech generation, and F0 correction run only on loopback-bound services on the user's PC. A browser Content Security Policy restricts API connections to the same local origin, and the bridge rejects non-loopback bind and upstream addresses. Reference images, profile values, input text, and generated audio are not uploaded. First setup and updates do contact upstream distribution services to download software and model files; project data is not included in those requests.
+
 ## One-click Linux setup
 
 The target baseline is Ubuntu 22.04/24.04 x86_64. Current glibc-based x86_64 and ARM64 distributions are supported on a best-effort basis.
@@ -61,7 +63,7 @@ Without an override, `CVD_BACKEND=auto` selects CUDA when the driver and GPU pas
 
 Every launch verifies that `pyworld` and `praat-parselmouth` can actually be loaded, not merely that their packages are installed. The local environment pins `pyworld` and retains the compatible `setuptools` provider required by Linux source builds. If F0 correction fails after an update, run `./stop_webui.sh` followed by `./webui.sh`; the launcher repairs the local packages and reloads the WebUI bridge. The exact native-import diagnostics can be checked with `runtime/mm/bin/python audio_postprocess.py --check`.
 
-Model weights and executable packages are downloaded from their upstream projects and are not redistributed in this repository. Review the applicable upstream model and runtime licenses before redistributing a populated `runtime/` directory.
+Model weights and executable packages are downloaded from their upstream projects and are not redistributed in this repository. License, attribution, redistribution, and model-use conditions are listed in [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md). A populated `runtime/` directory must not be redistributed without preserving all upstream licenses and reviewing its complete transitive dependency inventory.
 
 ## Synthetic sample
 
@@ -156,14 +158,14 @@ Implemented on this branch:
 - auditory calibration workflow with untuned/tuned A/B playback, phoneme-clarity and target-match ratings, notes, and profile-persisted evaluation history
 - dedicated nasal calibration for `/m/`, `/n/`, and moraic `/N/`, including oral-closure position/area/width, velopharyngeal opening, nasal-radiation contribution/path damping, hold/transition timing, direct closure-graph editing, A/B playback, and profile-persisted evaluation history
 - engine-independent vowel/CV dataset export; nasal tokens use the dedicated oral/nasal path model, while non-nasal consonant onsets remain explicitly experimental placeholders
-- read-only F0 derived from the reference center, vocal-fold spring constant, baseline muscle tension, and the currently provisional inflammation mapping
+- read-only F0 derived from the reference center, vocal-fold spring constant, and baseline muscle tension
 - respiratory source drive using VC/FVC, FEV1/PEF, maximum ventilation, maximum respiratory pressure, and speech-time support utilization; thoracic and abdominal volumes constrain maximum ventilation upstream
 - body resonance implemented as an independent parallel branch whose thoracic-volume-derived frequency, peak gain, and wet/dry coupling are stored separately
 - articulatory-control modifiers that separate phoneme gesture execution from tongue-dorsum, lip/cheek transverse, and tongue-groove PerformanceControlRange availability; availability limits a current gesture without redefining the neutral 2.5D anatomy, alongside motor precision, coarticulation strength, motor maturity, and phonological contrast maturity
 - Honda-style profile anchors for ANS, PNS, Menton, posterior pharyngeal wall, soft-palate hinge, and velum tip
 - morphological articulation-space guides exporting OCL, LFH, soft-palate length, velopharyngeal gap, and schematic paranasal sinus side branches
 - external neck-root breadth tracking, kept independent from the tracheal internal-diameter design parameter
-- optional smoking, exercise, diet, and respiratory-history inputs as conservative respiratory modifiers
+- no lifestyle-history, disease-history, inflammation, airway-narrowing, or pediatric intubation-depth inputs or mappings in the public implementation
 - low-poly inferred body model
 - baseline voice-parameter, UI edit-range, per-parameter performance-range override export, and reload
 - reproducible project ZIP packages containing `manifest.json`, `profile.json`, and the selected reference images
@@ -234,6 +236,9 @@ Public release evidence policy:
 - Use medical or anatomical papers only as aggregate references, generalized equations, parameter-schema support, or validity checks for computed values.
 - Do not use case reports, individual patient rows, subject IDs, imaging files, row-level clinical data, or cross-table participant linkage.
 - Present all embedded values as non-medical engineering priors for character voice design, not as diagnosis, treatment support, or individual biological identification.
+- Treatment-oriented clinical papers may be cited only for plausibility checks. Clinical treatment values such as pediatric intubation depth are not encoded or calculated.
+- Real-person images require explicit consent or another lawful basis. Do not enter medical history or other sensitive personal information.
+- Analysis and synthesis stay on loopback-bound services on the user's PC; setup downloads contain no project data.
 
 External cohort acquisition policy:
 

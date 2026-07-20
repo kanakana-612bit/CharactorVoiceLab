@@ -1348,6 +1348,31 @@ summary {
   margin: 0;
 }
 
+.references-pane td[data-tooltip] {
+  position: relative;
+  cursor: help;
+}
+
+.references-pane td[data-tooltip]:hover::after,
+.references-pane td[data-tooltip]:focus::after {
+  content: attr(data-tooltip);
+  position: absolute;
+  left: 8px;
+  top: calc(100% - 4px);
+  z-index: 140;
+  width: min(430px, calc(100vw - 48px));
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: #202522;
+  color: #f7f7f2;
+  box-shadow: var(--shadow);
+  font-size: 11px;
+  font-weight: 400;
+  line-height: 1.5;
+  white-space: pre-line;
+}
+
 .tract-edit-toolbar {
   display: grid;
   grid-template-columns: auto minmax(180px, 1fr) auto auto;
@@ -1857,4 +1882,23 @@ pre {
   .voice-control-footer {
     grid-column: 1 / -1;
   }
+}
+
+.privacy-notice {
+  margin: 14px 0 20px;
+  padding: 12px 14px;
+  border: 1px solid #b66a21;
+  border-left-width: 4px;
+  background: #fff8ed;
+  color: #34291f;
+}
+
+.privacy-notice h3 {
+  margin: 0 0 6px;
+  font-size: 1rem;
+}
+
+.privacy-notice p {
+  margin: 4px 0;
+  line-height: 1.55;
 }

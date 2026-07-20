@@ -55,6 +55,13 @@
             </label>
           </div>
 
+          <aside class="privacy-notice" aria-labelledby="privacyNoticeHeading">
+            <h3 id="privacyNoticeHeading">個人情報とローカル処理について</h3>
+            <p>解析・音声生成・保存は、このPC上のローカルサービスだけで実行されます。入力画像、プロファイル、読み上げテキスト、生成音声を外部サービスへ送信しません。</p>
+            <p>実在人物の画像は、本人の明示的な同意または適法な利用権限がある場合に限って使用してください。病歴その他の医療情報は入力しないでください。保存パッケージには、選択した参照画像と設計値が含まれます。</p>
+            <p>初回セットアップと更新時に限り、依存ソフトウェアとモデルを公式配布元から取得するための通信が発生します。この通信に参照画像や設計データは含まれません。</p>
+          </aside>
+
           <h2 class="section-heading">基本プロファイル</h2>
           <div class="form-grid">
             <label>
@@ -120,45 +127,6 @@
             </label>
           </div>
 
-          <h2 class="section-heading">生活習慣・呼吸器情報</h2>
-          <div class="form-grid">
-            <label>
-              喫煙歴
-              <select id="smokingInput">
-                <option value="unknown">unknown</option>
-                <option value="never">never</option>
-                <option value="past">past</option>
-                <option value="current">current</option>
-              </select>
-            </label>
-            <label>
-              運動習慣
-              <select id="exerciseInput">
-                <option value="unknown">unknown</option>
-                <option value="low">low</option>
-                <option value="moderate">moderate</option>
-                <option value="high">high</option>
-              </select>
-            </label>
-            <label>
-              食事習慣
-              <select id="dietInput">
-                <option value="unknown">unknown</option>
-                <option value="balanced">balanced</option>
-                <option value="irregular">irregular</option>
-                <option value="high_salt_or_alcohol">high salt/alcohol</option>
-              </select>
-            </label>
-            <label>
-              呼吸器既往
-              <select id="respiratoryHistoryInput">
-                <option value="unknown">unknown</option>
-                <option value="none">none</option>
-                <option value="asthma">asthma</option>
-                <option value="copd_or_chronic">COPD/chronic</option>
-              </select>
-            </label>
-          </div>
           <div class="inline-actions">
             <button id="analyzeBtn" class="primary" type="button">解析</button>
             <span id="extractionStatus" class="status-line">初期点はシェーマ上の仮配置です。各点を直接つかんで調整してください。</span>
@@ -172,7 +140,7 @@
                 <small id="computedBmiClass">身長・体重から計算</small>
               </div>
               <div class="composition-metric">
-                <span>同年代統計中央値</span>
+                <span>同年代統計参照中心</span>
                 <strong id="referenceBmiMedian">-</strong>
                 <small id="referenceBmiNote">参照可能な年齢階級データを表示</small>
               </div>
@@ -282,6 +250,7 @@
           <aside id="landmarkHintPanel" class="landmark-hint" aria-live="polite">
             <strong id="landmarkHintTitle">ランドマーク定義</strong>
             <span id="landmarkHintDefinition">点をつかむか、カーソルを重ねると定義を表示します。</span>
+            <span id="landmarkHintRole">全身・頭頚部・側面の点名は解剖学的表現へ統一しています。</span>
           </aside>
         </section>
       </section>
@@ -754,7 +723,7 @@
         <section class="pane references-pane">
           <div class="pane-head">
             <h2>引用・参照データ</h2>
-            <span>数値根拠と公開時の扱い</span>
+            <span>名称にマウスを重ねるかフォーカスすると利用範囲を表示</span>
           </div>
           <div class="table-wrap reference-table-wrap">
             <table>
@@ -762,9 +731,7 @@
                 <tr>
                   <th>No.</th>
                   <th>出典</th>
-                  <th>使用方法</th>
-                  <th>公開版での扱い</th>
-                  <th>注意</th>
+                  <th>分類</th>
                 </tr>
               </thead>
               <tbody id="referenceSourceTable"></tbody>

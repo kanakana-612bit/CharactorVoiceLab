@@ -5,7 +5,7 @@ window.CVL_LOCAL_PDF_PRIORS = {
   notes: [
     "This file contains only manually extracted aggregate values and equations from the locally supplied PDFs.",
     "No participant-level records or identifiers are represented.",
-    "Respiratory-function equations for ages 10-20 are reserved but not numerically encoded until the relevant table/equation is extracted cleanly."
+    "Pediatric intubation-depth and vocal-cord-to-carina equations are not encoded or calculated; their papers are retained only as plausibility-check citations."
   ],
   sources: {
     headGrowthSchoolchildren: {
@@ -20,13 +20,13 @@ window.CVL_LOCAL_PDF_PRIORS = {
     },
     pediatricVocalCordToCarina: {
       file_label: "小児における理想的な気管チューブ挿入長についての声帯から気管分岐部までの距離を指標とした検討.pdf",
-      use: "Height-linked pediatric vocal-cord-to-carina / airway length proxy.",
-      evidence_level: "manual_extract_from_text"
+      use: "Plausibility-check citation only; no equation or clinical insertion-depth value is encoded.",
+      evidence_level: "clinical_plausibility_check_only"
     },
     pediatricTubeDepthMethods: {
       file_label: "小児気管チューブ挿入長決定法の比較.pdf",
-      use: "Uncertainty evidence for pediatric airway-length formulas.",
-      evidence_level: "manual_extract_from_table"
+      use: "Plausibility-check citation only; no method table or insertion-depth percentage is encoded.",
+      evidence_level: "clinical_plausibility_check_only"
     },
     pediatricHeadNeckImaging: {
       file_label: "画像診断における成育の診方.pdf",
@@ -69,36 +69,6 @@ window.CVL_LOCAL_PDF_PRIORS = {
         source: "headGrowthSchoolchildren",
         note: "Text extract: age 6 and age 11 means; interpolation is linear for UI preview."
       }
-    }
-  },
-  pediatric_airway: {
-    height_range_cm: [43, 181],
-    equation_vocal_cord_to_carina_cm: {
-      form: "0.0699 * height_cm + 0.8507",
-      slope: 0.0699,
-      intercept: 0.8507,
-      source: "pediatricVocalCordToCarina",
-      note: "Extracted from scatter plot description; simplified clinical candidate around height * 0.06 was also reported."
-    },
-    simplified_safe_insertion_from_vocal_cord_cm: {
-      form: "0.06 * height_cm",
-      slope: 0.06,
-      intercept: 0,
-      source: "pediatricVocalCordToCarina",
-      note: "Use as a conservative airway safety proxy, not as a direct voice predictor."
-    },
-    uncertainty_multiplier: 1.45,
-    uncertainty_source: "pediatricTubeDepthMethods"
-  },
-  pediatric_tube_depth_method_table: {
-    n: 50,
-    source: "pediatricTubeDepthMethods",
-    methods: {
-      height_based: { appropriate_percent: 56.0, shallow_percent: 30.0, deep_percent: 4.0, unavailable_percent: 10.0 },
-      age_based: { appropriate_percent: 60.0, shallow_percent: 26.0, deep_percent: 14.0, unavailable_percent: 0.0 },
-      pals_guideline: { appropriate_percent: 56.0, shallow_percent: 42.0, deep_percent: 2.0, unavailable_percent: 0.0 },
-      tube_size_based: { appropriate_percent: 64.0, shallow_percent: 36.0, deep_percent: 0.0, unavailable_percent: 0.0 },
-      weight_based: { appropriate_percent: 56.0, shallow_percent: 30.0, deep_percent: 14.0, unavailable_percent: 0.0 }
     }
   },
   pediatric_sinus_development: {

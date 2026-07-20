@@ -2,16 +2,19 @@ window.CVL_REFERENCE = {
   publicationPolicy: {
     label: "Public prototype evidence policy",
     scope: [
-      "Use broadly accepted reference values, population summaries, and public aggregate statistics.",
-      "Use formula-level mappings and parameterized approximations only when the source has already generalized the values.",
-      "Use medical or anatomical papers as validity checks for computed values, not as direct patient-data sources.",
+      "Use broadly accepted reference values, public population summaries, and public aggregate statistics as source-labeled engineering priors.",
+      "Use published generalized equations only within their stated population and age range, with uncertainty and limitations preserved.",
+      "Use treatment-oriented clinical papers only as plausibility checks; do not encode treatment values such as intubation depth.",
+      "Run analysis and synthesis only on the user's PC through loopback-bound local services.",
     ],
     exclusions: [
       "Do not use case reports, individual patient rows, subject IDs, imaging files, or row-level clinical data.",
       "Do not infer, collect, cache, export, or link participant-level records from external dataset views.",
       "Do not present preview parameters as medical diagnosis, treatment advice, or individual biological identification.",
+      "Do not collect or infer lifestyle history, disease history, inflammation, or airway narrowing in the public implementation.",
+      "Do not use a real person's image without explicit consent or another lawful basis for use.",
     ],
-    disclosure: "すべての埋め込み値は、音声設計に関する工学的知見に基づきます。実在人物に基づく知見は統計的参照に限定し、出典および利用範囲を明記する必要があります。",
+    disclosure: "埋め込み値は、公開集計統計、一般化式、または明示された工学的近似に限定します。個人単位の臨床情報は使用せず、治療目的の数値は妥当性確認に限ります。解析・生成データはユーザーPC上でのみ処理されます。",
   },
   sources: {
     audioCpp2026: {
@@ -30,7 +33,7 @@ window.CVL_REFERENCE = {
       privacy_note: "Pretrained-model interface only. No source training records, reference-speaker audio, participant identifiers, or row-level data are imported into this project.",
       evidence_level: "pretrained_tts_model_reference",
       publication_use: "runtime_model_dependency",
-      public_release_status: "Review and comply with the current model-card license before redistribution",
+      public_release_status: "MIT; model-card ethical restrictions apply, including no impersonation without explicit consent and no misleading synthetic speech",
     },
     worldVocoder2016: {
       label: "Morise et al. 2016, WORLD: a vocoder-based high-quality speech synthesis system",
@@ -49,7 +52,7 @@ window.CVL_REFERENCE = {
       privacy_note: "Signal-processing software only. No participant recordings or row-level measurements are embedded.",
       evidence_level: "signal_processing_software_reference",
       publication_use: "implementation_dependency",
-      public_release_status: "Review Praat GPL and praat-parselmouth license obligations before binary redistribution",
+      public_release_status: "praat-parselmouth GPL-3.0-or-later; installed as an external runtime dependency and not incorporated into this repository's source",
     },
     pisanski2014: {
       label: "Pisanski et al. 2014, Vocal indicators of body size in men and women: a meta-analysis",
@@ -228,6 +231,7 @@ window.CVL_REFERENCE = {
       use: "Defines which dimensions are image-priority and which are statistical-prior-priority in the MVP.",
       publication_use: "internal_design_document",
       public_release_status: "usable",
+      display_in_reference_table: false,
     },
     pendingAist: {
       label: "AIST Japanese Head Dimensions Database 2001",
@@ -236,16 +240,17 @@ window.CVL_REFERENCE = {
       use: "Planned source for Japanese head and face priors. Not numerically embedded until the table is provided.",
       publication_use: "planned_public_reference_dataset",
       public_release_status: "pending_numeric_table_and_terms_check",
+      display_in_reference_table: false,
     },
     localPdfGrowthPriors: {
-      label: "Local PDF-derived Japanese growth and pediatric airway priors",
+      label: "Local PDF-derived Japanese growth and respiratory priors",
       citation_label: "PDF由来成長基準",
       local_cache: "local_pdf_growth_priors.js",
-      use: "Provides manually extracted aggregate references for school-age head growth, pediatric airway length, pediatric sinus development, and young respiratory-function metadata.",
+      use: "Provides manually extracted aggregate references for school-age head growth, pediatric sinus development, and young respiratory-function equations. Pediatric intubation papers are citation-only plausibility checks.",
       privacy_note: "Aggregate/manual-extract values only. No participant-level records.",
       evidence_level: "manual_extract",
-      publication_use: "clinical_aggregate_reference_only",
-      public_release_status: "review_before_public_release",
+      publication_use: "aggregate_prior_and_clinical_plausibility_check",
+      public_release_status: "aggregate values usable with source scope; pediatric intubation values excluded",
     },
     yumigeta2019BodyFatDistribution: {
       label: "Yumigeta et al. 2019, Characteristics of body fat distribution based on somatotype in Japanese young women",

@@ -59,6 +59,11 @@ class DesignerHandler(SimpleHTTPRequestHandler):
         self.send_header("X-Content-Type-Options", "nosniff")
         self.send_header("Referrer-Policy", "no-referrer")
         self.send_header("Cross-Origin-Resource-Policy", "same-origin")
+        self.send_header(
+            "Content-Security-Policy",
+            "default-src 'self'; img-src 'self' data: blob:; media-src 'self' blob:; "
+            "connect-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'",
+        )
         super().end_headers()
 
     def do_GET(self) -> None:  # noqa: N802 - stdlib handler API
@@ -299,12 +304,19 @@ def normalize_upstream_url(value: str) -> str:
     return value.rstrip("/")
 
 
+def normalize_bind_host(value: str) -> str:
+    if value not in {"127.0.0.1", "localhost", "::1"}:
+        raise ValueError("CharacterVoiceDesigner must bind to an explicit loopback host.")
+    return value
+
+
 def main() -> None:
     args = parse_args()
-    server = DesignerServer((args.host, args.port), DesignerHandler)
+    bind_host = normalize_bind_host(args.host)
+    server = DesignerServer((bind_host, args.port), DesignerHandler)
     server.audio_cpp_base_url = normalize_upstream_url(args.audio_cpp_url)
     server.upstream_timeout_seconds = max(1, args.upstream_timeout)
-    print(f"CharacterVoiceDesigner: http://{args.host}:{args.port}/")
+    print(f"CharacterVoiceDesigner: http://{bind_host}:{args.port}/")
     print(f"audio.cpp upstream: {server.audio_cpp_base_url}")
     try:
         server.serve_forever()

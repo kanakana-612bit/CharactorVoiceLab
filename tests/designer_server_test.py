@@ -49,6 +49,10 @@ class SpeechRequestValidationTest(unittest.TestCase):
         with self.assertRaises(ValueError):
             MODULE.normalize_upstream_url("https://example.com")
 
+    def test_non_loopback_bind_is_rejected(self):
+        with self.assertRaises(ValueError):
+            MODULE.normalize_bind_host("0.0.0.0")
+
     def test_invalid_model_id_is_rejected(self):
         with self.assertRaises(ValueError):
             MODULE.validate_speech_request({"model": "../../model", "input": "test"})
@@ -100,9 +104,11 @@ class LocalProxyIntegrationTest(unittest.TestCase):
     def test_runtime_health_reports_f0_dependencies(self):
         with urllib.request.urlopen(self.base_url + "/api/runtime/health") as response:
             health = json.load(response)
+            content_security_policy = response.headers.get("Content-Security-Policy", "")
         self.assertEqual(health["app"], "CharacterVoiceDesigner")
         self.assertIsInstance(health["psola_available"], bool)
         self.assertIn("pyworld", health["postprocess_dependencies"])
+        self.assertIn("connect-src 'self'", content_security_policy)
 
     def test_models_and_wav_are_proxied(self):
         with urllib.request.urlopen(self.base_url + "/api/audio-cpp/models") as response:

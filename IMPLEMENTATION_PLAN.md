@@ -71,7 +71,7 @@ Use the National Health and Nutrition Survey as the primary age-band source for 
 Planned inputs:
 
 - sex and age-band means for height, weight, BMI, waist circumference, and body-composition-adjacent fields where available
-- age-band prevalence for smoking, drinking, exercise habit, and diet categories
+- lifestyle and disease associations are discussion-only future research topics; no collection, inference, or character-level mapping is implemented
 - source-year and survey-year metadata, because recent surveys are not all continuous
 
 Important limitation:
@@ -217,10 +217,7 @@ Warnings:
 
 Inputs:
 
-- smoking history
-- exercise habit
-- diet habit
-- respiratory history
+- lifestyle and disease-history effects are future research topics only and are excluded from the public implementation
 - age/sex/height/weight/body composition
 
 Outputs:
@@ -237,7 +234,7 @@ Rules:
 
 - ages 10-20: prefer the young Japanese respiratory-function PDF tables/equations
 - adults: use official aggregate lifestyle/body-composition sources plus a conservative respiratory model until a better Japanese adult spirometry table is added
-- smoking and respiratory history should affect damping, noise, and pressure stability more than formant placement
+- any future lifestyle or disease model requires a separate ethics review, public aggregate evidence, and an explicit non-diagnostic design
 - thoracic and abdominal volumes act upstream through the maximum-ventilation ceiling and must not be added again inside `respiratory_support`
 
 ### 4. Detailed vocal-fold parameter panel
@@ -249,8 +246,8 @@ Add a panel for:
 - damping
 - baseline muscle tension
 - read-only F0 derived from the physical source quantities
-- mucosal inflammation/edema
-- airway lumen narrowing
+- mucosal inflammation/edema (future research only; not implemented)
+- airway lumen narrowing (future research only; not implemented)
 
 Neurological/autonomic response curves remain a separate future profile and must not be represented by a local vocal-fold multiplier in this panel.
 The retired `glottal_closure` master exists only in one-way pre-0.3 migration code; current projects store explicit LF-style source quantities.
@@ -259,8 +256,7 @@ Preview mapping:
 
 - spring constant and tension: F0 response and vibrato/stability
 - damping: spectral tilt and attack dullness
-- inflammation/edema: lower effective F0, higher noise, wider bandwidth, reduced closure efficiency
-- lumen narrowing: increased turbulent noise and high-frequency damping
+- disease-related acoustic mappings are intentionally unspecified until an ethically and scientifically approved study is designed
 
 This should remain a preview model until a real physical core is connected.
 

@@ -88,14 +88,13 @@ A later UI may expose one calibrated `overall_vocal_tract_loss` macro that moves
 
 | Parameter | Current state | Needed evidence |
 | --- | --- | --- |
-| `f0_mean_hz` | Read-only result derived from sex-class reference F0, vocal-fold spring constant, baseline muscle tension, and provisional inflammation mapping | A physically calibrated mapping from tissue stiffness, effective mass, longitudinal tension, and phonatory state to F0. |
-| `vocal_fold_spring_constant` | Age/lifestyle/inflammation preview proxy | Vocal-fold biomechanical stiffness data by age/sex/pathology. |
+| `f0_mean_hz` | Read-only result derived from sex-class reference F0, vocal-fold spring constant, and baseline muscle tension | A physically calibrated mapping from tissue stiffness, effective mass, longitudinal tension, and phonatory state to F0. |
+| `vocal_fold_spring_constant` | Age-class engineering baseline | Vocal-fold biomechanical stiffness data suitable for non-clinical aggregate calibration. |
 | `baseline_muscle_tension` | Preview proxy | Laryngeal muscle tension / phonation threshold pressure references. |
-| `inflammation_index` | Provisional internal proxy; removed from the 1.0 UI until its physical meaning and mapping can be explained | Edema/inflammation effects on vocal-fold mass, damping, closure, and acoustic noise. |
-| `airway_lumen_narrowing` | Provisional internal proxy; removed from the 1.0 UI until its physical meaning and mapping can be explained | Airway narrowing effects on turbulence, resistance, and phonation stability. |
-| `glottal_open_quotient` | Explicit LF-style preview control initialized from tension and provisional inflammation mapping | Aggregate acoustic or laryngographic open-quotient ranges by phonation mode, age, and sex. |
-| `glottal_speed_quotient` | Explicit LF-style preview control initialized from tension and provisional inflammation mapping | Source-model references linking speed quotient to perceived pressed/breathy quality. |
-| `glottal_return_phase` | Explicit LF-style preview control initialized from tension and provisional inflammation mapping | Return-phase calibration for the simplified LF-style source. |
+| Disease, inflammation, and airway-narrowing effects | Excluded from the public implementation | Future research topic only. Any implementation requires a separately approved ethical scope and aggregate, non-identifying evidence. |
+| `glottal_open_quotient` | Explicit LF-style preview control initialized from tension | Aggregate acoustic or laryngographic open-quotient ranges by phonation mode, age, and sex. |
+| `glottal_speed_quotient` | Explicit LF-style preview control initialized from tension | Source-model references linking speed quotient to perceived pressed/breathy quality. |
+| `glottal_return_phase` | Explicit LF-style preview control initialized from tension | Return-phase calibration for the simplified LF-style source. |
 | `glottal_spectral_tilt_db` | Preview spectral-tilt control | Voice-source spectral tilt references by phonation type and speaker class. |
 | `glottal_breathiness` | Aspiration-noise preview control | Breathiness/noise calibration against HNR or perceptual ratings. |
 | `glottal_volume_velocity_drive` | Preview source-input blend | Source-filter references for volume-velocity injection into a lightweight 1D tube model. |
@@ -109,15 +108,13 @@ A later UI may expose one calibrated `overall_vocal_tract_loss` macro that moves
 | BMI reference display | Young Japanese female grouped proxy, Komiya 1997 Japanese age/sex mean proxy, and General adult fallback percentiles | Japanese public age-band BMI medians by sex, preferably official aggregate tables. Komiya values are means/model centers, not medians. |
 | Body-fat percentage guide | Young Japanese female BIA group summaries, Komiya 1997 Japanese age/sex aggregate means, plus Deurenberg BMI/age/sex formula fallback | Japanese age-band and sex-specific measured body-fat percentage distributions with method-specific separation. |
 | Regional fat distribution | Young Japanese female BIA trunk/leg/arm percentage summaries plus a non-Japanese regional skinfold response guide | Male, middle-aged, older-adult, and post-menopausal distribution data from Japanese aggregate public sources. The current skinfold response guide is not a Japanese population center. |
-| Smoking modifiers | Conservative manual categories | Age/sex smoking prevalence and spirometry/vocal effects; public aggregate source preferred. |
-| Exercise modifiers | Conservative manual categories | Exercise habit vs pulmonary function/breath support references. |
+| Lifestyle modifiers | Excluded from the public implementation | Future research topic only; no personal history fields or unvalidated coefficients should be added. |
 | Diet modifiers | Very weak condition modifier | Evidence is indirect; may remain UI metadata rather than acoustic parameter. |
-| Respiratory history modifiers | Conservative preview penalties | Disease-specific spirometry and voice-quality effects, ideally aggregate and non-identifying. |
 
 ## Already Partially Supported
 
 | Parameter | Current support | Remaining gap |
 | --- | --- | --- |
 | `predicted_vc_l`, `predicted_fvc_l`, `predicted_fev1_l`, `predicted_pef_l_s`, `predicted_v50_l_s`, `predicted_v25_l_s` | Local PDF Table 4 equations for Japanese ages 10-20; VC/FVC and FEV1/PEF now feed the engineering respiratory-drive layer | Adult and under-10 references; the mapping weights to phonation duration, airflow, and pressure still need validation. |
-| `pediatric_vocal_cord_to_carina_cm` | Local pediatric airway PDF height equation | Voice relevance is indirect; use only as airway-length/safety proxy. |
+| Pediatric airway/intubation studies | Plausibility-check citation only | Treatment-oriented equations and insertion-depth values must remain absent from runtime data and calculations. |
 | school-age head growth | Local PDF endpoints for ages 6 and 11 | Need full table/SDs and connection to face/mandible dimensions. |
