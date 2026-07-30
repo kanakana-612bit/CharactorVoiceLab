@@ -8,6 +8,7 @@ data/source_pdfs/
 tmp/
 runtime/
 evaluation_results/
+speaker_condition_results/
 benchmark_results/*
 !benchmark_results/published/
 !benchmark_results/published/**

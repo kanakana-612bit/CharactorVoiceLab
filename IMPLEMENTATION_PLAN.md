@@ -53,12 +53,66 @@ real-person VoxCeleb training data. Raw embeddings are not serialized.
 
 Next evaluation work:
 
-1. expose native audio.cpp hashes or sampled summaries for speaker condition, caption
+1. extend the implemented native speaker-state hash pattern to caption
    condition, predicted duration, initial latent, and selected denoising steps;
 2. add batched evaluation-set generation using `evaluation_texts.ja.json`;
 3. compare embedding and acoustic drift across text while holding seed and controls;
 4. derive selection rules only after repeated trials establish stable
    within-condition variance.
+
+## 2026-07-30 Speaker Condition Reference Milestone
+
+Implemented:
+
+1. exact inspection of the installed VoiceDesign model configuration and
+   speaker-branch weight structure;
+2. validation of the upstream `.speaker.safetensors` suffix,
+   `speaker_embedding` key, rank, dtype, finite values, token count, and model
+   dimension;
+3. hash-bound provenance sidecars that distinguish non-semantic format fixtures
+   from trained artifacts;
+4. deterministic `(16, 768)` format-fixture generation without audio, text,
+   personal identifiers, or a learned voice;
+5. source inspection of the local audio.cpp runtime;
+6. a read-only capability API and JSON/Markdown/YAML compatibility report;
+7. tests proving that storage compatibility is not promoted to end-to-end or
+   semantic compatibility.
+
+Verified status:
+
+- the installed model has a 768-dimensional speaker branch;
+- the upstream Speaker Inversion file contract is structurally compatible;
+- the original audio.cpp request path had reference-audio conditioning but no
+  direct speaker-state input;
+- the patched Ubuntu source build and real-audio generation path were confirmed
+  on 2026-07-30.
+
+Native implementation added after the initial inspection:
+
+1. a pinned audio.cpp patch loads the official `speaker_embedding` tensor as a
+   direct variable-length speaker state with an all-valid mask;
+2. reference audio, `no_ref`, and direct embedding modes are mutually
+   exclusive;
+3. native suffix, file-size, rank, token-count, model-dimension, dtype, tensor
+   length, and finite-value checks run before inference;
+4. the Designer bridge exposes only files under
+   `runtime/speaker_conditions/`, rejects non-semantic fixtures, and records
+   only hashes and shapes;
+5. Linux setup rebuilds an unpatched binary automatically, while Windows
+   source builds apply the same tracked patch;
+6. native responses expose only the consumed speaker-state SHA-256, shape, and
+   input mode;
+7. Designer observations compare that digest with the canonical float32
+   little-endian digest computed from the validated input artifact.
+
+Next native work:
+
+1. run the new state-hash observation once on the Ubuntu GPU build and require
+   `matches_input_state: true`;
+2. compare the official upstream Python inference output with the patched
+   native path after the official environment is constructed;
+3. perform held-out-text semantic evaluation using an embedding optimized
+   against the exact local checkpoint.
 
 ## 2026-07-14 Workflow And Geometry Plan
 

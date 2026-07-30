@@ -2,10 +2,16 @@ import importlib.util
 import hashlib
 import json
 import pathlib
+import shutil
 import threading
 import unittest
 import urllib.request
+import uuid
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from unittest import mock
+
+import torch
+from safetensors.torch import save_file
 
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
@@ -13,6 +19,45 @@ SPEC = importlib.util.spec_from_file_location("designer_server", ROOT / "designe
 MODULE = importlib.util.module_from_spec(SPEC)
 assert SPEC.loader is not None
 SPEC.loader.exec_module(MODULE)
+
+
+def make_speaker_condition_project() -> tuple[pathlib.Path, pathlib.Path]:
+    root = ROOT / "tests" / f"_speaker_project_{uuid.uuid4().hex}"
+    audio_root = root / "runtime" / "audio.cpp"
+    model_root = audio_root / "models" / "irodori"
+    condition_root = root / "runtime" / "speaker_conditions"
+    model_root.mkdir(parents=True)
+    condition_root.mkdir(parents=True)
+    config = {
+        "use_speaker_condition": True,
+        "speaker_dim": 768,
+        "caption_dim": 512,
+        "latent_dim": 32,
+    }
+    (model_root / "model_config.json").write_text(
+        json.dumps(config), encoding="utf-8"
+    )
+    (audio_root / "server.character_voice_designer.json").write_text(
+        json.dumps(
+            {
+                "models": [
+                    {
+                        "id": "irodori-vdes",
+                        "path": "models/irodori",
+                        "family": "irodori_tts",
+                        "task": "voice_design",
+                    }
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+    condition = condition_root / "test.speaker.safetensors"
+    save_file(
+        {"speaker_embedding": torch.zeros((16, 768), dtype=torch.float32)},
+        str(condition),
+    )
+    return root, condition
 
 
 class SpeechRequestValidationTest(unittest.TestCase):
@@ -90,8 +135,88 @@ class SpeechRequestValidationTest(unittest.TestCase):
         with self.assertRaises(ValueError):
             MODULE.validate_speech_request({"model": "../../model", "input": "test"})
 
+    def test_managed_speaker_condition_is_validated_and_forwarded(self):
+        project, condition = make_speaker_condition_project()
+        self.addCleanup(shutil.rmtree, project, True)
+        with mock.patch.object(MODULE, "PROJECT_ROOT", project):
+            request = MODULE.validate_speech_request(
+                {
+                    "model": "irodori-vdes",
+                    "input": "test",
+                    "speaker_condition": {"file": condition.name},
+                }
+            )
+        self.assertFalse(request["options"]["no_ref"])
+        self.assertEqual(
+            request["options"]["speaker_embedding_path"],
+            str(condition.resolve()),
+        )
+        self.assertEqual(
+            request["_cvd_speaker_condition"]["shape"],
+            [16, 768],
+        )
+        self.assertRegex(
+            request["_cvd_speaker_condition"]["state_f32le_sha256"],
+            r"^[a-f0-9]{64}$",
+        )
+
+    def test_non_semantic_fixture_is_rejected(self):
+        project, condition = make_speaker_condition_project()
+        self.addCleanup(shutil.rmtree, project, True)
+        digest = hashlib.sha256(condition.read_bytes()).hexdigest()
+        condition.with_name("test.speaker.json").write_text(
+            json.dumps(
+                {
+                    "embedding": {"sha256": digest},
+                    "model": {},
+                    "provenance": {"semantic_voice": False},
+                }
+            ),
+            encoding="utf-8",
+        )
+        with mock.patch.object(MODULE, "PROJECT_ROOT", project):
+            with self.assertRaisesRegex(ValueError, "format fixture"):
+                MODULE.validate_speech_request(
+                    {
+                        "model": "irodori-vdes",
+                        "input": "test",
+                        "speaker_condition": {"file": condition.name},
+                    }
+                )
+
+    def test_speaker_condition_dimension_mismatch_is_rejected(self):
+        project, condition = make_speaker_condition_project()
+        self.addCleanup(shutil.rmtree, project, True)
+        save_file(
+            {"speaker_embedding": torch.zeros((16, 767), dtype=torch.float32)},
+            str(condition),
+        )
+        with mock.patch.object(MODULE, "PROJECT_ROOT", project):
+            with self.assertRaisesRegex(ValueError, "incompatible"):
+                MODULE.validate_speech_request(
+                    {
+                        "model": "irodori-vdes",
+                        "input": "test",
+                        "speaker_condition": {"file": condition.name},
+                    }
+                )
+
+    def test_speaker_condition_nested_path_is_rejected(self):
+        with self.assertRaisesRegex(ValueError, "managed"):
+            MODULE.validate_speech_request(
+                {
+                    "model": "irodori-vdes",
+                    "input": "test",
+                    "speaker_condition": {
+                        "file": "../test.speaker.safetensors",
+                    },
+                }
+            )
+
 
 class StubAudioCppHandler(BaseHTTPRequestHandler):
+    last_payload = None
+
     def do_GET(self):  # noqa: N802
         body = json.dumps({"data": [{"id": "irodori-vdes"}]}).encode()
         self.send_response(200)
@@ -103,6 +228,7 @@ class StubAudioCppHandler(BaseHTTPRequestHandler):
     def do_POST(self):  # noqa: N802
         length = int(self.headers.get("Content-Length", "0"))
         payload = json.loads(self.rfile.read(length))
+        type(self).last_payload = payload
         assert payload["model"] == "irodori-vdes"
         assert payload["options"]["caption"] == "明るい声。"
         assert "observation" not in payload
@@ -110,6 +236,16 @@ class StubAudioCppHandler(BaseHTTPRequestHandler):
         self.send_response(200)
         self.send_header("Content-Type", "audio/wav")
         self.send_header("Content-Length", str(len(body)))
+        if "speaker_embedding_path" in payload["options"]:
+            self.send_header(
+                "X-AudioCpp-Speaker-Condition-SHA256",
+                "b" * 64,
+            )
+            self.send_header("X-AudioCpp-Speaker-Condition-Shape", "16x768")
+            self.send_header(
+                "X-AudioCpp-Speaker-Condition-Mode",
+                "speaker_inversion",
+            )
         self.end_headers()
         self.wfile.write(body)
 
@@ -146,6 +282,12 @@ class ObservationRecordTest(unittest.TestCase):
         observation_options = request.pop("_cvd_observation")
         store = MemoryObservationStore()
         capture = store.begin(request, None, observation_options)
+        capture.record["internal_conditions"]["speaker_condition"].update(
+            {
+                "requested": True,
+                "input_state_f32le_sha256": "a" * 64,
+            }
+        )
         self.assertTrue(
             capture.finalize_success(
                 upstream_body=b"upstream",
@@ -158,6 +300,8 @@ class ObservationRecordTest(unittest.TestCase):
                 upstream_headers={
                     "X-AudioCpp-Predicted-Duration-Seconds": "2.5",
                     "X-AudioCpp-Speaker-Condition-SHA256": "a" * 64,
+                    "X-AudioCpp-Speaker-Condition-Shape": "16x768",
+                    "X-AudioCpp-Speaker-Condition-Mode": "speaker_inversion",
                 },
                 f0_analyzer=None,
             )
@@ -171,6 +315,17 @@ class ObservationRecordTest(unittest.TestCase):
         self.assertTrue(record["internal_conditions"]["duration_prediction"]["observed"])
         self.assertEqual(record["internal_conditions"]["duration_prediction"]["seconds"], 2.5)
         self.assertTrue(record["internal_conditions"]["speaker_condition"]["observed"])
+        self.assertEqual(
+            record["internal_conditions"]["speaker_condition"]["shape"],
+            [16, 768],
+        )
+        self.assertEqual(
+            record["internal_conditions"]["speaker_condition"]["mode"],
+            "speaker_inversion",
+        )
+        self.assertTrue(
+            record["internal_conditions"]["speaker_condition"]["matches_input_state"]
+        )
 
 
 class LocalProxyIntegrationTest(unittest.TestCase):
@@ -280,6 +435,47 @@ class LocalProxyIntegrationTest(unittest.TestCase):
         )
         self.assertFalse(record["internal_conditions"]["speaker_condition"]["observed"])
 
+    def test_managed_speaker_state_headers_and_mismatch_are_observed(self):
+        project, condition = make_speaker_condition_project()
+        self.addCleanup(shutil.rmtree, project, True)
+        payload = {
+            "model": "irodori-vdes",
+            "input": "speaker state test",
+            "options": {"caption": "明るい声。"},
+            "speaker_condition": {"file": condition.name},
+            "observation": {
+                "enabled": True,
+                "analyze_f0": False,
+                "capture_internal_conditions": True,
+            },
+        }
+        request = urllib.request.Request(
+            self.base_url + "/api/audio-cpp/speech",
+            data=json.dumps(payload, ensure_ascii=False).encode("utf-8"),
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        with mock.patch.object(MODULE, "PROJECT_ROOT", project):
+            with urllib.request.urlopen(request) as response:
+                response.read()
+                observation_id = response.headers["X-CVD-Observation-ID"]
+                self.assertEqual(
+                    response.headers["X-CVD-Speaker-State-SHA256"],
+                    "b" * 64,
+                )
+                self.assertEqual(
+                    response.headers["X-CVD-Speaker-State-Shape"],
+                    "16x768",
+                )
+                self.assertEqual(
+                    response.headers["X-CVD-Speaker-Condition-Mode"],
+                    "speaker_inversion",
+                )
+        record = self.designer.observation_store.read(observation_id)
+        speaker = record["internal_conditions"]["speaker_condition"]
+        self.assertTrue(speaker["observed"])
+        self.assertFalse(speaker["matches_input_state"])
+
     def test_observation_capabilities_are_reported(self):
         with urllib.request.urlopen(
             self.base_url + "/api/runtime/observation-capabilities?model=irodori-vdes"
@@ -288,6 +484,23 @@ class LocalProxyIntegrationTest(unittest.TestCase):
         self.assertTrue(capabilities["available"]["request_conditions"])
         self.assertFalse(capabilities["available"]["speaker_condition"])
         self.assertFalse(capabilities["storage"]["stores_audio"])
+
+    def test_speaker_condition_capabilities_do_not_claim_direct_inference(self):
+        with urllib.request.urlopen(
+            self.base_url
+            + "/api/runtime/speaker-condition-capabilities?model=irodori-vdes"
+        ) as response:
+            capabilities = json.load(response)
+        self.assertTrue(
+            capabilities["available"]["speaker_inversion_file_validation"]
+        )
+        self.assertFalse(
+            capabilities["available"]["speaker_inversion_direct_inference"]
+        )
+        self.assertFalse(capabilities["available"]["speaker_state_observation"])
+        self.assertTrue(
+            capabilities["speaker_inversion_contract"]["raw_embedding_not_exposed_by_default"]
+        )
 
 
 if __name__ == "__main__":

@@ -29,11 +29,19 @@ from generation_observation import (
     load_model_metadata,
     validate_observation_options,
 )
+from speaker_condition_reference import (
+    SpeakerConditionError,
+    inspect_embedding,
+    speaker_condition_capabilities,
+)
 
 
 PROJECT_ROOT = Path(__file__).resolve().parent
 MODEL_ID_PATTERN = re.compile(r"^[A-Za-z0-9_.:-]{1,128}$")
 LANGUAGE_PATTERN = re.compile(r"^[A-Za-z][A-Za-z0-9-]{1,15}$")
+SPEAKER_CONDITION_NAME_PATTERN = re.compile(
+    r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}\.speaker\.safetensors$"
+)
 MAX_JSON_BYTES = 128 * 1024
 MAX_AUDIO_BYTES = 256 * 1024 * 1024
 STATIC_EXTENSIONS = {
@@ -50,6 +58,7 @@ STATIC_EXTENSIONS = {
     ".wav",
 }
 BLOCKED_STATIC_PREFIXES = ("/.git", "/data/", "/scripts/", "/tests/", "/runtime/")
+SPEAKER_CONDITION_ROOT = PROJECT_ROOT / "runtime" / "speaker_conditions"
 
 
 class DesignerServer(ThreadingHTTPServer):
@@ -130,6 +139,18 @@ class DesignerHandler(SimpleHTTPRequestHandler):
                 },
             )
             return
+        if path == "/api/runtime/speaker-condition-capabilities":
+            query = urllib.parse.parse_qs(urllib.parse.urlsplit(self.path).query)
+            model = query.get("model", ["irodori-vdes"])[0]
+            if not MODEL_ID_PATTERN.fullmatch(model):
+                self._send_json(HTTPStatus.BAD_REQUEST, {"error": "model is invalid."})
+                return
+            metadata = load_model_metadata(PROJECT_ROOT, model)
+            self._send_json(
+                HTTPStatus.OK,
+                speaker_condition_capabilities(PROJECT_ROOT, metadata),
+            )
+            return
         if path.startswith("/api/runtime/observations/"):
             observation_id = path.rsplit("/", 1)[-1]
             record = self.server.observation_store.read(observation_id)
@@ -169,12 +190,33 @@ class DesignerHandler(SimpleHTTPRequestHandler):
             return
         postprocess = request.pop("_cvd_postprocess", None)
         observation_options = request.pop("_cvd_observation", None)
+        speaker_condition = request.pop("_cvd_speaker_condition", None)
         observation = (
             self.server.observation_store.begin(request, postprocess, observation_options)
             if observation_options
             else None
         )
-        self._proxy_json("/v1/audio/speech", request, postprocess, observation)
+        if observation and speaker_condition:
+            observation.record["request"]["speaker_condition"] = dict(
+                speaker_condition
+            )
+            observation.record["internal_conditions"]["speaker_condition"].update(
+                {
+                    "requested": True,
+                    "input_sha256": speaker_condition["sha256"],
+                    "input_state_f32le_sha256": speaker_condition[
+                        "state_f32le_sha256"
+                    ],
+                    "input_shape": speaker_condition["shape"],
+                }
+            )
+        self._proxy_json(
+            "/v1/audio/speech",
+            request,
+            postprocess,
+            observation,
+            speaker_condition,
+        )
 
     def _static_path_allowed(self, raw_path: str) -> bool:
         path = urllib.parse.unquote(raw_path)
@@ -214,6 +256,7 @@ class DesignerHandler(SimpleHTTPRequestHandler):
         payload: dict[str, Any],
         postprocess: dict[str, Any] | None = None,
         observation: ObservationCapture | None = None,
+        speaker_condition: dict[str, Any] | None = None,
     ) -> None:
         body = json.dumps(payload, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
         request = urllib.request.Request(
@@ -222,13 +265,19 @@ class DesignerHandler(SimpleHTTPRequestHandler):
             headers={"Content-Type": "application/json", "Accept": "audio/wav"},
             method="POST",
         )
-        self._perform_upstream_request(request, postprocess, observation)
+        self._perform_upstream_request(
+            request,
+            postprocess,
+            observation,
+            speaker_condition,
+        )
 
     def _perform_upstream_request(
         self,
         request: urllib.request.Request,
         postprocess: dict[str, Any] | None = None,
         observation: ObservationCapture | None = None,
+        speaker_condition: dict[str, Any] | None = None,
     ) -> None:
         upstream_started = time.perf_counter()
         try:
@@ -267,6 +316,47 @@ class DesignerHandler(SimpleHTTPRequestHandler):
                 self.send_header("Cache-Control", "no-store")
                 if observation_written:
                     self.send_header("X-CVD-Observation-ID", observation.id)
+                if speaker_condition:
+                    self.send_header(
+                        "X-CVD-Speaker-Condition-SHA256",
+                        speaker_condition["sha256"],
+                    )
+                    self.send_header(
+                        "X-CVD-Speaker-Artifact-SHA256",
+                        speaker_condition["sha256"],
+                    )
+                    self.send_header(
+                        "X-CVD-Speaker-Condition-Shape",
+                        "x".join(str(value) for value in speaker_condition["shape"]),
+                    )
+                    native_state_sha = response.headers.get(
+                        "X-AudioCpp-Speaker-Condition-SHA256"
+                    )
+                    if native_state_sha and re.fullmatch(
+                        r"[a-fA-F0-9]{64}", native_state_sha
+                    ):
+                        self.send_header(
+                            "X-CVD-Speaker-State-SHA256",
+                            native_state_sha.lower(),
+                        )
+                    native_shape = response.headers.get(
+                        "X-AudioCpp-Speaker-Condition-Shape"
+                    )
+                    if native_shape and re.fullmatch(
+                        r"[1-9][0-9]*x[1-9][0-9]*", native_shape
+                    ):
+                        self.send_header(
+                            "X-CVD-Speaker-State-Shape",
+                            native_shape,
+                        )
+                    native_mode = response.headers.get(
+                        "X-AudioCpp-Speaker-Condition-Mode"
+                    )
+                    if native_mode in {"none", "reference_audio", "speaker_inversion"}:
+                        self.send_header(
+                            "X-CVD-Speaker-Condition-Mode",
+                            native_mode,
+                        )
                 if correction_metadata:
                     self.send_header("X-CVD-F0-Measured-Hz", str(correction_metadata["measured_hz"]))
                     self.send_header("X-CVD-F0-Target-Hz", str(correction_metadata["target_hz"]))
@@ -333,6 +423,63 @@ def bounded_number(value: Any, field: str, minimum: float, maximum: float) -> fl
     return number
 
 
+def resolve_speaker_condition(
+    project_root: Path,
+    model_id: str,
+    value: Any,
+) -> tuple[Path, dict[str, Any]] | None:
+    if value is None:
+        return None
+    if not isinstance(value, dict):
+        raise ValueError("speaker_condition must be an object.")
+    name = value.get("file")
+    if not isinstance(name, str) or not SPEAKER_CONDITION_NAME_PATTERN.fullmatch(name):
+        raise ValueError(
+            "speaker_condition.file must be a managed .speaker.safetensors filename."
+        )
+    root = (project_root / "runtime" / "speaker_conditions").resolve()
+    path = (root / name).resolve()
+    if path.parent != root or not path.is_file():
+        raise ValueError("The managed speaker condition was not found.")
+
+    metadata = load_model_metadata(project_root, model_id)
+    architecture = metadata.get("architecture", {})
+    model_contract = {
+        "config_sha256": metadata.get("model_config_sha256"),
+        "checkpoint": {"sha256": None},
+        "speaker_condition": {
+            "enabled": bool(architecture.get("use_speaker_condition", False)),
+            "dimension": architecture.get("speaker_dim"),
+        },
+    }
+    try:
+        artifact = inspect_embedding(path, model=model_contract)
+    except SpeakerConditionError as error:
+        raise ValueError(f"The speaker condition could not be read: {error}") from error
+    if not artifact["upstream_file_contract_compatible"]:
+        raise ValueError(
+            "The speaker condition does not satisfy the Speaker Inversion file contract."
+        )
+    if not artifact["target_model_contract_compatible"]:
+        raise ValueError(
+            "The speaker condition is incompatible with the selected model."
+        )
+    sidecar = artifact.get("sidecar") or {}
+    if sidecar.get("provenance", {}).get("semantic_voice") is False:
+        raise ValueError("A non-semantic format fixture cannot be used for speech.")
+    if artifact["model_binding_status"] in {"invalid", "incompatible"}:
+        raise ValueError(
+            "The speaker condition provenance does not match the selected model."
+        )
+    return path, {
+        "file": name,
+        "sha256": artifact["sha256"],
+        "state_f32le_sha256": artifact["state_f32le_sha256"],
+        "shape": artifact["shape"],
+        "model_binding_status": artifact["model_binding_status"],
+    }
+
+
 def validate_speech_request(payload: dict[str, Any]) -> dict[str, Any]:
     model = payload.get("model")
     text = payload.get("input")
@@ -372,6 +519,16 @@ def validate_speech_request(payload: dict[str, Any]) -> dict[str, Any]:
         ),
         "trim_tail": trim_tail,
     }
+    speaker_condition = resolve_speaker_condition(
+        PROJECT_ROOT,
+        model,
+        payload.get("speaker_condition"),
+    )
+    if speaker_condition is not None:
+        speaker_path, speaker_metadata = speaker_condition
+        request["options"]["no_ref"] = False
+        request["options"]["speaker_embedding_path"] = str(speaker_path)
+        request["_cvd_speaker_condition"] = speaker_metadata
     raw_postprocess = payload.get("postprocess", {})
     if not isinstance(raw_postprocess, dict):
         raise ValueError("postprocess must be an object.")
@@ -427,6 +584,7 @@ def main() -> None:
     server.audio_cpp_base_url = normalize_upstream_url(args.audio_cpp_url)
     server.upstream_timeout_seconds = max(1, args.upstream_timeout)
     server.observation_store = ObservationStore(PROJECT_ROOT / "runtime" / "observations", PROJECT_ROOT)
+    SPEAKER_CONDITION_ROOT.mkdir(parents=True, exist_ok=True)
     print(f"CharacterVoiceDesigner: http://{bind_host}:{args.port}/")
     print(f"audio.cpp upstream: {server.audio_cpp_base_url}")
     try:

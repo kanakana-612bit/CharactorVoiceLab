@@ -20,6 +20,10 @@ $AudioCppRoot = [System.IO.Path]::GetFullPath($AudioCppRoot)
 $RuntimeRoot = Split-Path -Parent $AudioCppRoot
 $PyWorldRequirement = "pyworld==0.3.5"
 $SetuptoolsRequirement = "setuptools<81"
+$SpeakerInversionPatch = Join-Path $ProjectRoot "patches\audio_cpp\irodori_speaker_inversion.patch"
+$SpeakerObservationPatch = Join-Path $ProjectRoot "patches\audio_cpp\irodori_speaker_observation.patch"
+$SpeakerInversionMarker = "speaker_embedding_path"
+$SpeakerObservationMarker = "X-AudioCpp-Speaker-Condition-SHA256"
 New-Item -ItemType Directory -Force -Path $RuntimeRoot | Out-Null
 New-Item -ItemType Directory -Force -Path $AudioCppRoot | Out-Null
 
@@ -48,7 +52,45 @@ if ($BuildFromSource) {
     throw "MSVC cl.exe was not found. Run this script from a Visual Studio 2022 Developer PowerShell."
   }
   if (-not (Test-Path -LiteralPath (Join-Path $AudioCppRoot ".git") -PathType Container)) {
-    git clone https://github.com/0xShug0/audio.cpp.git $AudioCppRoot
+    if ($ReleaseTag) {
+      git clone --depth 1 --branch $ReleaseTag https://github.com/0xShug0/audio.cpp.git $AudioCppRoot
+    } else {
+      git clone https://github.com/0xShug0/audio.cpp.git $AudioCppRoot
+    }
+    if ($LASTEXITCODE -ne 0) { throw "audio.cpp source clone failed." }
+  }
+  $IrodoriSessionSource = Join-Path $AudioCppRoot "src\models\irodori_tts\session.cpp"
+  $ServerRuntimeSource = Join-Path $AudioCppRoot "app\server\runtime.cpp"
+  if (-not (Test-Path -LiteralPath $SpeakerInversionPatch -PathType Leaf)) {
+    throw "The CharacterVoiceDesigner audio.cpp patch is missing: $SpeakerInversionPatch"
+  }
+  if (-not (Test-Path -LiteralPath $IrodoriSessionSource -PathType Leaf)) {
+    throw "The audio.cpp Irodori session source is missing: $IrodoriSessionSource"
+  }
+  if (-not (Test-Path -LiteralPath $ServerRuntimeSource -PathType Leaf)) {
+    throw "The audio.cpp server runtime source is missing: $ServerRuntimeSource"
+  }
+  $IrodoriSessionText = Get-Content -LiteralPath $IrodoriSessionSource -Raw
+  if (-not $IrodoriSessionText.Contains($SpeakerInversionMarker)) {
+    git -C $AudioCppRoot apply --check $SpeakerInversionPatch
+    if ($LASTEXITCODE -ne 0) {
+      throw "The audio.cpp source does not match the pinned Speaker Inversion patch."
+    }
+    git -C $AudioCppRoot apply $SpeakerInversionPatch
+    if ($LASTEXITCODE -ne 0) { throw "The Speaker Inversion patch could not be applied." }
+  } else {
+    $ServerRuntimeText = Get-Content -LiteralPath $ServerRuntimeSource -Raw
+    if (-not $ServerRuntimeText.Contains($SpeakerObservationMarker)) {
+      if (-not (Test-Path -LiteralPath $SpeakerObservationPatch -PathType Leaf)) {
+        throw "The CharacterVoiceDesigner speaker-observation upgrade patch is missing."
+      }
+      git -C $AudioCppRoot apply --check $SpeakerObservationPatch
+      if ($LASTEXITCODE -ne 0) {
+        throw "The existing Speaker Inversion source cannot be upgraded with the pinned observation patch."
+      }
+      git -C $AudioCppRoot apply $SpeakerObservationPatch
+      if ($LASTEXITCODE -ne 0) { throw "The speaker-observation patch could not be applied." }
+    }
   }
   $Preset = if ($Backend -eq "cuda") { "windows-cuda-release" } else { "windows-cpu-release" }
   Push-Location $AudioCppRoot

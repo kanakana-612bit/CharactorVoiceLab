@@ -23,6 +23,7 @@ It owns only:
 - `GET /api/audio-cpp/models` -> `GET http://127.0.0.1:8080/v1/models`
 - `POST /api/audio-cpp/speech` -> `POST http://127.0.0.1:8080/v1/audio/speech`
 - `GET /api/runtime/observation-capabilities?model={id}` -> local observation support and expected model dimensions
+- `GET /api/runtime/speaker-condition-capabilities?model={id}` -> model, file-contract, and native direct-input capability
 - `GET /api/runtime/observations/{id}` -> one opt-in local generation record
 
 The bridge accepts a configured model id, up to 5000 text characters, language, seed, inference-step count, and a small allowlist of VoiceDesign options. The upstream origin must be loopback HTTP; arbitrary URLs and unrecognized request fields are not forwarded.
@@ -34,6 +35,52 @@ unchanged. Records are local-only, do not copy the generated WAV, and hash
 input text and captions unless `include_text` is explicitly enabled. The
 schema and current native-runtime boundary are defined in
 [`OBSERVATION_PROTOCOL.md`](OBSERVATION_PROTOCOL.md).
+
+The speaker-condition capability route is read-only. It does not accept,
+serialize, or forward raw embeddings. `speaker_inversion_direct_inference` is
+reported from the inspected native binary rather than from an available source
+tree. File-format validation and model dimensional compatibility must not be
+presented as executable or semantic compatibility. See
+[`SPEAKER_CONDITION_COMPATIBILITY.md`](SPEAKER_CONDITION_COMPATIBILITY.md).
+
+An optional managed speaker condition may be selected for speech generation:
+
+```json
+{
+  "model": "irodori-vdes",
+  "input": "こんにちは。",
+  "speaker_condition": {
+    "file": "character-a.speaker.safetensors"
+  },
+  "options": {
+    "caption": "落ち着いた自然な発話"
+  }
+}
+```
+
+The file must exist directly under `runtime/speaker_conditions/`. Nested paths,
+absolute paths, malformed tensors, model-dimension mismatches, incompatible
+provenance sidecars, and non-semantic format fixtures are rejected by the
+Designer bridge. The bridge sets `no_ref: false` and forwards only the resolved
+managed path to the loopback audio.cpp process. A patched native binary then
+loads the `speaker_embedding` tensor directly and bypasses the reference-audio
+encoder. The response identifies the accepted artifact with
+`X-CVD-Speaker-Condition-SHA256` (legacy artifact-file hash),
+`X-CVD-Speaker-Artifact-SHA256`, and
+`X-CVD-Speaker-Condition-Shape`. A patched native runtime also returns:
+
+- `X-AudioCpp-Speaker-Condition-SHA256`: SHA-256 of the exact contiguous
+  float32 little-endian speaker-state bytes consumed by inference;
+- `X-AudioCpp-Speaker-Condition-Shape`: the consumed `tokens x dimension`;
+- `X-AudioCpp-Speaker-Condition-Mode`: `none`, `reference_audio`, or
+  `speaker_inversion`.
+
+The bridge forwards those values as `X-CVD-Speaker-State-SHA256`,
+`X-CVD-Speaker-State-Shape`, and `X-CVD-Speaker-Condition-Mode`. Observation
+records compare the native state hash with the canonical state hash computed
+while validating the managed artifact and report `matches_input_state` as
+`true`, `false`, or `null` when the native value was unavailable. Neither
+headers nor observation records contain raw embedding values.
 
 ## VoiceControlProfile
 

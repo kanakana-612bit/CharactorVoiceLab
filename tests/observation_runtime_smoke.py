@@ -43,6 +43,14 @@ def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--audio-cpp-url", default="http://127.0.0.1:8080")
     parser.add_argument("--steps", type=int, default=4)
+    parser.add_argument(
+        "--speaker-condition",
+        default="",
+        help=(
+            "Managed filename under runtime/speaker_conditions. When set, "
+            "require the native consumed-state hash to match the input state."
+        ),
+    )
     args = parser.parse_args()
 
     server = DesignerServer(("127.0.0.1", 0), DesignerHandler)
@@ -69,6 +77,8 @@ def main() -> None:
             "trim_tail": True,
         },
     }
+    if args.speaker_condition:
+        payload["speaker_condition"] = {"file": args.speaker_condition}
     try:
         plain_wav, plain_id = request_wav(base_url, payload)
         payload["observation"] = {
@@ -87,12 +97,31 @@ def main() -> None:
         record = server.observation_store.read(observation_id)
         if record is None:
             raise RuntimeError("Observation record was not persisted.")
+        speaker_condition = record["internal_conditions"]["speaker_condition"]
+        if args.speaker_condition:
+            if not speaker_condition.get("observed"):
+                raise RuntimeError(
+                    "The patched native runtime did not report the consumed speaker state."
+                )
+            if speaker_condition.get("mode") != "speaker_inversion":
+                raise RuntimeError(
+                    "The native runtime did not report speaker_inversion input mode."
+                )
+            if speaker_condition.get("matches_input_state") is not True:
+                raise RuntimeError(
+                    "The native consumed speaker state does not match the managed input."
+                )
         output = {
             "observation_id": observation_id,
             "wav_sha256": hashlib.sha256(observed_wav).hexdigest(),
             "wav_bytes_identical": True,
             "record_status": record.get("status"),
-            "speaker_condition_observed": record["internal_conditions"]["speaker_condition"]["observed"],
+            "speaker_condition_observed": speaker_condition["observed"],
+            "speaker_condition_mode": speaker_condition.get("mode"),
+            "speaker_condition_shape": speaker_condition.get("shape"),
+            "speaker_condition_matches_input": speaker_condition.get(
+                "matches_input_state"
+            ),
             "caption_condition_observed": record["internal_conditions"]["caption_condition"]["observed"],
             "latent_snapshots_observed": record["internal_conditions"]["latent_snapshots"]["observed_steps"],
             "record_path": str(

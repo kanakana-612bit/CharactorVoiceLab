@@ -118,12 +118,47 @@ metadata, generation timing, returned-WAV hashes and PCM metadata, and optional
 WORLD F0 statistics. It does not copy the generated audio and does not retain
 text or caption values by default.
 
-The current audio.cpp release does not expose Speaker/Caption condition tokens,
-intermediate latents, or Duration Predictor output. Observation records mark
-those fields as requested but unavailable instead of presenting inferred
-values as internal model state. The API, privacy behavior, native hook boundary,
-and parity smoke test are documented in
+The patched audio.cpp runtime exposes only a SHA-256 digest, shape, and input
+mode for the speaker state actually consumed by inference. It does not expose
+raw Speaker/Caption condition tokens, intermediate latents, or Duration
+Predictor output. Observation records compare a managed Speaker Inversion
+artifact's canonical float32 state hash with that native digest. Other
+unavailable fields remain explicitly marked unavailable instead of being
+presented as inferred internal state. The API, privacy behavior, native hook
+boundary, and parity smoke test are documented in
 [`OBSERVATION_PROTOCOL.md`](OBSERVATION_PROTOCOL.md).
+
+## Speaker condition reference
+
+`speaker_condition_reference.py` and `verify_speaker_inversion.py` implement a
+local, read-only compatibility boundary for Irodori Speaker Inversion files.
+They verify the installed model architecture, `.speaker.safetensors` contract,
+artifact provenance, and the inspected audio.cpp input path as separate layers.
+
+The installed VoiceDesign model is structurally compatible with a
+`speaker_embedding` tensor of shape `(tokens, 768)`. The current audio.cpp
+release binary does not accept that tensor directly. CharacterVoiceDesigner
+therefore carries a pinned source patch that adds the official direct-state
+contract. Linux setup automatically rebuilds when the installed binary lacks
+the direct-input or safe-observation feature marker, including upgrading an
+earlier direct-input-only source tree; Windows applies the same upgrade when
+`setup_audio_cpp.ps1 -BuildFromSource` is used. Unpatched release binaries
+continue to work for caption-only generation and report direct inference as
+unavailable.
+
+Optimized embeddings may be placed under `runtime/speaker_conditions/` and
+selected through the local speech API. The bridge accepts only a direct
+filename, validates it against the selected model, and never exposes the raw
+tensor. A generated format fixture is random, non-semantic test data and is
+rejected for speech generation. Patched native responses expose only the
+consumed state hash, shape, and input mode, allowing exact transport
+verification without serializing the embedding.
+
+Run `verify_speaker_inversion.bat --create-format-fixture` on Windows or
+`./verify_speaker_inversion.sh --create-format-fixture` on Linux. Results are
+written under the ignored `speaker_condition_results/` directory. The exact
+contract, current result, and native acceptance criteria are documented in
+[`SPEAKER_CONDITION_COMPATIBILITY.md`](SPEAKER_CONDITION_COMPATIBILITY.md).
 
 Terminology:
 
@@ -213,6 +248,7 @@ Not implemented in this MVP:
 - SMPL-X, MediaPipe Face Mesh, DensePose, or robust background removal
 - VocalTractLab adapter
 - direct low-level control of learned TTS latent variables beyond the current caption/duration adapter; exact median F0 is available only as an explicit WORLD-measured, Praat-PSOLA waveform postprocess
+- native injection of an optimized Irodori Speaker Inversion embedding; only format, model, provenance, and runtime-capability validation are implemented
 - validated anthropometric database
 - validated mapping from external neck breadth to internal airway dimensions; the prototype deliberately does not make that inference
 - participant-level linkage across external data sources

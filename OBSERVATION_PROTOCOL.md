@@ -59,7 +59,7 @@ GET /api/runtime/observation-capabilities?model=irodori-vdes
 
 ## Stored Fields
 
-The current schema is `cvd_tts_observation_0.1`. It stores:
+The current schema is `cvd_tts_observation_0.2`. It stores:
 
 - model id, model-config SHA-256, model weight size, and architecture fields;
 - seed, inference steps, language, conditioning scales, and postprocess settings;
@@ -68,6 +68,9 @@ The current schema is `cvd_tts_observation_0.1`. It stores:
 - upstream and returned WAV SHA-256, PCM format, duration, and optional WORLD
   F0 statistics, kept separate when waveform postprocessing is enabled;
 - expected Speaker, Caption, and audio-latent dimensions;
+- managed speaker-condition artifact hash, canonical float32 state hash,
+  native-consumed state hash, shape, mode, and exact-match result when direct
+  Speaker Inversion is selected;
 - requested latent snapshot steps and whether each internal value was observed.
 
 `include_text` defaults to `false`. When false, neither the input text nor the
@@ -75,23 +78,27 @@ caption value is stored. The generated WAV is never stored by this protocol.
 
 ## Native Runtime Boundary
 
-The pinned audio.cpp release does not currently expose Speaker-condition
-tokens, Caption-condition tokens, initial audio latent, intermediate latent
-snapshots, or Duration Predictor output. The record therefore distinguishes
-`capture_requested` from `observed`.
+The patched audio.cpp runtime exposes a digest, shape, and mode for the
+Speaker-condition state, but not its raw tokens. Caption-condition tokens,
+initial audio latent, intermediate latent snapshots, and Duration Predictor
+output remain unavailable. The record therefore distinguishes
+`capture_requested` from `observed` for every field.
 
-The bridge already accepts these optional native response headers for a future
-instrumented audio.cpp build:
+The bridge accepts these native response headers:
 
 - `X-AudioCpp-Predicted-Duration-Seconds`
 - `X-AudioCpp-Predicted-Duration-Frames`
 - `X-AudioCpp-Speaker-Condition-SHA256`
+- `X-AudioCpp-Speaker-Condition-Shape`
+- `X-AudioCpp-Speaker-Condition-Mode`
 - `X-AudioCpp-Caption-Condition-SHA256`
 - `X-AudioCpp-Initial-Latent-SHA256`
 
-Hashes prove parity and condition reuse without placing raw model tensors in
-HTTP headers. Raw tensor export will require an explicitly configured,
-local-only native sidecar format after the pinned source is available.
+The speaker digest is SHA-256 over the exact contiguous float32 little-endian
+state consumed by inference. Designer computes the same canonical digest while
+validating a managed artifact and records `matches_input_state`. Hashes prove
+transport parity and condition reuse without placing raw model tensors in HTTP
+headers. Raw tensor export is intentionally not implemented.
 
 ## Parity Test
 
@@ -107,3 +114,16 @@ runtime/mm/bin/python tests/observation_runtime_smoke.py --steps 4
 
 The smoke test generates the same seed and conditions once without observation
 and once with observation, then requires byte-identical WAV output.
+
+To verify a managed Speaker Inversion artifact and the patched native state
+path on Ubuntu:
+
+```bash
+runtime/mm/bin/python tests/observation_runtime_smoke.py \
+  --steps 4 \
+  --speaker-condition character-a.speaker.safetensors
+```
+
+The command additionally requires `speaker_inversion` mode and
+`matches_input_state: true`. The artifact must already be directly under
+`runtime/speaker_conditions/`.

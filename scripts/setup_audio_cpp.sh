@@ -68,6 +68,10 @@ fi
 AUDIO_ROOT="$(mkdir -p -- "$AUDIO_ROOT" && cd -- "$AUDIO_ROOT" && pwd -P)"
 RUNTIME_ROOT="$(cd -- "$AUDIO_ROOT/.." && pwd -P)"
 SOURCE_ROOT="$RUNTIME_ROOT/audio.cpp-source"
+SPEAKER_INVERSION_PATCH="$PROJECT_ROOT/patches/audio_cpp/irodori_speaker_inversion.patch"
+SPEAKER_OBSERVATION_PATCH="$PROJECT_ROOT/patches/audio_cpp/irodori_speaker_observation.patch"
+SPEAKER_INVERSION_MARKER="speaker_embedding_path"
+SPEAKER_OBSERVATION_MARKER="X-AudioCpp-Speaker-Condition-SHA256"
 CUDA_VERSION_NODOT="${CUDA_VERSION//./}"
 CUDA_TOOLKIT_ROOT="$RUNTIME_ROOT/toolchains/cuda${CUDA_VERSION_NODOT}"
 CUDA_CHANNEL="nvidia/label/cuda-${CUDA_VERSION}.0"
@@ -87,6 +91,48 @@ MAMBA_CACHE_ROOT="$RUNTIME_ROOT/micromamba-root"
 TOOLCHAIN_ROOT="$RUNTIME_ROOT/toolchains/gcc13"
 PYWORLD_REQUIREMENT="pyworld==0.3.5"
 SETUPTOOLS_REQUIREMENT="setuptools<81"
+
+binary_has_speaker_inversion() {
+  [[ -x "$SERVER_BIN" ]] &&
+    grep -aFq -- "$SPEAKER_INVERSION_MARKER" "$SERVER_BIN" &&
+    grep -aFq -- "$SPEAKER_OBSERVATION_MARKER" "$SERVER_BIN"
+}
+
+apply_speaker_inversion_patch() {
+  local target="$SOURCE_ROOT/src/models/irodori_tts/session.cpp"
+  local observation_target="$SOURCE_ROOT/app/server/runtime.cpp"
+  if [[ ! -f "$SPEAKER_INVERSION_PATCH" ]]; then
+    echo "The CharacterVoiceDesigner audio.cpp patch is missing: $SPEAKER_INVERSION_PATCH" >&2
+    return 1
+  fi
+  if [[ ! -f "$target" ]]; then
+    echo "The audio.cpp Irodori session source is missing: $target" >&2
+    return 1
+  fi
+  if ! command -v git >/dev/null 2>&1; then
+    echo "git is required to apply the CharacterVoiceDesigner audio.cpp patch." >&2
+    return 1
+  fi
+  if ! grep -Fq -- "$SPEAKER_INVERSION_MARKER" "$target"; then
+    if ! git -C "$SOURCE_ROOT" apply --check "$SPEAKER_INVERSION_PATCH"; then
+      echo "The audio.cpp source does not match the pinned Speaker Inversion patch." >&2
+      return 1
+    fi
+    git -C "$SOURCE_ROOT" apply "$SPEAKER_INVERSION_PATCH"
+  elif ! grep -Fq -- "$SPEAKER_OBSERVATION_MARKER" "$observation_target"; then
+    if [[ ! -f "$SPEAKER_OBSERVATION_PATCH" ]]; then
+      echo "The CharacterVoiceDesigner speaker-observation upgrade patch is missing." >&2
+      return 1
+    fi
+    if ! git -C "$SOURCE_ROOT" apply --check "$SPEAKER_OBSERVATION_PATCH"; then
+      echo "The existing Speaker Inversion source cannot be upgraded with the pinned observation patch." >&2
+      return 1
+    fi
+    git -C "$SOURCE_ROOT" apply "$SPEAKER_OBSERVATION_PATCH"
+  fi
+  grep -Fq -- "$SPEAKER_INVERSION_MARKER" "$target" &&
+    grep -Fq -- "$SPEAKER_OBSERVATION_MARKER" "$observation_target"
+}
 
 find_cuda_nvcc() {
   [[ -d "$CUDA_TOOLKIT_ROOT" ]] || return 1
@@ -268,7 +314,12 @@ if [[ "$BACKEND" == "cuda" ]] && ! cuda_toolkit_ready; then
   fi
 fi
 
-if [[ ! -x "$SERVER_BIN" ]]; then
+NEEDS_BUILD=0
+if ! binary_has_speaker_inversion; then
+  NEEDS_BUILD=1
+fi
+
+if [[ "$NEEDS_BUILD" -eq 1 ]]; then
   CVD_TOOLCHAIN_ROOT=""
   if ! select_local_compiler && ! select_system_compiler; then
     install_local_compiler
@@ -298,6 +349,7 @@ if [[ ! -x "$SERVER_BIN" ]]; then
     tar -xzf "$SOURCE_ARCHIVE" --strip-components=1 -C "$SOURCE_ROOT"
     rm -f -- "$SOURCE_ARCHIVE"
   fi
+  apply_speaker_inversion_patch
 fi
 
 postprocess_dependencies_ready() {
@@ -329,7 +381,7 @@ if ! postprocess_dependencies_ready; then
   exit 1
 fi
 
-if [[ ! -x "$SERVER_BIN" ]]; then
+if [[ "$NEEDS_BUILD" -eq 1 ]]; then
   JOBS="${CVD_BUILD_JOBS:-}"
   if [[ -z "$JOBS" ]]; then
     JOBS="$(getconf _NPROCESSORS_ONLN 2>/dev/null || echo 2)"
@@ -389,6 +441,10 @@ fi
 
 if [[ ! -x "$SERVER_BIN" ]]; then
   echo "audio.cpp build completed without producing $SERVER_BIN" >&2
+  exit 1
+fi
+if ! binary_has_speaker_inversion; then
+  echo "audio.cpp build does not contain the Speaker Inversion input and observation paths." >&2
   exit 1
 fi
 

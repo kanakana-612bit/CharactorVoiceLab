@@ -17,7 +17,7 @@ from pathlib import Path
 from typing import Any, Callable, Mapping
 
 
-OBSERVATION_SCHEMA_VERSION = "cvd_tts_observation_0.1"
+OBSERVATION_SCHEMA_VERSION = "cvd_tts_observation_0.2"
 OBSERVATION_ID_PATTERN = re.compile(r"^[0-9]{8}T[0-9]{6}\.[0-9]{6}Z-[a-f0-9]{12}$")
 LABEL_PATTERN = re.compile(r"^[A-Za-z0-9_.:-]{0,64}$")
 MAX_OBSERVATION_BYTES = 2 * 1024 * 1024
@@ -272,6 +272,23 @@ def merge_upstream_observation_headers(
         digest = headers.get(header)
         if isinstance(digest, str) and re.fullmatch(r"[a-fA-F0-9]{64}", digest):
             internal[field].update({"observed": True, "sha256": digest.lower(), "reason": None})
+    speaker = internal["speaker_condition"]
+    speaker_shape = headers.get("X-AudioCpp-Speaker-Condition-Shape")
+    if isinstance(speaker_shape, str) and re.fullmatch(
+        r"[1-9][0-9]*x[1-9][0-9]*", speaker_shape
+    ):
+        speaker["shape"] = [int(value) for value in speaker_shape.split("x")]
+    speaker_mode = headers.get("X-AudioCpp-Speaker-Condition-Mode")
+    if speaker_mode in {"none", "reference_audio", "speaker_inversion"}:
+        speaker["mode"] = speaker_mode
+    expected_state_sha = speaker.get("input_state_f32le_sha256")
+    if isinstance(expected_state_sha, str):
+        observed_state_sha = speaker.get("sha256")
+        speaker["matches_input_state"] = (
+            observed_state_sha == expected_state_sha
+            if isinstance(observed_state_sha, str)
+            else None
+        )
 
 
 class ObservationCapture:
