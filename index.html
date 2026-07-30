@@ -31,6 +31,7 @@
       <button class="tab-button" data-tab-target="vowelTab">母音試聴</button>
       <button class="tab-button" data-tab-target="consonantTab">子音試聴</button>
       <button class="tab-button" data-tab-target="ttsModelTab">TTSモデル</button>
+      <button class="tab-button" data-tab-target="experimentTab">実験</button>
       <button class="tab-button" data-tab-target="outputTab">出力デモ</button>
       <button class="tab-button" data-tab-target="referenceTab">参考文献</button>
     </nav>
@@ -631,6 +632,250 @@
             <button id="regenerateTtsCaptionBtn" type="button">設計値から再生成</button>
           </div>
           <p class="note">現在の第一候補は日本語のIrodori-TTS-600M-v3-VoiceDesignです。モデルはaudio.cppサーバー側で管理します。</p>
+        </section>
+      </section>
+
+      <section id="experimentTab" class="tab-panel experiment-workspace" aria-label="実験" hidden>
+        <section class="pane experiment-panel">
+          <div class="pane-head">
+            <div>
+              <span class="section-kicker">Local experiment workspace</span>
+              <h2>実験ツール</h2>
+            </div>
+            <button id="refreshExperimentsBtn" type="button">更新</button>
+          </div>
+          <p class="note">
+            すべての処理はこのPC上で実行されます。外部話者認識モデルとモデル自動ダウンロードは、
+            倫理・再現性上の理由からこの画面では使用しません。
+          </p>
+
+          <div id="experimentToolTabs" class="experiment-tool-tabs" role="tablist" aria-label="実験ツール">
+            <button class="experiment-tool-button active" type="button" data-experiment-tool="runtime_observation">観測疎通</button>
+            <button class="experiment-tool-button" type="button" data-experiment-tool="speaker_compatibility">Speaker互換性</button>
+            <button class="experiment-tool-button" type="button" data-experiment-tool="seed_f0">Seed / F0</button>
+            <button class="experiment-tool-button" type="button" data-experiment-tool="voice_evaluation">音声評価</button>
+            <button class="experiment-tool-button" type="button" data-experiment-tool="runtime_diagnostics">環境診断</button>
+          </div>
+
+          <div class="experiment-config-bands">
+            <form id="runtimeObservationForm" class="experiment-tool-form active" data-experiment-form="runtime_observation">
+              <div class="experiment-form-head">
+                <div>
+                  <h3>生成観測・話者状態疎通</h3>
+                  <p>通常生成と観測付き生成のWAV同一性、話者状態の消費状態を検証します。</p>
+                </div>
+                <button class="primary" type="submit">実行</button>
+              </div>
+              <div class="form-grid experiment-form-grid">
+                <label>
+                  推論ステップ
+                  <input id="experimentObservationSteps" type="number" min="4" max="100" step="1" value="4" />
+                </label>
+                <label>
+                  話者状態
+                  <select id="experimentObservationSpeaker">
+                    <option value="">使用しない</option>
+                  </select>
+                </label>
+              </div>
+            </form>
+
+            <form id="speakerCompatibilityForm" class="experiment-tool-form" data-experiment-form="speaker_compatibility" hidden>
+              <div class="experiment-form-head">
+                <div>
+                  <h3>Speaker Inversion互換性</h3>
+                  <p>ファイル契約、対象モデルとの結合、audio.cppの直接状態入力を検査します。</p>
+                </div>
+                <button class="primary" type="submit">実行</button>
+              </div>
+              <div class="form-grid experiment-form-grid">
+                <label>
+                  管理済み話者状態
+                  <select id="experimentSpeakerEmbeddings" multiple size="4"></select>
+                </label>
+                <label>
+                  トークン数
+                  <input id="experimentSpeakerTokens" type="number" min="1" max="1024" step="1" value="16" />
+                </label>
+                <label>
+                  乱数シード
+                  <input id="experimentSpeakerSeed" type="number" min="0" max="2147483647" step="1" value="0" />
+                </label>
+                <label>
+                  初期標準偏差
+                  <input id="experimentSpeakerInitStd" type="number" min="0.0001" max="1" step="0.001" value="0.02" />
+                </label>
+              </div>
+              <div class="experiment-checks">
+                <label class="check-line">
+                  <input id="experimentCreateFixture" type="checkbox" />
+                  <span>形式検査用の非意味的fixtureを作成</span>
+                </label>
+                <label class="check-line">
+                  <input id="experimentHashModel" type="checkbox" />
+                  <span>モデル重み全体のSHA-256を計算（数GBを読み込むため低速）</span>
+                </label>
+              </div>
+            </form>
+
+            <form id="seedF0Form" class="experiment-tool-form" data-experiment-form="seed_f0" hidden>
+              <div class="experiment-form-head">
+                <div>
+                  <h3>Seed / F0ベンチマーク</h3>
+                  <p>低ステップ候補と最終生成を同一seedで比較します。音声補正は適用しません。</p>
+                </div>
+                <button class="primary" type="submit">実行</button>
+              </div>
+              <div class="experiment-resource-row">
+                <label>
+                  プロファイル
+                  <select id="experimentBenchmarkProfile">
+                    <option value="">既定値を使用</option>
+                  </select>
+                </label>
+                <button id="experimentUseCurrentProfileBtn" type="button">現在のプロファイルを登録</button>
+                <label class="file-command">
+                  ファイルを登録
+                  <input id="experimentProfileUpload" type="file" accept=".json,.zip,application/json,application/zip" />
+                </label>
+              </div>
+              <div class="form-grid experiment-form-grid">
+                <label>
+                  サンプル数
+                  <input id="experimentBenchmarkSamples" type="number" min="2" max="100" step="1" value="10" />
+                </label>
+                <label>
+                  開始seed
+                  <input id="experimentBenchmarkSeed" type="number" min="0" max="2147483647" step="1" value="20260719" />
+                </label>
+                <label>
+                  低ステップ
+                  <input id="experimentBenchmarkLowSteps" type="number" min="4" max="99" step="1" value="4" />
+                </label>
+                <label>
+                  最終ステップ
+                  <input id="experimentBenchmarkFinalSteps" type="number" min="5" max="100" step="1" value="40" />
+                </label>
+                <label>
+                  解析区間 秒
+                  <input id="experimentBenchmarkSeconds" type="number" min="0.2" max="60" step="0.1" value="3" />
+                </label>
+                <label>
+                  目標F0 Hz
+                  <input id="experimentBenchmarkTargetF0" type="number" min="60" max="500" step="0.1" />
+                </label>
+                <label>
+                  Caption CFG
+                  <input id="experimentBenchmarkCfg" type="number" min="0.5" max="10" step="0.1" value="2" />
+                </label>
+                <label>
+                  発話時間倍率
+                  <input id="experimentBenchmarkDuration" type="number" min="0.5" max="2" step="0.05" value="1" />
+                </label>
+              </div>
+              <label class="stacked-field">
+                読み上げテキスト
+                <textarea id="experimentBenchmarkText" rows="3" maxlength="5000">これは短い音声生成の実験です。</textarea>
+              </label>
+              <label class="stacked-field">
+                VoiceDesign caption
+                <textarea id="experimentBenchmarkCaption" rows="3" maxlength="2000"></textarea>
+              </label>
+            </form>
+
+            <form id="voiceEvaluationForm" class="experiment-tool-form" data-experiment-form="voice_evaluation" hidden>
+              <div class="experiment-form-head">
+                <div>
+                  <h3>生成音声評価</h3>
+                  <p>F0、波形品質、スペクトル特徴量を評価します。話者同一性の証明や臨床評価ではありません。</p>
+                </div>
+                <button class="primary" type="submit">実行</button>
+              </div>
+              <div class="experiment-resource-row">
+                <label class="file-command">
+                  WAVを登録
+                  <input id="experimentWavUpload" type="file" accept=".wav,audio/wav" multiple />
+                </label>
+                <label class="file-command">
+                  manifestを登録
+                  <input id="experimentManifestUpload" type="file" accept=".json,application/json" />
+                </label>
+              </div>
+              <div class="form-grid experiment-form-grid">
+                <label>
+                  評価対象（複数選択可）
+                  <select id="experimentEvaluationInputs" multiple size="7"></select>
+                </label>
+                <label>
+                  参照音声（任意・複数選択可）
+                  <select id="experimentEvaluationReferences" multiple size="7"></select>
+                </label>
+                <label>
+                  manifest
+                  <select id="experimentEvaluationManifest">
+                    <option value="">使用しない</option>
+                  </select>
+                </label>
+                <label>
+                  目標F0 Hz
+                  <input id="experimentEvaluationTargetF0" type="number" min="60" max="500" step="0.1" />
+                </label>
+              </div>
+            </form>
+
+            <form id="runtimeDiagnosticsForm" class="experiment-tool-form" data-experiment-form="runtime_diagnostics" hidden>
+              <div class="experiment-form-head">
+                <div>
+                  <h3>実行環境診断</h3>
+                  <p>pyworld、Praat-Parselmouthなど、F0解析・補正に必要な依存関係を確認します。</p>
+                </div>
+                <button class="primary" type="submit">診断</button>
+              </div>
+            </form>
+          </div>
+          <p id="experimentWorkspaceStatus" class="status-line">実験ツールを読み込んでいます。</p>
+        </section>
+
+        <section class="pane experiment-jobs-panel">
+          <div class="pane-head">
+            <div>
+              <span class="section-kicker">Job monitor</span>
+              <h2>実行履歴</h2>
+            </div>
+            <span>同時実行 1件</span>
+          </div>
+          <div class="experiment-monitor-grid">
+            <div class="experiment-job-list-wrap">
+              <table class="experiment-job-table">
+                <thead>
+                  <tr><th>ツール</th><th>状態</th><th>開始</th></tr>
+                </thead>
+                <tbody id="experimentJobRows"></tbody>
+              </table>
+              <p id="experimentJobEmpty" class="note">実行履歴はありません。</p>
+            </div>
+            <div class="experiment-job-detail" aria-live="polite">
+              <div class="experiment-job-detail-head">
+                <div>
+                  <span id="experimentJobStatus" class="experiment-status-badge">未選択</span>
+                  <h3 id="experimentJobTitle">ジョブを選択してください</h3>
+                </div>
+                <button id="cancelExperimentBtn" type="button" disabled>中止</button>
+              </div>
+              <progress id="experimentJobProgress" max="1" value="0"></progress>
+              <p id="experimentJobProgressText" class="note">-</p>
+              <div id="experimentArtifacts" class="experiment-artifacts"></div>
+              <audio id="experimentArtifactAudio" controls hidden></audio>
+              <details class="experiment-output-details" open>
+                <summary>実行ログ</summary>
+                <pre id="experimentJobLog">-</pre>
+              </details>
+              <details id="experimentReportDetails" class="experiment-output-details" hidden>
+                <summary>レポート</summary>
+                <pre id="experimentReportText"></pre>
+              </details>
+            </div>
+          </div>
         </section>
       </section>
 

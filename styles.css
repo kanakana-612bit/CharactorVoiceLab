@@ -1902,3 +1902,281 @@ pre {
   margin: 4px 0;
   line-height: 1.55;
 }
+
+.experiment-workspace {
+  display: grid;
+  grid-template-columns: minmax(480px, 0.85fr) minmax(560px, 1.15fr);
+  gap: 14px;
+  align-items: start;
+}
+
+.experiment-tool-tabs {
+  display: flex;
+  gap: 4px;
+  margin: 16px 0 0;
+  padding-bottom: 8px;
+  overflow-x: auto;
+  border-bottom: 1px solid var(--line);
+}
+
+.experiment-tool-button {
+  flex: 0 0 auto;
+  min-height: 36px;
+  padding: 7px 12px;
+  border-color: transparent;
+  background: transparent;
+  color: var(--muted);
+}
+
+.experiment-tool-button:hover {
+  border-color: var(--line);
+}
+
+.experiment-tool-button.active {
+  border-color: var(--accent);
+  background: rgba(35, 107, 91, 0.1);
+  color: var(--ink);
+}
+
+.experiment-config-bands {
+  min-height: 170px;
+}
+
+.experiment-tool-form {
+  padding: 18px 0 4px;
+}
+
+.experiment-tool-form:not(.active) {
+  display: none;
+}
+
+.experiment-form-head,
+.experiment-job-detail-head,
+.experiment-resource-row {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 14px;
+}
+
+.experiment-form-head h3,
+.experiment-job-detail-head h3 {
+  margin: 0 0 4px;
+  font-size: 1rem;
+}
+
+.experiment-form-head p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.88rem;
+}
+
+.experiment-form-head > button {
+  flex: 0 0 auto;
+  min-width: 72px;
+  white-space: nowrap;
+}
+
+.experiment-form-grid {
+  margin-top: 14px;
+}
+
+.experiment-resource-row {
+  justify-content: flex-start;
+  align-items: end;
+  margin: 14px 0;
+  flex-wrap: wrap;
+}
+
+.experiment-resource-row > label:first-child {
+  min-width: min(100%, 320px);
+}
+
+.file-command {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 38px;
+  padding: 7px 12px;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--surface);
+  color: var(--ink);
+  cursor: pointer;
+  font-size: 0.86rem;
+  font-weight: 600;
+}
+
+.file-command input {
+  position: absolute;
+  inline-size: 1px;
+  block-size: 1px;
+  opacity: 0;
+}
+
+.experiment-checks {
+  display: flex;
+  gap: 18px;
+  flex-wrap: wrap;
+  margin-top: 14px;
+}
+
+.experiment-monitor-grid {
+  display: grid;
+  grid-template-columns: minmax(220px, 0.65fr) minmax(0, 1.35fr);
+  gap: 18px;
+  align-items: start;
+}
+
+.experiment-job-list-wrap {
+  max-height: 520px;
+  overflow: auto;
+  border-right: 1px solid var(--line);
+  padding-right: 16px;
+}
+
+.experiment-job-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.84rem;
+}
+
+.experiment-job-table th,
+.experiment-job-table td {
+  padding: 9px 7px;
+  border-bottom: 1px solid var(--line);
+  text-align: left;
+  vertical-align: top;
+}
+
+.experiment-job-table th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: var(--surface);
+  color: var(--muted);
+  font-weight: 600;
+}
+
+.experiment-job-table tr[data-job-id] {
+  cursor: pointer;
+}
+
+.experiment-job-table tr[data-job-id]:hover,
+.experiment-job-table tr.selected {
+  background: rgba(35, 107, 91, 0.1);
+}
+
+.experiment-job-detail {
+  min-width: 0;
+}
+
+.experiment-status-badge {
+  display: inline-block;
+  margin-bottom: 5px;
+  color: var(--muted);
+  font-size: 0.78rem;
+  font-weight: 700;
+}
+
+.experiment-status-badge[data-status="complete"] {
+  color: #287a45;
+}
+
+.experiment-status-badge[data-status="failed"],
+.experiment-status-badge[data-status="cancelled"],
+.experiment-status-badge[data-status="interrupted"] {
+  color: #a33b32;
+}
+
+.experiment-job-detail progress {
+  width: 100%;
+  height: 9px;
+  margin-top: 12px;
+  accent-color: var(--accent);
+}
+
+.experiment-artifacts {
+  display: flex;
+  gap: 7px;
+  flex-wrap: wrap;
+  margin: 12px 0;
+}
+
+.experiment-artifact-action {
+  min-height: 32px;
+  padding: 5px 9px;
+  font-size: 0.78rem;
+}
+
+#experimentArtifactAudio {
+  width: 100%;
+  margin: 5px 0 12px;
+}
+
+.experiment-output-details {
+  border-top: 1px solid var(--line);
+  padding-top: 9px;
+}
+
+.experiment-output-details + .experiment-output-details {
+  margin-top: 10px;
+}
+
+.experiment-output-details summary {
+  cursor: pointer;
+  color: var(--muted);
+  font-size: 0.84rem;
+  font-weight: 700;
+}
+
+.experiment-output-details pre {
+  max-height: 320px;
+  margin: 9px 0 0;
+  padding: 12px;
+  overflow: auto;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  background: #f4f6f7;
+  color: var(--ink);
+  font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+  font-size: 0.76rem;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+@media (max-width: 980px) {
+  .experiment-monitor-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .experiment-job-list-wrap {
+    max-height: 280px;
+    padding-right: 0;
+    border-right: 0;
+    border-bottom: 1px solid var(--line);
+    padding-bottom: 14px;
+  }
+}
+
+@media (max-width: 1100px) {
+  .experiment-workspace {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 640px) {
+  .experiment-form-head,
+  .experiment-job-detail-head {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .experiment-form-head > button,
+  .experiment-job-detail-head > button {
+    align-self: flex-start;
+  }
+}

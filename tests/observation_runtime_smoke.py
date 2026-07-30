@@ -51,6 +51,11 @@ def main() -> None:
             "require the native consumed-state hash to match the input state."
         ),
     )
+    parser.add_argument(
+        "--output-json",
+        type=Path,
+        help="Optional local JSON result path for GUI experiment jobs.",
+    )
     args = parser.parse_args()
 
     server = DesignerServer(("127.0.0.1", 0), DesignerHandler)
@@ -128,6 +133,12 @@ def main() -> None:
                 Path("runtime") / "observations" / f"{observation_id}.json"
             ),
         }
+        if args.output_json:
+            args.output_json.parent.mkdir(parents=True, exist_ok=True)
+            args.output_json.write_text(
+                json.dumps(output, ensure_ascii=False, indent=2) + "\n",
+                encoding="utf-8",
+            )
         print(json.dumps(output, ensure_ascii=False, indent=2))
     finally:
         server.shutdown()

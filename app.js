@@ -81,6 +81,11 @@ const state = {
   ttsResultBlob: null,
   ttsResultUrl: null,
   audioCppModels: [],
+  experimentResources: null,
+  experimentJobs: [],
+  activeExperimentTool: "runtime_observation",
+  activeExperimentJobId: null,
+  experimentPollTimer: null,
 };
 
 const referenceData = window.CVL_REFERENCE;
@@ -402,6 +407,54 @@ const els = {
   exportVoiceControlProfileBtn: document.getElementById("exportVoiceControlProfileBtn"),
   ttsDemoAudio: document.getElementById("ttsDemoAudio"),
   ttsDemoStatus: document.getElementById("ttsDemoStatus"),
+  refreshExperimentsBtn: document.getElementById("refreshExperimentsBtn"),
+  experimentToolButtons: Array.from(document.querySelectorAll(".experiment-tool-button")),
+  experimentToolForms: Array.from(document.querySelectorAll(".experiment-tool-form")),
+  runtimeObservationForm: document.getElementById("runtimeObservationForm"),
+  experimentObservationSteps: document.getElementById("experimentObservationSteps"),
+  experimentObservationSpeaker: document.getElementById("experimentObservationSpeaker"),
+  speakerCompatibilityForm: document.getElementById("speakerCompatibilityForm"),
+  experimentSpeakerEmbeddings: document.getElementById("experimentSpeakerEmbeddings"),
+  experimentSpeakerTokens: document.getElementById("experimentSpeakerTokens"),
+  experimentSpeakerSeed: document.getElementById("experimentSpeakerSeed"),
+  experimentSpeakerInitStd: document.getElementById("experimentSpeakerInitStd"),
+  experimentCreateFixture: document.getElementById("experimentCreateFixture"),
+  experimentHashModel: document.getElementById("experimentHashModel"),
+  seedF0Form: document.getElementById("seedF0Form"),
+  experimentBenchmarkProfile: document.getElementById("experimentBenchmarkProfile"),
+  experimentUseCurrentProfileBtn: document.getElementById("experimentUseCurrentProfileBtn"),
+  experimentProfileUpload: document.getElementById("experimentProfileUpload"),
+  experimentBenchmarkSamples: document.getElementById("experimentBenchmarkSamples"),
+  experimentBenchmarkSeed: document.getElementById("experimentBenchmarkSeed"),
+  experimentBenchmarkLowSteps: document.getElementById("experimentBenchmarkLowSteps"),
+  experimentBenchmarkFinalSteps: document.getElementById("experimentBenchmarkFinalSteps"),
+  experimentBenchmarkSeconds: document.getElementById("experimentBenchmarkSeconds"),
+  experimentBenchmarkTargetF0: document.getElementById("experimentBenchmarkTargetF0"),
+  experimentBenchmarkCfg: document.getElementById("experimentBenchmarkCfg"),
+  experimentBenchmarkDuration: document.getElementById("experimentBenchmarkDuration"),
+  experimentBenchmarkText: document.getElementById("experimentBenchmarkText"),
+  experimentBenchmarkCaption: document.getElementById("experimentBenchmarkCaption"),
+  voiceEvaluationForm: document.getElementById("voiceEvaluationForm"),
+  experimentWavUpload: document.getElementById("experimentWavUpload"),
+  experimentManifestUpload: document.getElementById("experimentManifestUpload"),
+  experimentEvaluationInputs: document.getElementById("experimentEvaluationInputs"),
+  experimentEvaluationReferences: document.getElementById("experimentEvaluationReferences"),
+  experimentEvaluationManifest: document.getElementById("experimentEvaluationManifest"),
+  experimentEvaluationTargetF0: document.getElementById("experimentEvaluationTargetF0"),
+  runtimeDiagnosticsForm: document.getElementById("runtimeDiagnosticsForm"),
+  experimentWorkspaceStatus: document.getElementById("experimentWorkspaceStatus"),
+  experimentJobRows: document.getElementById("experimentJobRows"),
+  experimentJobEmpty: document.getElementById("experimentJobEmpty"),
+  experimentJobStatus: document.getElementById("experimentJobStatus"),
+  experimentJobTitle: document.getElementById("experimentJobTitle"),
+  cancelExperimentBtn: document.getElementById("cancelExperimentBtn"),
+  experimentJobProgress: document.getElementById("experimentJobProgress"),
+  experimentJobProgressText: document.getElementById("experimentJobProgressText"),
+  experimentArtifacts: document.getElementById("experimentArtifacts"),
+  experimentArtifactAudio: document.getElementById("experimentArtifactAudio"),
+  experimentJobLog: document.getElementById("experimentJobLog"),
+  experimentReportDetails: document.getElementById("experimentReportDetails"),
+  experimentReportText: document.getElementById("experimentReportText"),
 };
 
 function num(el, fallback = 0) {
@@ -5206,6 +5259,396 @@ function format(value, digits = 2) {
   return Number(value).toFixed(digits);
 }
 
+async function experimentApi(path, options = {}) {
+  const response = await fetch(path, {
+    headers: { Accept: "application/json", ...(options.headers || {}) },
+    ...options,
+  });
+  const text = await response.text();
+  let payload = {};
+  if (text) {
+    try {
+      payload = JSON.parse(text);
+    } catch {
+      throw new Error(`実験APIが不正な応答を返しました (HTTP ${response.status})。`);
+    }
+  }
+  if (!response.ok) throw new Error(payload.error || `HTTP ${response.status}`);
+  return payload;
+}
+
+function setExperimentStatus(message, isError = false) {
+  if (!els.experimentWorkspaceStatus) return;
+  els.experimentWorkspaceStatus.textContent = message;
+  els.experimentWorkspaceStatus.classList.toggle("error", isError);
+}
+
+function setExperimentTool(tool) {
+  state.activeExperimentTool = tool;
+  for (const button of els.experimentToolButtons) {
+    const active = button.dataset.experimentTool === tool;
+    button.classList.toggle("active", active);
+    button.setAttribute("aria-selected", active ? "true" : "false");
+  }
+  for (const form of els.experimentToolForms) {
+    const active = form.dataset.experimentForm === tool;
+    form.classList.toggle("active", active);
+    form.hidden = !active;
+  }
+}
+
+function selectedOptionValues(select) {
+  return select ? Array.from(select.selectedOptions, (option) => option.value).filter(Boolean) : [];
+}
+
+function populateExperimentSelect(select, items, baseLabel = null) {
+  if (!select) return;
+  const selected = new Set(selectedOptionValues(select));
+  select.replaceChildren();
+  if (baseLabel != null) {
+    const option = document.createElement("option");
+    option.value = "";
+    option.textContent = baseLabel;
+    select.append(option);
+  }
+  for (const item of items || []) {
+    const option = document.createElement("option");
+    option.value = item.id;
+    option.textContent = item.label;
+    option.selected = selected.has(item.id);
+    select.append(option);
+  }
+}
+
+function renderExperimentResources() {
+  const resources = state.experimentResources || {};
+  populateExperimentSelect(
+    els.experimentObservationSpeaker,
+    resources.speaker_conditions,
+    "使用しない",
+  );
+  populateExperimentSelect(els.experimentSpeakerEmbeddings, resources.speaker_conditions);
+  populateExperimentSelect(els.experimentBenchmarkProfile, resources.profiles, "既定値を使用");
+  populateExperimentSelect(els.experimentEvaluationInputs, resources.voice_inputs);
+  populateExperimentSelect(els.experimentEvaluationReferences, resources.voice_inputs);
+  populateExperimentSelect(
+    els.experimentEvaluationManifest,
+    resources.manifests,
+    "使用しない",
+  );
+}
+
+const experimentStatusLabels = {
+  queued: "待機",
+  running: "実行中",
+  cancelling: "中止処理中",
+  complete: "完了",
+  failed: "失敗",
+  cancelled: "中止",
+  interrupted: "中断",
+};
+
+function formatExperimentTime(value) {
+  if (!value) return "-";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value;
+  return date.toLocaleString("ja-JP", {
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+  });
+}
+
+function renderExperimentJobs() {
+  if (!els.experimentJobRows) return;
+  els.experimentJobRows.replaceChildren();
+  const jobs = state.experimentJobs || [];
+  if (els.experimentJobEmpty) els.experimentJobEmpty.hidden = jobs.length > 0;
+  for (const job of jobs) {
+    const row = document.createElement("tr");
+    row.dataset.jobId = job.id;
+    row.classList.toggle("selected", job.id === state.activeExperimentJobId);
+    row.tabIndex = 0;
+    for (const value of [
+      job.label,
+      experimentStatusLabels[job.status] || job.status,
+      formatExperimentTime(job.started_at || job.created_at),
+    ]) {
+      const cell = document.createElement("td");
+      cell.textContent = value;
+      row.append(cell);
+    }
+    const select = () => {
+      state.activeExperimentJobId = job.id;
+      renderExperimentJobs();
+      renderExperimentJobDetail(job);
+    };
+    row.addEventListener("click", select);
+    row.addEventListener("keydown", (event) => {
+      if (event.key === "Enter" || event.key === " ") {
+        event.preventDefault();
+        select();
+      }
+    });
+    els.experimentJobRows.append(row);
+  }
+  const selected = jobs.find((job) => job.id === state.activeExperimentJobId);
+  renderExperimentJobDetail(selected || null);
+}
+
+function renderExperimentJobDetail(job) {
+  if (!els.experimentJobTitle) return;
+  if (!job) {
+    els.experimentJobStatus.textContent = "未選択";
+    els.experimentJobStatus.dataset.status = "";
+    els.experimentJobTitle.textContent = "ジョブを選択してください";
+    els.cancelExperimentBtn.disabled = true;
+    els.experimentJobProgress.value = 0;
+    els.experimentJobProgressText.textContent = "-";
+    els.experimentJobLog.textContent = "-";
+    els.experimentArtifacts.replaceChildren();
+    els.experimentArtifactAudio.hidden = true;
+    els.experimentReportDetails.hidden = true;
+    return;
+  }
+  const status = experimentStatusLabels[job.status] || job.status;
+  els.experimentJobStatus.textContent = status;
+  els.experimentJobStatus.dataset.status = job.status;
+  els.experimentJobTitle.textContent = `${job.label} / ${job.id}`;
+  els.cancelExperimentBtn.disabled = !job.can_cancel;
+  const ratio = Number(job.progress?.ratio);
+  if (Number.isFinite(ratio)) {
+    els.experimentJobProgress.value = Math.max(0, Math.min(1, ratio));
+  } else if (job.status === "running") {
+    els.experimentJobProgress.removeAttribute("value");
+  } else {
+    els.experimentJobProgress.value = job.status === "complete" ? 1 : 0;
+  }
+  const progress = job.progress || {};
+  const count = progress.total ? ` ${progress.current}/${progress.total}` : "";
+  els.experimentJobProgressText.textContent = `${progress.phase || status}${count}${
+    job.error ? ` / ${job.error}` : ""
+  }`;
+  els.experimentJobLog.textContent = job.log || "-";
+  els.experimentJobLog.scrollTop = els.experimentJobLog.scrollHeight;
+  els.experimentArtifacts.replaceChildren();
+  for (const artifact of job.artifacts || []) {
+    if (artifact.media_type === "audio/wav" || artifact.name.toLowerCase().endsWith(".wav")) {
+      const play = document.createElement("button");
+      play.type = "button";
+      play.className = "experiment-artifact-action";
+      play.textContent = `再生 ${artifact.name}`;
+      play.addEventListener("click", () => {
+        els.experimentArtifactAudio.src = artifact.url;
+        els.experimentArtifactAudio.hidden = false;
+        els.experimentArtifactAudio.play().catch(() => {});
+      });
+      els.experimentArtifacts.append(play);
+    }
+    const link = document.createElement("a");
+    link.className = "experiment-artifact-action";
+    link.href = artifact.url;
+    link.download = artifact.name;
+    link.textContent = `保存 ${artifact.name}`;
+    els.experimentArtifacts.append(link);
+  }
+  els.experimentReportDetails.hidden = !job.report_text;
+  els.experimentReportText.textContent = job.report_text || "";
+}
+
+function scheduleExperimentPoll() {
+  if (state.experimentPollTimer) clearTimeout(state.experimentPollTimer);
+  state.experimentPollTimer = null;
+  const active = state.experimentJobs.some((job) =>
+    ["queued", "running", "cancelling"].includes(job.status),
+  );
+  if (state.activeTab === "experimentTab" && active) {
+    state.experimentPollTimer = setTimeout(() => {
+      refreshExperimentWorkspace({ silent: true }).catch(() => {});
+    }, 1000);
+  }
+}
+
+async function refreshExperimentWorkspace({ silent = false } = {}) {
+  if (!els.experimentJobRows) return;
+  if (!silent) setExperimentStatus("実験ツールと履歴を更新しています。");
+  try {
+    const [resources, jobsPayload] = await Promise.all([
+      experimentApi("/api/experiments/resources"),
+      experimentApi("/api/experiments/jobs"),
+    ]);
+    state.experimentResources = resources;
+    state.experimentJobs = jobsPayload.jobs || [];
+    if (
+      !state.activeExperimentJobId ||
+      !state.experimentJobs.some((job) => job.id === state.activeExperimentJobId)
+    ) {
+      state.activeExperimentJobId = state.experimentJobs[0]?.id || null;
+    }
+    renderExperimentResources();
+    renderExperimentJobs();
+    if (!silent) setExperimentStatus("ローカル実験環境を使用できます。");
+    scheduleExperimentPoll();
+  } catch (error) {
+    setExperimentStatus(`実験ツールを読み込めません: ${error.message}`, true);
+  }
+}
+
+async function startExperiment(tool, options) {
+  setExperimentStatus("実験ジョブを登録しています。");
+  try {
+    const job = await experimentApi("/api/experiments/jobs", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ tool, options }),
+    });
+    state.activeExperimentJobId = job.id;
+    setExperimentStatus(`${job.label}を開始しました。`);
+    await refreshExperimentWorkspace({ silent: true });
+  } catch (error) {
+    setExperimentStatus(`実行できません: ${error.message}`, true);
+  }
+}
+
+async function uploadExperimentFile(file, kind) {
+  if (!file) return null;
+  setExperimentStatus(`${file.name}をローカル実験領域へ登録しています。`);
+  const query = new URLSearchParams({ kind, name: file.name });
+  const resource = await experimentApi(`/api/experiments/uploads?${query}`, {
+    method: "POST",
+    headers: { "Content-Type": file.type || "application/octet-stream" },
+    body: file,
+  });
+  await refreshExperimentWorkspace({ silent: true });
+  setExperimentStatus(`${file.name}を登録しました。`);
+  return resource;
+}
+
+async function registerCurrentExperimentProfile() {
+  const profile = buildVoiceControlProfile();
+  if (!profile) throw new Error("現在のプロファイルを構築できません。");
+  const title = (els.projectTitleInput?.value || "voice_profile").replace(/[^A-Za-z0-9_.-]+/g, "-");
+  const file = new File(
+    [JSON.stringify(profile, null, 2)],
+    `${title || "voice_profile"}.json`,
+    { type: "application/json" },
+  );
+  const resource = await uploadExperimentFile(file, "profile");
+  if (resource && els.experimentBenchmarkProfile) {
+    els.experimentBenchmarkProfile.value = resource.id;
+  }
+}
+
+function installExperimentHandlers() {
+  for (const button of els.experimentToolButtons) {
+    button.addEventListener("click", () => setExperimentTool(button.dataset.experimentTool));
+  }
+  els.refreshExperimentsBtn?.addEventListener("click", () => refreshExperimentWorkspace());
+  els.runtimeObservationForm?.addEventListener("submit", (event) => {
+    event.preventDefault();
+    startExperiment("runtime_observation", {
+      steps: num(els.experimentObservationSteps, 4),
+      speaker_condition: els.experimentObservationSpeaker?.value || "",
+    });
+  });
+  els.speakerCompatibilityForm?.addEventListener("submit", (event) => {
+    event.preventDefault();
+    startExperiment("speaker_compatibility", {
+      embeddings: selectedOptionValues(els.experimentSpeakerEmbeddings),
+      tokens: num(els.experimentSpeakerTokens, 16),
+      seed: num(els.experimentSpeakerSeed, 0),
+      init_std: num(els.experimentSpeakerInitStd, 0.02),
+      create_format_fixture: els.experimentCreateFixture?.checked === true,
+      hash_model: els.experimentHashModel?.checked === true,
+    });
+  });
+  els.seedF0Form?.addEventListener("submit", (event) => {
+    event.preventDefault();
+    startExperiment("seed_f0", {
+      profile_id: els.experimentBenchmarkProfile?.value || "",
+      samples: num(els.experimentBenchmarkSamples, 10),
+      seed_start: num(els.experimentBenchmarkSeed, 20260719),
+      low_steps: num(els.experimentBenchmarkLowSteps, 4),
+      final_steps: num(els.experimentBenchmarkFinalSteps, 40),
+      analysis_seconds: num(els.experimentBenchmarkSeconds, 3),
+      target_f0: optionalNum(els.experimentBenchmarkTargetF0),
+      text: els.experimentBenchmarkText?.value || "",
+      caption: els.experimentBenchmarkCaption?.value || "",
+      model: els.ttsModelSelect?.value || "irodori-vdes",
+      caption_guidance: num(els.experimentBenchmarkCfg, 2),
+      duration_scale: num(els.experimentBenchmarkDuration, 1),
+    });
+  });
+  els.voiceEvaluationForm?.addEventListener("submit", (event) => {
+    event.preventDefault();
+    startExperiment("voice_evaluation", {
+      inputs: selectedOptionValues(els.experimentEvaluationInputs),
+      references: selectedOptionValues(els.experimentEvaluationReferences),
+      manifest_id: els.experimentEvaluationManifest?.value || "",
+      target_f0: optionalNum(els.experimentEvaluationTargetF0),
+    });
+  });
+  els.runtimeDiagnosticsForm?.addEventListener("submit", (event) => {
+    event.preventDefault();
+    startExperiment("runtime_diagnostics", {});
+  });
+  els.experimentUseCurrentProfileBtn?.addEventListener("click", () => {
+    registerCurrentExperimentProfile().catch((error) =>
+      setExperimentStatus(`登録できません: ${error.message}`, true),
+    );
+  });
+  els.experimentProfileUpload?.addEventListener("change", async (event) => {
+    try {
+      const resource = await uploadExperimentFile(event.target.files?.[0], "profile");
+      if (resource) els.experimentBenchmarkProfile.value = resource.id;
+    } catch (error) {
+      setExperimentStatus(`登録できません: ${error.message}`, true);
+    } finally {
+      event.target.value = "";
+    }
+  });
+  els.experimentManifestUpload?.addEventListener("change", async (event) => {
+    try {
+      const resource = await uploadExperimentFile(event.target.files?.[0], "manifest");
+      if (resource) els.experimentEvaluationManifest.value = resource.id;
+    } catch (error) {
+      setExperimentStatus(`登録できません: ${error.message}`, true);
+    } finally {
+      event.target.value = "";
+    }
+  });
+  els.experimentWavUpload?.addEventListener("change", async (event) => {
+    const uploaded = [];
+    try {
+      for (const file of Array.from(event.target.files || [])) {
+        const resource = await uploadExperimentFile(file, "wav");
+        if (resource) uploaded.push(resource.id);
+      }
+      for (const option of els.experimentEvaluationInputs.options) {
+        option.selected = uploaded.includes(option.value);
+      }
+    } catch (error) {
+      setExperimentStatus(`登録できません: ${error.message}`, true);
+    } finally {
+      event.target.value = "";
+    }
+  });
+  els.cancelExperimentBtn?.addEventListener("click", async () => {
+    if (!state.activeExperimentJobId) return;
+    try {
+      await experimentApi(`/api/experiments/jobs/${state.activeExperimentJobId}/cancel`, {
+        method: "POST",
+      });
+      setExperimentStatus("中止要求を送信しました。");
+      await refreshExperimentWorkspace({ silent: true });
+    } catch (error) {
+      setExperimentStatus(`中止できません: ${error.message}`, true);
+    }
+  });
+}
+
 function setActiveTab(tabId) {
   state.activeTab = tabId;
   for (const button of els.tabButtons) {
@@ -5220,6 +5663,18 @@ function setActiveTab(tabId) {
   }
   if (els.floatingPreviewDock) els.floatingPreviewDock.hidden = tabId !== "vowelTab";
   if (tabId === "ttsModelTab" || tabId === "outputTab") renderVoiceDesignerControls();
+  if (tabId === "experimentTab") {
+    const profile = buildVoiceControlProfile();
+    if (els.experimentBenchmarkCaption && !els.experimentBenchmarkCaption.value) {
+      els.experimentBenchmarkCaption.value = activeTtsCaption(profile);
+    }
+    if (els.experimentBenchmarkTargetF0 && !els.experimentBenchmarkTargetF0.value) {
+      els.experimentBenchmarkTargetF0.value = format(profile?.identity_anchor?.f0_mean_hz, 1);
+    }
+    refreshExperimentWorkspace();
+  } else {
+    scheduleExperimentPoll();
+  }
   draw();
 }
 
@@ -8861,6 +9316,8 @@ function init() {
   mountArticulationWorkspaces();
   renderLandmarkReference();
   renderPublicationReferences();
+  installExperimentHandlers();
+  setExperimentTool(state.activeExperimentTool);
   analyze();
   for (const button of els.tabButtons) {
     button.addEventListener("click", () => setActiveTab(button.dataset.tabTarget));

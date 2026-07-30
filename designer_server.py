@@ -34,6 +34,13 @@ from speaker_condition_reference import (
     inspect_embedding,
     speaker_condition_capabilities,
 )
+from experiment_jobs import (
+    ExperimentBusyError,
+    ExperimentError,
+    ExperimentJobManager,
+    ExperimentNotFoundError,
+    MAX_UPLOAD_BYTES,
+)
 
 
 PROJECT_ROOT = Path(__file__).resolve().parent
@@ -65,6 +72,7 @@ class DesignerServer(ThreadingHTTPServer):
     audio_cpp_base_url: str
     upstream_timeout_seconds: float
     observation_store: ObservationStore
+    experiment_manager: ExperimentJobManager
 
 
 class DesignerHandler(SimpleHTTPRequestHandler):
@@ -86,6 +94,36 @@ class DesignerHandler(SimpleHTTPRequestHandler):
 
     def do_GET(self) -> None:  # noqa: N802 - stdlib handler API
         path = urllib.parse.urlsplit(self.path).path
+        if path == "/api/experiments/catalog":
+            self._send_json(HTTPStatus.OK, self.server.experiment_manager.catalog())
+            return
+        if path == "/api/experiments/resources":
+            self._send_json(HTTPStatus.OK, self.server.experiment_manager.resources())
+            return
+        if path == "/api/experiments/jobs":
+            self._send_json(HTTPStatus.OK, self.server.experiment_manager.list_jobs())
+            return
+        experiment_match = re.fullmatch(
+            r"/api/experiments/jobs/([^/]+)(?:/artifacts/([^/]+))?",
+            path,
+        )
+        if experiment_match:
+            job_id, artifact_id = experiment_match.groups()
+            try:
+                if artifact_id:
+                    artifact_path, media_type = self.server.experiment_manager.artifact_path(
+                        job_id,
+                        artifact_id,
+                    )
+                    self._send_file(artifact_path, media_type)
+                else:
+                    self._send_json(
+                        HTTPStatus.OK,
+                        self.server.experiment_manager.get_job(job_id),
+                    )
+            except ExperimentNotFoundError as error:
+                self._send_json(HTTPStatus.NOT_FOUND, {"error": str(error)})
+            return
         if path == "/api/runtime/health":
             self._send_json(
                 HTTPStatus.OK,
@@ -178,7 +216,40 @@ class DesignerHandler(SimpleHTTPRequestHandler):
         super().do_HEAD()
 
     def do_POST(self) -> None:  # noqa: N802 - stdlib handler API
-        path = urllib.parse.urlsplit(self.path).path
+        parsed = urllib.parse.urlsplit(self.path)
+        path = parsed.path
+        if path == "/api/experiments/jobs":
+            try:
+                payload = self._read_json()
+                job = self.server.experiment_manager.start(
+                    payload.get("tool"),
+                    payload.get("options", {}),
+                )
+                self._send_json(HTTPStatus.ACCEPTED, job)
+            except ExperimentBusyError as error:
+                self._send_json(HTTPStatus.CONFLICT, {"error": str(error)})
+            except (ExperimentError, ValueError) as error:
+                self._send_json(HTTPStatus.BAD_REQUEST, {"error": str(error)})
+            return
+        cancel_match = re.fullmatch(r"/api/experiments/jobs/([^/]+)/cancel", path)
+        if cancel_match:
+            try:
+                job = self.server.experiment_manager.cancel(cancel_match.group(1))
+                self._send_json(HTTPStatus.OK, job)
+            except ExperimentNotFoundError as error:
+                self._send_json(HTTPStatus.NOT_FOUND, {"error": str(error)})
+            return
+        if path == "/api/experiments/uploads":
+            query = urllib.parse.parse_qs(parsed.query)
+            kind = query.get("kind", [""])[0]
+            name = query.get("name", [""])[0]
+            try:
+                body = self._read_body(MAX_UPLOAD_BYTES)
+                resource = self.server.experiment_manager.store_upload(kind, name, body)
+                self._send_json(HTTPStatus.CREATED, resource)
+            except (ExperimentError, ValueError) as error:
+                self._send_json(HTTPStatus.BAD_REQUEST, {"error": str(error)})
+            return
         if path != "/api/audio-cpp/speech":
             self._send_json(HTTPStatus.NOT_FOUND, {"error": "Unknown API route."})
             return
@@ -228,19 +299,23 @@ class DesignerHandler(SimpleHTTPRequestHandler):
         return Path(normalized).suffix.lower() in STATIC_EXTENSIONS
 
     def _read_json(self) -> dict[str, Any]:
+        body = self._read_body(MAX_JSON_BYTES)
         try:
-            length = int(self.headers.get("Content-Length", "0"))
-        except ValueError as error:
-            raise ValueError("Invalid Content-Length header.") from error
-        if length <= 0 or length > MAX_JSON_BYTES:
-            raise ValueError("JSON request size is invalid.")
-        try:
-            payload = json.loads(self.rfile.read(length).decode("utf-8"))
+            payload = json.loads(body.decode("utf-8"))
         except (UnicodeDecodeError, json.JSONDecodeError) as error:
             raise ValueError("Request body must be UTF-8 JSON.") from error
         if not isinstance(payload, dict):
             raise ValueError("JSON request root must be an object.")
         return payload
+
+    def _read_body(self, maximum: int) -> bytes:
+        try:
+            length = int(self.headers.get("Content-Length", "0"))
+        except ValueError as error:
+            raise ValueError("Invalid Content-Length header.") from error
+        if length <= 0 or length > maximum:
+            raise ValueError("Request size is invalid.")
+        return self.rfile.read(length)
 
     def _proxy_get(self, upstream_path: str) -> None:
         request = urllib.request.Request(
@@ -409,6 +484,21 @@ class DesignerHandler(SimpleHTTPRequestHandler):
         self.send_header("Cache-Control", "no-store")
         self.end_headers()
         self.wfile.write(body)
+
+    def _send_file(self, path: Path, media_type: str) -> None:
+        size = path.stat().st_size
+        self.send_response(HTTPStatus.OK)
+        self.send_header("Content-Type", media_type)
+        self.send_header("Content-Length", str(size))
+        self.send_header("Cache-Control", "no-store")
+        self.send_header(
+            "Content-Disposition",
+            f'attachment; filename="{path.name.replace(chr(34), "")}"',
+        )
+        self.end_headers()
+        with path.open("rb") as stream:
+            while chunk := stream.read(1024 * 1024):
+                self.wfile.write(chunk)
 
 
 def bounded_number(value: Any, field: str, minimum: float, maximum: float) -> float:
@@ -584,6 +674,11 @@ def main() -> None:
     server.audio_cpp_base_url = normalize_upstream_url(args.audio_cpp_url)
     server.upstream_timeout_seconds = max(1, args.upstream_timeout)
     server.observation_store = ObservationStore(PROJECT_ROOT / "runtime" / "observations", PROJECT_ROOT)
+    server.experiment_manager = ExperimentJobManager(
+        PROJECT_ROOT,
+        bridge_base_url=f"http://{bind_host}:{server.server_port}",
+        audio_cpp_base_url=server.audio_cpp_base_url,
+    )
     SPEAKER_CONDITION_ROOT.mkdir(parents=True, exist_ok=True)
     print(f"CharacterVoiceDesigner: http://{bind_host}:{args.port}/")
     print(f"audio.cpp upstream: {server.audio_cpp_base_url}")
@@ -592,6 +687,7 @@ def main() -> None:
     except KeyboardInterrupt:
         pass
     finally:
+        server.experiment_manager.shutdown()
         server.server_close()
 
 

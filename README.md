@@ -305,9 +305,26 @@ node tests/landmark_schema.test.js
 node tests/voice_control_profile.test.js
 node tests/tube_synthesis_smoke.test.js
 runtime/mm/Scripts/python.exe -m unittest tests/designer_server_test.py tests/audio_postprocess_test.py
+runtime/mm/Scripts/python.exe -m unittest tests/experiment_jobs_test.py
 runtime/mm/Scripts/python.exe -m unittest tests/seed_f0_benchmark_test.py
 runtime/mm/Scripts/python.exe -m unittest tests/voice_evaluator_test.py
 ```
+
+## Experiment workspace
+
+The **Experiment** tab beside **TTS Model** is the primary interface for local
+research utilities. It runs generation-observation parity checks, Speaker
+Inversion compatibility checks, Seed/F0 benchmarks, generated-voice evaluation,
+and dependency diagnostics without requiring users to type filesystem paths.
+Long jobs run asynchronously one at a time, with progress, logs, reports, WAV
+playback, and artifact downloads available in the same tab.
+
+WAV, profile, and manifest uploads are copied only into the ignored local
+`runtime/experiment_inputs/` directory. Job records are stored under the ignored
+`runtime/experiment_jobs/` directory. The server accepts only allowlisted tools
+and managed resources; it does not expose a shell or arbitrary-path execution.
+The command-line wrappers remain available for scripted and publication-grade
+reproduction.
 
 ## Seed/F0 screening benchmark
 

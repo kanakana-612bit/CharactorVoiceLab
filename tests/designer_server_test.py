@@ -337,15 +337,24 @@ class LocalProxyIntegrationTest(unittest.TestCase):
         self.designer.audio_cpp_base_url = f"http://127.0.0.1:{self.stub.server_port}"
         self.designer.upstream_timeout_seconds = 3
         self.designer.observation_store = MemoryObservationStore()
+        self.experiment_root = ROOT / "tests" / f"_experiment_project_{uuid.uuid4().hex}"
+        self.experiment_root.mkdir(parents=True)
+        self.designer.experiment_manager = MODULE.ExperimentJobManager(
+            self.experiment_root,
+            bridge_base_url=f"http://127.0.0.1:{self.designer.server_port}",
+            audio_cpp_base_url=self.designer.audio_cpp_base_url,
+        )
         self.designer_thread = threading.Thread(target=self.designer.serve_forever, daemon=True)
         self.designer_thread.start()
         self.base_url = f"http://127.0.0.1:{self.designer.server_port}"
 
     def tearDown(self):
+        self.designer.experiment_manager.shutdown()
         self.designer.shutdown()
         self.designer.server_close()
         self.stub.shutdown()
         self.stub.server_close()
+        shutil.rmtree(self.experiment_root, ignore_errors=True)
 
     def test_runtime_health_reports_f0_dependencies(self):
         with urllib.request.urlopen(self.base_url + "/api/runtime/health") as response:
@@ -355,6 +364,28 @@ class LocalProxyIntegrationTest(unittest.TestCase):
         self.assertIsInstance(health["psola_available"], bool)
         self.assertIn("pyworld", health["postprocess_dependencies"])
         self.assertIn("connect-src 'self'", content_security_policy)
+
+    def test_experiment_catalog_and_local_upload_are_available(self):
+        with urllib.request.urlopen(self.base_url + "/api/experiments/catalog") as response:
+            catalog = json.load(response)
+        self.assertTrue(catalog["local_only"])
+        self.assertEqual(catalog["max_parallel_jobs"], 1)
+        self.assertIn("seed_f0", {tool["id"] for tool in catalog["tools"]})
+
+        wav = b"RIFF" + (4).to_bytes(4, "little") + b"WAVE"
+        request = urllib.request.Request(
+            self.base_url + "/api/experiments/uploads?kind=wav&name=test.wav",
+            data=wav,
+            headers={"Content-Type": "audio/wav"},
+            method="POST",
+        )
+        with urllib.request.urlopen(request) as response:
+            uploaded = json.load(response)
+        self.assertTrue(uploaded["id"].startswith("upload-wav:"))
+
+        with urllib.request.urlopen(self.base_url + "/api/experiments/resources") as response:
+            resources = json.load(response)
+        self.assertIn(uploaded["id"], {item["id"] for item in resources["voice_inputs"]})
 
     def test_models_and_wav_are_proxied(self):
         with urllib.request.urlopen(self.base_url + "/api/audio-cpp/models") as response:
