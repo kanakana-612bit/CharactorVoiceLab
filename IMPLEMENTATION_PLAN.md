@@ -15,6 +15,51 @@ Current implementation order:
 
 The first adapter uses deterministic Japanese caption generation, fixed-seed reproducibility, duration scaling, and explicit disclosure that caption conditioning is approximate. Direct F0, breathiness, and spectral controls may be added only when a selected TTS backend exposes stable inference-time controls for them.
 
+## 2026-07-30 Conditioning Observation Milestone
+
+Implemented:
+
+1. opt-in local generation records with hashed text/caption provenance
+2. seed, inference-step, CFG, duration, model-config, and postprocess capture
+3. separate hashes for upstream audio.cpp WAV and returned postprocessed WAV
+4. PCM duration and optional WORLD F0 analysis
+5. explicit expected dimensions for Speaker condition (768), Caption condition
+   (512), and audio latent (32)
+6. requested-versus-observed state for internal conditions and latent snapshots
+7. unit parity and real audio.cpp parity tests proving observation does not
+   alter returned WAV bytes
+
+The pinned audio.cpp binary does not expose the internal tensors or Duration
+Predictor result. The next native milestone is an instrumented source build
+that reports condition/initial-latent hashes and predicted duration first,
+then writes explicitly requested raw tensor snapshots to a local sidecar
+format. Normal inference must remain byte-identical when observation is off.
+
+## 2026-07-30 Evaluation Milestone
+
+The first evaluation layer is implemented as a separate local CLI. It produces
+machine-readable JSON, flattened CSV, and Markdown reports while keeping these
+measurement groups separate:
+
+- source F0 and prosody;
+- spectral-timbre engineering proxies;
+- delivery timing and level dynamics;
+- waveform quality diagnostics;
+- optional observation-record provenance.
+
+The default evaluator uses only generated WAV data. Independent speaker embedding is
+an explicit, disabled-by-default adapter because the reference ECAPA model uses
+real-person VoxCeleb training data. Raw embeddings are not serialized.
+
+Next evaluation work:
+
+1. expose native audio.cpp hashes or sampled summaries for speaker condition, caption
+   condition, predicted duration, initial latent, and selected denoising steps;
+2. add batched evaluation-set generation using `evaluation_texts.ja.json`;
+3. compare embedding and acoustic drift across text while holding seed and controls;
+4. derive selection rules only after repeated trials establish stable
+   within-condition variance.
+
 ## 2026-07-14 Workflow And Geometry Plan
 
 The working order is:

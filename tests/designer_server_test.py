@@ -1,4 +1,5 @@
 import importlib.util
+import hashlib
 import json
 import pathlib
 import threading
@@ -45,6 +46,38 @@ class SpeechRequestValidationTest(unittest.TestCase):
         self.assertEqual(request["_cvd_postprocess"]["target_hz"], 225)
         self.assertEqual(request["_cvd_postprocess"]["strength"], 0.75)
 
+    def test_observation_options_are_validated_and_not_forwarded(self):
+        request = MODULE.validate_speech_request(
+            {
+                "model": "irodori-vdes",
+                "input": "test",
+                "observation": {
+                    "enabled": True,
+                    "label": "parity-01",
+                    "analyze_f0": False,
+                    "capture_internal_conditions": True,
+                    "latent_snapshot_steps": [20, 4, 20],
+                },
+            }
+        )
+        observation = request.pop("_cvd_observation")
+        self.assertEqual(observation["label"], "parity-01")
+        self.assertEqual(observation["latent_snapshot_steps"], [4, 20])
+        self.assertNotIn("observation", request)
+
+    def test_invalid_observation_snapshot_step_is_rejected(self):
+        with self.assertRaises(ValueError):
+            MODULE.validate_speech_request(
+                {
+                    "model": "irodori-vdes",
+                    "input": "test",
+                    "observation": {
+                        "enabled": True,
+                        "latent_snapshot_steps": [0],
+                    },
+                }
+            )
+
     def test_remote_upstream_is_rejected(self):
         with self.assertRaises(ValueError):
             MODULE.normalize_upstream_url("https://example.com")
@@ -72,6 +105,7 @@ class StubAudioCppHandler(BaseHTTPRequestHandler):
         payload = json.loads(self.rfile.read(length))
         assert payload["model"] == "irodori-vdes"
         assert payload["options"]["caption"] == "明るい声。"
+        assert "observation" not in payload
         body = b"RIFF\x04\x00\x00\x00WAVE"
         self.send_response(200)
         self.send_header("Content-Type", "audio/wav")
@@ -83,6 +117,62 @@ class StubAudioCppHandler(BaseHTTPRequestHandler):
         pass
 
 
+class MemoryObservationStore(MODULE.ObservationStore):
+    def __init__(self):
+        super().__init__(ROOT / "tmp" / "unused-observation-store", ROOT)
+        self.records = {}
+
+    def write(self, observation_id, record):
+        self.records[observation_id] = dict(record)
+        return True
+
+    def read(self, observation_id):
+        return self.records.get(observation_id)
+
+
+class ObservationRecordTest(unittest.TestCase):
+    def test_upstream_and_returned_audio_and_native_headers_remain_distinct(self):
+        request = MODULE.validate_speech_request(
+            {
+                "model": "irodori-vdes",
+                "input": "test",
+                "observation": {
+                    "enabled": True,
+                    "analyze_f0": False,
+                    "capture_internal_conditions": True,
+                },
+            }
+        )
+        observation_options = request.pop("_cvd_observation")
+        store = MemoryObservationStore()
+        capture = store.begin(request, None, observation_options)
+        self.assertTrue(
+            capture.finalize_success(
+                upstream_body=b"upstream",
+                body=b"returned",
+                status=200,
+                content_type="application/octet-stream",
+                upstream_seconds=1.25,
+                postprocess_seconds=0.1,
+                correction_metadata=None,
+                upstream_headers={
+                    "X-AudioCpp-Predicted-Duration-Seconds": "2.5",
+                    "X-AudioCpp-Speaker-Condition-SHA256": "a" * 64,
+                },
+                f0_analyzer=None,
+            )
+        )
+        record = store.read(capture.id)
+        self.assertFalse(record["response"]["upstream_audio"]["same_as_returned"])
+        self.assertNotEqual(
+            record["response"]["upstream_audio"]["sha256"],
+            record["response"]["audio"]["sha256"],
+        )
+        self.assertTrue(record["internal_conditions"]["duration_prediction"]["observed"])
+        self.assertEqual(record["internal_conditions"]["duration_prediction"]["seconds"], 2.5)
+        self.assertTrue(record["internal_conditions"]["speaker_condition"]["observed"])
+
+
 class LocalProxyIntegrationTest(unittest.TestCase):
     def setUp(self):
         self.stub = ThreadingHTTPServer(("127.0.0.1", 0), StubAudioCppHandler)
@@ -91,6 +181,7 @@ class LocalProxyIntegrationTest(unittest.TestCase):
         self.designer = MODULE.DesignerServer(("127.0.0.1", 0), MODULE.DesignerHandler)
         self.designer.audio_cpp_base_url = f"http://127.0.0.1:{self.stub.server_port}"
         self.designer.upstream_timeout_seconds = 3
+        self.designer.observation_store = MemoryObservationStore()
         self.designer_thread = threading.Thread(target=self.designer.serve_forever, daemon=True)
         self.designer_thread.start()
         self.base_url = f"http://127.0.0.1:{self.designer.server_port}"
@@ -133,6 +224,70 @@ class LocalProxyIntegrationTest(unittest.TestCase):
             content_type = response.headers.get_content_type()
         self.assertEqual(content_type, "audio/wav")
         self.assertTrue(audio.startswith(b"RIFF"))
+
+    def test_observation_is_local_opt_in_and_does_not_change_audio(self):
+        payload = {
+            "model": "irodori-vdes",
+            "input": "observation test",
+            "options": {"caption": "明るい声。"},
+        }
+        plain_request = urllib.request.Request(
+            self.base_url + "/api/audio-cpp/speech",
+            data=json.dumps(payload).encode("utf-8"),
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        with urllib.request.urlopen(plain_request) as response:
+            plain_audio = response.read()
+            self.assertIsNone(response.headers.get("X-CVD-Observation-ID"))
+
+        payload["observation"] = {
+            "enabled": True,
+            "label": "parity",
+            "analyze_f0": False,
+            "capture_internal_conditions": True,
+            "latent_snapshot_steps": [4, 20],
+        }
+        observed_request = urllib.request.Request(
+            self.base_url + "/api/audio-cpp/speech",
+            data=json.dumps(payload).encode("utf-8"),
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        with urllib.request.urlopen(observed_request) as response:
+            observed_audio = response.read()
+            observation_id = response.headers.get("X-CVD-Observation-ID")
+
+        self.assertEqual(observed_audio, plain_audio)
+        self.assertIsNotNone(observation_id)
+        with urllib.request.urlopen(
+            self.base_url + f"/api/runtime/observations/{observation_id}"
+        ) as response:
+            record = json.load(response)
+        self.assertEqual(record["status"], "complete")
+        self.assertEqual(record["label"], "parity")
+        self.assertFalse(record["privacy"]["input_text_stored"])
+        self.assertNotIn("value", record["request"]["input"])
+        self.assertEqual(
+            record["response"]["audio"]["sha256"],
+            hashlib.sha256(observed_audio).hexdigest(),
+        )
+        self.assertTrue(record["response"]["upstream_audio"]["same_as_returned"])
+        self.assertTrue(record["internal_conditions"]["capture_requested"])
+        self.assertEqual(
+            record["internal_conditions"]["latent_snapshots"]["requested_steps"],
+            [4, 20],
+        )
+        self.assertFalse(record["internal_conditions"]["speaker_condition"]["observed"])
+
+    def test_observation_capabilities_are_reported(self):
+        with urllib.request.urlopen(
+            self.base_url + "/api/runtime/observation-capabilities?model=irodori-vdes"
+        ) as response:
+            capabilities = json.load(response)
+        self.assertTrue(capabilities["available"]["request_conditions"])
+        self.assertFalse(capabilities["available"]["speaker_condition"])
+        self.assertFalse(capabilities["storage"]["stores_audio"])
 
 
 if __name__ == "__main__":

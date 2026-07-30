@@ -110,6 +110,21 @@ The implementation roadmap is tracked in `IMPLEMENTATION_PLAN.md`.
 Literature and dataset gaps are tracked in `EVIDENCE_GAPS.md`.
 Source permissions and allowed evidence roles are tracked in `SOURCE_ETHICS_AUDIT.md`.
 
+## Local generation observation
+
+The TTS bridge provides an opt-in, local-only observation record for controlled
+experiments. It records request hashes and settings, model architecture
+metadata, generation timing, returned-WAV hashes and PCM metadata, and optional
+WORLD F0 statistics. It does not copy the generated audio and does not retain
+text or caption values by default.
+
+The current audio.cpp release does not expose Speaker/Caption condition tokens,
+intermediate latents, or Duration Predictor output. Observation records mark
+those fields as requested but unavailable instead of presenting inferred
+values as internal model state. The API, privacy behavior, native hook boundary,
+and parity smoke test are documented in
+[`OBSERVATION_PROTOCOL.md`](OBSERVATION_PROTOCOL.md).
+
 Terminology:
 
 - `center`: character-specific baseline value.
@@ -133,6 +148,7 @@ Implemented on this branch:
 - serializable pitch, breathiness, energy, speaking-rate, articulation, and breath-phrase control functions
 - deterministic mapping of the intermediate profile to an Irodori VoiceDesign caption, fixed seed, inference steps, caption guidance, and duration scale
 - local audio.cpp model discovery and WAV generation through a validated same-origin HTTP bridge
+- opt-in local generation observations with request/model provenance, timing, WAV hashes, acoustic analysis, and explicit internal-tensor availability
 - backward-compatible loading of Character Voice Lab Ver 1.1 physical profiles
 
 - publication-oriented physical-profile workflow: basic information, detailed settings, vowel calibration, consonant calibration, and references/publication policy
@@ -254,6 +270,7 @@ node tests/voice_control_profile.test.js
 node tests/tube_synthesis_smoke.test.js
 runtime/mm/Scripts/python.exe -m unittest tests/designer_server_test.py tests/audio_postprocess_test.py
 runtime/mm/Scripts/python.exe -m unittest tests/seed_f0_benchmark_test.py
+runtime/mm/Scripts/python.exe -m unittest tests/voice_evaluator_test.py
 ```
 
 ## Seed/F0 screening benchmark
@@ -275,3 +292,24 @@ The exact protocol, metrics, interpretation, limitations, and the curated
 [`BENCHMARK_PROTOCOL.md`](BENCHMARK_PROTOCOL.md). Provenance-checked pilot
 artifacts, including the generated WAV files, are archived under
 [`benchmark_results/published/`](benchmark_results/published/).
+
+## Local Voice Evaluation
+
+`evaluate_voice.py` measures generated WAV files without uploading audio. It keeps
+source/prosody, spectral-timbre proxies, delivery style, and waveform quality as
+separate groups and can join results to opt-in generation observation records.
+
+```powershell
+.\evaluate_voice.bat --input "output_wavs" --reference "reference_wavs" --target-f0 220
+```
+
+```bash
+./evaluate_voice.sh --input "output_wavs" --reference "reference_wavs" --target-f0 220
+```
+
+The built-in measurements are engineering comparison proxies, not speaker identity
+or clinical measurements. The optional SpeechBrain ECAPA adapter is disabled by
+default, is not installed or downloaded automatically, and requires a separate ethics
+review because its reference model was trained on the real-person VoxCeleb corpus.
+See [`EVALUATION_PROTOCOL.md`](EVALUATION_PROTOCOL.md) for the test set, manifest,
+interpretation limits, and output schema.

@@ -22,8 +22,18 @@ It owns only:
 - `GET /api/audio-cpp/health` -> `GET http://127.0.0.1:8080/health`
 - `GET /api/audio-cpp/models` -> `GET http://127.0.0.1:8080/v1/models`
 - `POST /api/audio-cpp/speech` -> `POST http://127.0.0.1:8080/v1/audio/speech`
+- `GET /api/runtime/observation-capabilities?model={id}` -> local observation support and expected model dimensions
+- `GET /api/runtime/observations/{id}` -> one opt-in local generation record
 
 The bridge accepts a configured model id, up to 5000 text characters, language, seed, inference-step count, and a small allowlist of VoiceDesign options. The upstream origin must be loopback HTTP; arbitrary URLs and unrecognized request fields are not forwarded.
+
+An optional `observation` object is consumed entirely by the bridge and is
+never forwarded to audio.cpp. Successful persistence adds an
+`X-CVD-Observation-ID` response header while leaving the returned WAV bytes
+unchanged. Records are local-only, do not copy the generated WAV, and hash
+input text and captions unless `include_text` is explicitly enabled. The
+schema and current native-runtime boundary are defined in
+[`OBSERVATION_PROTOCOL.md`](OBSERVATION_PROTOCOL.md).
 
 ## VoiceControlProfile
 
@@ -234,6 +244,15 @@ Native TTS engines are not coupled directly to browser code. The current local s
 The current Irodori adapter consumes non-pitch identity anchors through caption descriptors and maps speaking rate to `duration_scale`. Pitch wording is intentionally excluded from the caption. When enabled, the local bridge measures the generated voiced contour with WORLD, then uses Praat PSOLA overlap-add to shift its median to `voice_control_profile.identity_anchor.f0_mean_hz` while retaining the relative intonation, original waveform texture, and duration. Response headers report measured, target, and output F0. This is an explicit waveform postprocess, not native control of Irodori's learned latent space. Breathiness, spectral tilt, and articulation trajectories remain approximate caption mappings.
 
 The optional `seed_f0_benchmark.py` test bench evaluates an alternative pre-generation selection strategy. It sends paired low-step and final-step requests with identical seeds and conditioning, explicitly disables F0 post-processing, measures the returned unmodified WAV files with WORLD, and records whether low-step F0 predicts final-step F0. Benchmark artifacts are not part of the TTS API. Local runs are excluded from version control by default; selected, provenance-checked pilot evidence may be archived under `benchmark_results/published/`.
+
+The local `evaluate_voice.py` evaluator emits `cvd_voice_evaluation_0.1` JSON,
+flattened CSV, and Markdown reports. These are analysis artifacts rather than TTS API
+responses. A manifest may join a WAV filename to text metadata and an opt-in
+observation ID. Built-in source/prosody, spectral-timbre, delivery, and waveform
+quality fields are engineering comparison proxies; downstream consumers must not
+relabel them as speaker identity or clinical measurements. Independent
+speaker-embedding output, when explicitly enabled, remains a separate model-dependent
+field and raw embeddings are not serialized.
 
 The WebUI should remain useful even when no external synthesis backend is available. In that mode it exports constraints, vowel-specific area/width tuning, nasal-articulation tuning, local auditory-evaluation records, and synthetic phoneme/syllable datasets using the browser 2.5D-derived tube preview. Nasal `/m/`, `/n/`, and moraic `/N/` use a dedicated initial model; other CV onset generation remains experimental scaffolding rather than a validated consonant model. Tokens are evaluated individually before a set is accepted. Profiles saved by older versions may still contain `formant` or `hybrid` preview selections and hybrid-only controls; version 1.1 ignores those retired fields and exports `preview_synthesis_backend: "tube"`.
 

@@ -7,6 +7,7 @@ import argparse
 import json
 import os
 import re
+import time
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -17,9 +18,16 @@ from typing import Any
 
 from audio_postprocess import (
     AudioPostprocessError,
+    analyze_wav_f0,
     correct_wav_f0,
     postprocess_dependency_status,
     psola_available,
+)
+from generation_observation import (
+    ObservationCapture,
+    ObservationStore,
+    load_model_metadata,
+    validate_observation_options,
 )
 
 
@@ -47,6 +55,7 @@ BLOCKED_STATIC_PREFIXES = ("/.git", "/data/", "/scripts/", "/tests/", "/runtime/
 class DesignerServer(ThreadingHTTPServer):
     audio_cpp_base_url: str
     upstream_timeout_seconds: float
+    observation_store: ObservationStore
 
 
 class DesignerHandler(SimpleHTTPRequestHandler):
@@ -78,6 +87,57 @@ class DesignerHandler(SimpleHTTPRequestHandler):
                 },
             )
             return
+        if path == "/api/runtime/observation-capabilities":
+            query = urllib.parse.parse_qs(urllib.parse.urlsplit(self.path).query)
+            model = query.get("model", ["irodori-vdes"])[0]
+            if not MODEL_ID_PATTERN.fullmatch(model):
+                self._send_json(HTTPStatus.BAD_REQUEST, {"error": "model is invalid."})
+                return
+            metadata = load_model_metadata(PROJECT_ROOT, model)
+            architecture = metadata.get("architecture", {})
+            self._send_json(
+                HTTPStatus.OK,
+                {
+                    "schema_version": "cvd_observation_capabilities_0.1",
+                    "model": metadata,
+                    "storage": {
+                        "local_only": True,
+                        "opt_in": True,
+                        "stores_audio": False,
+                        "stores_text_by_default": False,
+                    },
+                    "available": {
+                        "request_conditions": True,
+                        "generation_timing": True,
+                        "output_wav_hash": True,
+                        "output_wav_analysis": True,
+                        "speaker_condition": False,
+                        "caption_condition": False,
+                        "initial_audio_latent": False,
+                        "latent_snapshots": False,
+                        "duration_prediction": False,
+                    },
+                    "expected_dimensions": {
+                        "speaker_condition": architecture.get("speaker_dim"),
+                        "caption_condition": architecture.get("caption_dim"),
+                        "audio_latent": architecture.get("latent_dim"),
+                    },
+                    "internal_runtime_note": (
+                        "The pinned audio.cpp runtime does not expose internal tensors yet. "
+                        "The observation schema is ready to ingest hashes and duration metadata "
+                        "when the native hook is available."
+                    ),
+                },
+            )
+            return
+        if path.startswith("/api/runtime/observations/"):
+            observation_id = path.rsplit("/", 1)[-1]
+            record = self.server.observation_store.read(observation_id)
+            if record is None:
+                self._send_json(HTTPStatus.NOT_FOUND, {"error": "Observation was not found."})
+                return
+            self._send_json(HTTPStatus.OK, record)
+            return
         if path == "/api/audio-cpp/health":
             self._proxy_get("/health")
             return
@@ -108,7 +168,13 @@ class DesignerHandler(SimpleHTTPRequestHandler):
             self._send_json(HTTPStatus.BAD_REQUEST, {"error": str(error)})
             return
         postprocess = request.pop("_cvd_postprocess", None)
-        self._proxy_json("/v1/audio/speech", request, postprocess)
+        observation_options = request.pop("_cvd_observation", None)
+        observation = (
+            self.server.observation_store.begin(request, postprocess, observation_options)
+            if observation_options
+            else None
+        )
+        self._proxy_json("/v1/audio/speech", request, postprocess, observation)
 
     def _static_path_allowed(self, raw_path: str) -> bool:
         path = urllib.parse.unquote(raw_path)
@@ -147,6 +213,7 @@ class DesignerHandler(SimpleHTTPRequestHandler):
         upstream_path: str,
         payload: dict[str, Any],
         postprocess: dict[str, Any] | None = None,
+        observation: ObservationCapture | None = None,
     ) -> None:
         body = json.dumps(payload, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
         request = urllib.request.Request(
@@ -155,29 +222,51 @@ class DesignerHandler(SimpleHTTPRequestHandler):
             headers={"Content-Type": "application/json", "Accept": "audio/wav"},
             method="POST",
         )
-        self._perform_upstream_request(request, postprocess)
+        self._perform_upstream_request(request, postprocess, observation)
 
     def _perform_upstream_request(
         self,
         request: urllib.request.Request,
         postprocess: dict[str, Any] | None = None,
+        observation: ObservationCapture | None = None,
     ) -> None:
+        upstream_started = time.perf_counter()
         try:
             with urllib.request.urlopen(request, timeout=self.server.upstream_timeout_seconds) as response:
                 body = response.read(MAX_AUDIO_BYTES + 1)
+                upstream_body = body
+                upstream_seconds = time.perf_counter() - upstream_started
                 if len(body) > MAX_AUDIO_BYTES:
                     raise ValueError("audio.cpp response exceeded the local size limit.")
                 correction_metadata = None
+                postprocess_seconds = 0.0
                 if postprocess and response.headers.get_content_type() == "audio/wav":
+                    postprocess_started = time.perf_counter()
                     body, correction_metadata = correct_wav_f0(
                         body,
                         target_hz=postprocess["target_hz"],
                         strength=postprocess["strength"],
                     )
+                    postprocess_seconds = time.perf_counter() - postprocess_started
+                observation_written = False
+                if observation:
+                    observation_written = observation.finalize_success(
+                        upstream_body=upstream_body,
+                        body=body,
+                        status=response.status,
+                        content_type=response.headers.get_content_type(),
+                        upstream_seconds=upstream_seconds,
+                        postprocess_seconds=postprocess_seconds,
+                        correction_metadata=correction_metadata,
+                        upstream_headers=response.headers,
+                        f0_analyzer=analyze_wav_f0,
+                    )
                 self.send_response(response.status)
                 self.send_header("Content-Type", response.headers.get_content_type())
                 self.send_header("Content-Length", str(len(body)))
                 self.send_header("Cache-Control", "no-store")
+                if observation_written:
+                    self.send_header("X-CVD-Observation-ID", observation.id)
                 if correction_metadata:
                     self.send_header("X-CVD-F0-Measured-Hz", str(correction_metadata["measured_hz"]))
                     self.send_header("X-CVD-F0-Target-Hz", str(correction_metadata["target_hz"]))
@@ -187,6 +276,12 @@ class DesignerHandler(SimpleHTTPRequestHandler):
                 self.end_headers()
                 self.wfile.write(body)
         except urllib.error.HTTPError as error:
+            if observation:
+                observation.finalize_error(
+                    "upstream_http",
+                    f"HTTP {error.code}",
+                    time.perf_counter() - upstream_started,
+                )
             body = error.read(MAX_JSON_BYTES)
             content_type = error.headers.get_content_type() if error.headers else "application/json"
             self.send_response(error.code)
@@ -196,9 +291,21 @@ class DesignerHandler(SimpleHTTPRequestHandler):
             self.end_headers()
             self.wfile.write(body)
         except AudioPostprocessError as error:
+            if observation:
+                observation.finalize_error(
+                    "postprocess",
+                    str(error),
+                    time.perf_counter() - upstream_started,
+                )
             self._send_json(HTTPStatus.UNPROCESSABLE_ENTITY, {"error": str(error)})
         except (urllib.error.URLError, TimeoutError, ValueError) as error:
             reason = getattr(error, "reason", error)
+            if observation:
+                observation.finalize_error(
+                    "upstream",
+                    str(reason),
+                    time.perf_counter() - upstream_started,
+                )
             self._send_json(
                 HTTPStatus.BAD_GATEWAY,
                 {"error": f"audio.cpp is unavailable at {self.server.audio_cpp_base_url}: {reason}"},
@@ -279,6 +386,9 @@ def validate_speech_request(payload: dict[str, Any]) -> dict[str, Any]:
             "target_hz": bounded_number(raw_f0.get("target_hz"), "postprocess.f0.target_hz", 60, 500),
             "strength": bounded_number(raw_f0.get("strength", 1), "postprocess.f0.strength", 0, 1),
         }
+    observation = validate_observation_options(payload.get("observation"))
+    if observation:
+        request["_cvd_observation"] = observation
     return request
 
 
@@ -316,6 +426,7 @@ def main() -> None:
     server = DesignerServer((bind_host, args.port), DesignerHandler)
     server.audio_cpp_base_url = normalize_upstream_url(args.audio_cpp_url)
     server.upstream_timeout_seconds = max(1, args.upstream_timeout)
+    server.observation_store = ObservationStore(PROJECT_ROOT / "runtime" / "observations", PROJECT_ROOT)
     print(f"CharacterVoiceDesigner: http://{bind_host}:{args.port}/")
     print(f"audio.cpp upstream: {server.audio_cpp_base_url}")
     try:

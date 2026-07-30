@@ -1,0 +1,72 @@
+{
+  "schema_version": "cvd_evaluation_text_set_0.1",
+  "language": "ja-JP",
+  "purpose": "CharacterVoiceDesignerの文脈依存変動と短文生成の再現評価",
+  "notes": [
+    "各文は同じモデル設定、seed、step、captionで比較する。",
+    "話者性の評価には単一文だけを使用せず、複数カテゴリを分けて報告する。",
+    "K2-K7は既存実験で文依存変動が観測されたため回帰試験として収録する。"
+  ],
+  "items": [
+    {
+      "id": "N1",
+      "category": "neutral_short",
+      "text": "今日は静かな部屋で、短い文章を読みます。",
+      "source": "project_authored"
+    },
+    {
+      "id": "N2",
+      "category": "neutral_short",
+      "text": "明るい窓辺に、青い箱を置きました。",
+      "source": "project_authored"
+    },
+    {
+      "id": "N3",
+      "category": "neutral_short",
+      "text": "駅を出てから、ゆっくり右へ曲がります。",
+      "source": "project_authored"
+    },
+    {
+      "id": "N4",
+      "category": "neutral_short",
+      "text": "小さな音まで、落ち着いて確かめてください。",
+      "source": "project_authored"
+    },
+    {
+      "id": "K2",
+      "category": "known_context_drift",
+      "text": "智に働けば角が立つ。",
+      "source": "Natsume Soseki, Kusamakura, public-domain text"
+    },
+    {
+      "id": "K3",
+      "category": "known_context_drift",
+      "text": "情に棹させば流される。",
+      "source": "Natsume Soseki, Kusamakura, public-domain text"
+    },
+    {
+      "id": "K4",
+      "category": "known_context_drift",
+      "text": "意地を通せば窮屈だ。",
+      "source": "Natsume Soseki, Kusamakura, public-domain text"
+    },
+    {
+      "id": "K5",
+      "category": "known_context_drift",
+      "text": "とかくに人の世は住みにくい。",
+      "source": "Natsume Soseki, Kusamakura, public-domain text"
+    },
+    {
+      "id": "K6",
+      "category": "known_context_drift",
+      "text": "住みにくさが高じると、安い所へ引き越したくなる。",
+      "source": "Natsume Soseki, Kusamakura, public-domain text"
+    },
+    {
+      "id": "K7",
+      "category": "known_context_drift",
+      "text": "どこへ越しても住みにくいと悟った時、詩が生まれて、絵が出来る。",
+      "source": "Natsume Soseki, Kusamakura, public-domain text"
+    }
+  ]
+}
