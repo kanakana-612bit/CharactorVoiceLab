@@ -243,9 +243,15 @@ class DesignerHandler(SimpleHTTPRequestHandler):
             query = urllib.parse.parse_qs(parsed.query)
             kind = query.get("kind", [""])[0]
             name = query.get("name", [""])[0]
+            target = query.get("target", [""])[0]
             try:
                 body = self._read_body(MAX_UPLOAD_BYTES)
-                resource = self.server.experiment_manager.store_upload(kind, name, body)
+                resource = self.server.experiment_manager.store_upload(
+                    kind,
+                    name,
+                    body,
+                    target=target,
+                )
                 self._send_json(HTTPStatus.CREATED, resource)
             except (ExperimentError, ValueError) as error:
                 self._send_json(HTTPStatus.BAD_REQUEST, {"error": str(error)})

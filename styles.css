@@ -1942,6 +1942,28 @@ pre {
   min-height: 170px;
 }
 
+.experiment-speaker-registration {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  margin-top: 14px;
+  padding: 12px 0;
+  border-top: 1px solid var(--line);
+  border-bottom: 1px solid var(--line);
+}
+
+.experiment-speaker-registration p {
+  margin: 3px 0 0;
+  color: var(--muted);
+  font-size: 0.82rem;
+}
+
+.experiment-speaker-registration .file-command {
+  flex: 0 0 auto;
+  white-space: nowrap;
+}
+
 .experiment-tool-form {
   padding: 18px 0 4px;
 }
@@ -2169,6 +2191,11 @@ pre {
 }
 
 @media (max-width: 640px) {
+  .experiment-speaker-registration {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
   .experiment-form-head,
   .experiment-job-detail-head {
     align-items: stretch;

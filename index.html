@@ -648,6 +648,24 @@
             すべての処理はこのPC上で実行されます。外部話者認識モデルとモデル自動ダウンロードは、
             倫理・再現性上の理由からこの画面では使用しません。
           </p>
+          <div class="experiment-speaker-registration">
+            <div>
+              <strong>管理済み話者状態</strong>
+              <p>
+                `.speaker.safetensors`を登録すると観測疎通と互換性検査で選択できます。
+                対応する`.speaker.json` sidecarがある場合は同時に選択してください。
+              </p>
+            </div>
+            <label class="file-command">
+              話者状態を登録
+              <input
+                id="experimentSpeakerUpload"
+                type="file"
+                accept=".safetensors,.json,application/json"
+                multiple
+              />
+            </label>
+          </div>
 
           <div id="experimentToolTabs" class="experiment-tool-tabs" role="tablist" aria-label="実験ツール">
             <button class="experiment-tool-button active" type="button" data-experiment-tool="runtime_observation">観測疎通</button>

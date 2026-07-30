@@ -17,6 +17,12 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
+from speaker_condition_reference import (
+    SpeakerConditionError,
+    inspect_embedding,
+    sidecar_path,
+)
+
 
 JOB_ID_PATTERN = re.compile(r"^[0-9]{8}T[0-9]{6}-[a-f0-9]{8}$")
 SPEAKER_NAME_PATTERN = re.compile(
@@ -181,11 +187,7 @@ class ExperimentJobManager:
         }
 
     def resources(self) -> dict[str, Any]:
-        speakers = [
-            {"id": path.name, "label": path.name}
-            for path in sorted(self.speaker_root.glob("*.speaker.safetensors"))
-            if SPEAKER_NAME_PATTERN.fullmatch(path.name)
-        ]
+        speakers = self._speaker_resources()
         profiles: list[dict[str, str]] = []
         voice_inputs: list[dict[str, str]] = []
         manifests: list[dict[str, str]] = []
@@ -224,14 +226,28 @@ class ExperimentJobManager:
         return {
             "schema_version": "cvd_experiment_resources_0.1",
             "speaker_conditions": speakers,
+            "speech_speaker_conditions": [
+                item for item in speakers if item.get("speech_usable")
+            ],
             "profiles": profiles,
             "voice_inputs": voice_inputs,
             "manifests": manifests,
         }
 
-    def store_upload(self, kind: str, filename: str, body: bytes) -> dict[str, str]:
+    def store_upload(
+        self,
+        kind: str,
+        filename: str,
+        body: bytes,
+        *,
+        target: str = "",
+    ) -> dict[str, Any]:
         if len(body) <= 0 or len(body) > MAX_UPLOAD_BYTES:
             raise ExperimentError("Upload size is invalid.")
+        if kind == "speaker":
+            return self._store_speaker(filename, body)
+        if kind == "speaker-sidecar":
+            return self._store_speaker_sidecar(target, filename, body)
         if kind not in {"wav", "profile", "manifest"}:
             raise ExperimentError("Upload kind is invalid.")
         name = _safe_name(filename, f"{kind}.dat")
@@ -261,6 +277,135 @@ class ExperimentJobManager:
             "id": f"upload-{kind}:{relative}",
             "label": f"アップロード / {destination.name}",
             "sha256": digest,
+        }
+
+    def _speaker_resources(self) -> list[dict[str, Any]]:
+        resources = []
+        for path in sorted(self.speaker_root.glob("*.speaker.safetensors")):
+            if not SPEAKER_NAME_PATTERN.fullmatch(path.name):
+                continue
+            try:
+                artifact = inspect_embedding(path)
+                semantic_voice = (
+                    artifact.get("sidecar", {})
+                    .get("provenance", {})
+                    .get("semantic_voice")
+                    if artifact.get("sidecar")
+                    else None
+                )
+                shape = artifact.get("shape") or []
+                shape_label = "x".join(str(value) for value in shape) or "shape unknown"
+                binding = artifact.get("model_binding_status", "unbound")
+                file_compatible = bool(artifact.get("upstream_file_contract_compatible"))
+                speech_usable = file_compatible and semantic_voice is not False
+                resources.append(
+                    {
+                        "id": path.name,
+                        "label": f"{path.name} / {shape_label} / {binding}",
+                        "shape": shape,
+                        "file_contract_compatible": file_compatible,
+                        "model_binding_status": binding,
+                        "has_sidecar": artifact.get("sidecar") is not None,
+                        "speech_usable": speech_usable,
+                        "warnings": artifact.get("warnings", []),
+                        "errors": artifact.get("errors", []),
+                    }
+                )
+            except SpeakerConditionError as error:
+                resources.append(
+                    {
+                        "id": path.name,
+                        "label": f"{path.name} / 読み取り不可",
+                        "shape": [],
+                        "file_contract_compatible": False,
+                        "model_binding_status": "invalid",
+                        "has_sidecar": sidecar_path(path).is_file(),
+                        "speech_usable": False,
+                        "warnings": [],
+                        "errors": [str(error)],
+                    }
+                )
+        return resources
+
+    def _store_speaker(self, filename: str, body: bytes) -> dict[str, Any]:
+        name = _safe_name(filename, "speaker.speaker.safetensors")
+        if not SPEAKER_NAME_PATTERN.fullmatch(name):
+            raise ExperimentError(
+                "Speaker condition filename must end with .speaker.safetensors."
+            )
+        digest = hashlib.sha256(body).hexdigest()
+        temporary_root = self.upload_root / "speaker"
+        temporary_root.mkdir(parents=True, exist_ok=True)
+        temporary = temporary_root / f".{uuid.uuid4().hex}-{name}"
+        temporary.write_bytes(body)
+        try:
+            artifact = inspect_embedding(temporary)
+        except SpeakerConditionError as error:
+            temporary.unlink(missing_ok=True)
+            raise ExperimentError(f"Speaker condition is invalid: {error}") from error
+        if not artifact["upstream_file_contract_compatible"]:
+            temporary.unlink(missing_ok=True)
+            raise ExperimentError(
+                "Speaker condition does not satisfy the direct-state file contract: "
+                + ", ".join(artifact["file_errors"])
+            )
+
+        destination = self.speaker_root / name
+        if destination.exists():
+            existing_digest = hashlib.sha256(destination.read_bytes()).hexdigest()
+            if existing_digest == digest:
+                temporary.unlink(missing_ok=True)
+            else:
+                base = name[: -len(".speaker.safetensors")]
+                destination = self.speaker_root / (
+                    f"{base}-{digest[:8]}.speaker.safetensors"
+                )
+                temporary.replace(destination)
+        else:
+            temporary.replace(destination)
+        return {
+            "id": destination.name,
+            "label": destination.name,
+            "sha256": digest,
+            "shape": artifact["shape"],
+            "sidecar_name": sidecar_path(destination).name,
+            "speech_usable": True,
+        }
+
+    def _store_speaker_sidecar(
+        self,
+        target: str,
+        filename: str,
+        body: bytes,
+    ) -> dict[str, Any]:
+        if not SPEAKER_NAME_PATTERN.fullmatch(target):
+            raise ExperimentError("Speaker sidecar target is invalid.")
+        if Path(filename).suffix.lower() != ".json":
+            raise ExperimentError("Speaker sidecar must be JSON.")
+        try:
+            value = json.loads(body.decode("utf-8-sig"))
+        except (UnicodeDecodeError, json.JSONDecodeError) as error:
+            raise ExperimentError("Speaker sidecar must be valid UTF-8 JSON.") from error
+        if not isinstance(value, dict):
+            raise ExperimentError("Speaker sidecar JSON root must be an object.")
+        embedding_path = (self.speaker_root / target).resolve()
+        if embedding_path.parent != self.speaker_root.resolve() or not embedding_path.is_file():
+            raise ExperimentError("Managed speaker condition was not found.")
+        expected_sha = hashlib.sha256(embedding_path.read_bytes()).hexdigest()
+        if value.get("embedding", {}).get("sha256") != expected_sha:
+            raise ExperimentError("Speaker sidecar embedding SHA-256 does not match.")
+        destination = sidecar_path(embedding_path)
+        temporary = destination.with_suffix(".tmp")
+        temporary.write_text(
+            json.dumps(value, ensure_ascii=False, indent=2) + "\n",
+            encoding="utf-8",
+        )
+        temporary.replace(destination)
+        return {
+            "id": target,
+            "label": target,
+            "sidecar_name": destination.name,
+            "sha256": expected_sha,
         }
 
     @staticmethod

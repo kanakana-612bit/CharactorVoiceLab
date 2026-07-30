@@ -410,6 +410,7 @@ const els = {
   refreshExperimentsBtn: document.getElementById("refreshExperimentsBtn"),
   experimentToolButtons: Array.from(document.querySelectorAll(".experiment-tool-button")),
   experimentToolForms: Array.from(document.querySelectorAll(".experiment-tool-form")),
+  experimentSpeakerUpload: document.getElementById("experimentSpeakerUpload"),
   runtimeObservationForm: document.getElementById("runtimeObservationForm"),
   experimentObservationSteps: document.getElementById("experimentObservationSteps"),
   experimentObservationSpeaker: document.getElementById("experimentObservationSpeaker"),
@@ -5324,7 +5325,7 @@ function renderExperimentResources() {
   const resources = state.experimentResources || {};
   populateExperimentSelect(
     els.experimentObservationSpeaker,
-    resources.speaker_conditions,
+    resources.speech_speaker_conditions || resources.speaker_conditions,
     "使用しない",
   );
   populateExperimentSelect(els.experimentSpeakerEmbeddings, resources.speaker_conditions);
@@ -5512,10 +5513,11 @@ async function startExperiment(tool, options) {
   }
 }
 
-async function uploadExperimentFile(file, kind) {
+async function uploadExperimentFile(file, kind, target = "") {
   if (!file) return null;
   setExperimentStatus(`${file.name}をローカル実験領域へ登録しています。`);
   const query = new URLSearchParams({ kind, name: file.name });
+  if (target) query.set("target", target);
   const resource = await experimentApi(`/api/experiments/uploads?${query}`, {
     method: "POST",
     headers: { "Content-Type": file.type || "application/octet-stream" },
@@ -5524,6 +5526,49 @@ async function uploadExperimentFile(file, kind) {
   await refreshExperimentWorkspace({ silent: true });
   setExperimentStatus(`${file.name}を登録しました。`);
   return resource;
+}
+
+async function registerSpeakerConditionFiles(files) {
+  const selected = Array.from(files || []);
+  const embeddings = selected.filter((file) =>
+    file.name.toLowerCase().endsWith(".speaker.safetensors"),
+  );
+  const sidecars = selected.filter((file) => file.name.toLowerCase().endsWith(".json"));
+  if (!embeddings.length) {
+    throw new Error("`.speaker.safetensors`を1件以上選択してください。");
+  }
+  const expectedSidecarNames = new Set(
+    embeddings.map((file) => file.name.replace(/\.safetensors$/i, ".json").toLowerCase()),
+  );
+  const unmatched = sidecars.filter(
+    (file) => !expectedSidecarNames.has(file.name.toLowerCase()),
+  );
+  if (unmatched.length) {
+    throw new Error(
+      `対応する話者状態がないsidecarがあります: ${unmatched.map((file) => file.name).join(", ")}`,
+    );
+  }
+  const registered = [];
+  for (const embedding of embeddings) {
+    const resource = await uploadExperimentFile(embedding, "speaker");
+    if (!resource) continue;
+    registered.push(resource.id);
+    const expectedName = embedding.name.replace(/\.safetensors$/i, ".json");
+    const sidecar = sidecars.find(
+      (file) => file.name.toLowerCase() === expectedName.toLowerCase(),
+    );
+    if (sidecar) {
+      await uploadExperimentFile(sidecar, "speaker-sidecar", resource.id);
+    }
+  }
+  await refreshExperimentWorkspace({ silent: true });
+  if (registered.length) {
+    els.experimentObservationSpeaker.value = registered[registered.length - 1];
+    for (const option of els.experimentSpeakerEmbeddings.options) {
+      option.selected = registered.includes(option.value);
+    }
+  }
+  setExperimentStatus(`${registered.length}件の話者状態を管理領域へ登録しました。`);
 }
 
 async function registerCurrentExperimentProfile() {
@@ -5598,6 +5643,15 @@ function installExperimentHandlers() {
     registerCurrentExperimentProfile().catch((error) =>
       setExperimentStatus(`登録できません: ${error.message}`, true),
     );
+  });
+  els.experimentSpeakerUpload?.addEventListener("change", async (event) => {
+    try {
+      await registerSpeakerConditionFiles(event.target.files);
+    } catch (error) {
+      setExperimentStatus(`話者状態を登録できません: ${error.message}`, true);
+    } finally {
+      event.target.value = "";
+    }
   });
   els.experimentProfileUpload?.addEventListener("change", async (event) => {
     try {

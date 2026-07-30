@@ -154,6 +154,13 @@ rejected for speech generation. Patched native responses expose only the
 consumed state hash, shape, and input mode, allowing exact transport
 verification without serializing the embedding.
 
+The **Experiment** tab can register a `.speaker.safetensors` file without
+manually locating that runtime directory. Select its matching `.speaker.json`
+sidecar in the same file picker when provenance metadata is available. Every
+embedding is inspected before registration. Non-semantic format fixtures remain
+available to the compatibility checker but are excluded from the speech-parity
+selector.
+
 Run `verify_speaker_inversion.bat --create-format-fixture` on Windows or
 `./verify_speaker_inversion.sh --create-format-fixture` on Linux. Results are
 written under the ignored `speaker_condition_results/` directory. The exact

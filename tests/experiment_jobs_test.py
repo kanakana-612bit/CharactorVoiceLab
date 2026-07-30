@@ -3,6 +3,9 @@ import pathlib
 import unittest
 import uuid
 
+import torch
+from safetensors.torch import save_file
+
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 
@@ -104,6 +107,61 @@ class ExperimentJobManagerTest(unittest.TestCase):
         )
         self.assertIn("--profile", command)
         self.assertEqual(safe["profile_id"], profile["id"])
+
+    def test_speaker_condition_registration_and_fixture_filtering(self):
+        source = self.root / "character-a.speaker.safetensors"
+        save_file({"speaker_embedding": torch.zeros((16, 768))}, str(source))
+        registered = self.manager.store_upload(
+            "speaker",
+            source.name,
+            source.read_bytes(),
+        )
+        resources = self.manager.resources()
+        self.assertIn(
+            registered["id"],
+            {item["id"] for item in resources["speech_speaker_conditions"]},
+        )
+
+        sidecar = {
+            "schema_version": "speaker_condition_artifact_0.1",
+            "embedding": {
+                "file": registered["id"],
+                "sha256": registered["sha256"],
+            },
+            "model": {},
+            "provenance": {
+                "kind": "deterministic_format_fixture",
+                "semantic_voice": False,
+                "training_data_used": False,
+            },
+            "privacy": {
+                "contains_audio": False,
+                "contains_text": False,
+                "contains_person_identifier": False,
+            },
+        }
+        self.manager.store_upload(
+            "speaker-sidecar",
+            "character-a.speaker.json",
+            json.dumps(sidecar).encode(),
+            target=registered["id"],
+        )
+        resources = self.manager.resources()
+        self.assertIn(
+            registered["id"],
+            {item["id"] for item in resources["speaker_conditions"]},
+        )
+        self.assertNotIn(
+            registered["id"],
+            {item["id"] for item in resources["speech_speaker_conditions"]},
+        )
+
+        with self.assertRaises(ExperimentError):
+            self.manager.store_upload(
+                "speaker",
+                "broken.speaker.safetensors",
+                b"not safetensors",
+            )
 
 
 if __name__ == "__main__":
