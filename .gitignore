@@ -7,4 +7,7 @@ __pycache__/
 data/source_pdfs/
 tmp/
 runtime/
+benchmark_results/*
+!benchmark_results/published/
+!benchmark_results/published/**
 server.character_voice_designer.json

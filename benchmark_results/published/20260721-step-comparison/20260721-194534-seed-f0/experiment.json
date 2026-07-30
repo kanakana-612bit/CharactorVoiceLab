@@ -1,0 +1,20 @@
+{
+  "schema_version": "seed_f0_benchmark_experiment_0.1",
+  "created_at": "2026-07-21T19:45:34.484624+09:00",
+  "purpose": "test whether low-step seed F0 predicts final-step seed F0 without waveform correction",
+  "sample_count": 10,
+  "seed_start": 184568213,
+  "low_steps": 35,
+  "final_steps": 40,
+  "analysis_seconds": 3.0,
+  "target_f0_hz": 247.07,
+  "text": "これは評価用サンプルです。",
+  "caption": "若い女性。自然な明るさの音色。小さく前寄りの共鳴、気息感の少ない明瞭な声質。自然で聞き取りやすい構音、安定した発声、自然な話速で話す。",
+  "model": "irodori-vdes",
+  "caption_guidance_scale": 3.0,
+  "duration_scale": 1.0,
+  "bridge_url": "http://127.0.0.1:8765",
+  "postprocess_enabled": false,
+  "profile_source_name": "20260721-character-voice_Sample.zip",
+  "profile_source_sha256": "07d042e614a8b0bf5d97a622698800bf66dec144459935009d66aee433bad19d"
+}

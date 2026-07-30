@@ -146,6 +146,49 @@ def _encode_pcm16_mono(samples: Any, sample_rate: int) -> bytes:
     return output.getvalue()
 
 
+def analyze_wav_f0(
+    wav_bytes: bytes,
+    maximum_seconds: float | None = None,
+) -> dict[str, float | int | str]:
+    """Measure an unmodified PCM16 WAV with WORLD for reproducible benchmarks."""
+
+    if not world_available():
+        status = postprocess_dependency_status()
+        failures = [
+            f"{name}: {item['error'] or 'not installed'}"
+            for name, item in status.items()
+            if name in {"numpy", "pyworld"} and not item["available"]
+        ]
+        raise AudioPostprocessError(
+            "WORLD F0 analysis is unavailable (" + "; ".join(failures) + ")."
+        )
+    samples, sample_rate = _decode_pcm16_mono(wav_bytes)
+    original_sample_count = int(samples.size)
+    if maximum_seconds is not None:
+        if not 0.2 <= maximum_seconds <= 60.0:
+            raise AudioPostprocessError("F0 analysis duration must be between 0.2 and 60 seconds.")
+        samples = samples[: max(1, min(samples.size, round(sample_rate * maximum_seconds)))]
+    f0, _time_axis, median_hz = _analyze_f0(samples, sample_rate)
+    voiced = f0[f0 > 0.0]
+    peak = float(np.max(np.abs(samples))) if samples.size else 0.0
+    rms = float(np.sqrt(np.mean(samples * samples))) if samples.size else 0.0
+    return {
+        "schema_version": "world_f0_measurement_0.1",
+        "method": "world_dio_stonemask",
+        "sample_rate_hz": sample_rate,
+        "source_duration_seconds": round(original_sample_count / sample_rate, 6),
+        "analyzed_duration_seconds": round(samples.size / sample_rate, 6),
+        "median_f0_hz": round(median_hz, 6),
+        "mean_f0_hz": round(float(np.mean(voiced)), 6),
+        "f0_p10_hz": round(float(np.percentile(voiced, 10)), 6),
+        "f0_p90_hz": round(float(np.percentile(voiced, 90)), 6),
+        "voiced_frame_count": int(voiced.size),
+        "voiced_frame_ratio": round(float(voiced.size / max(1, f0.size)), 6),
+        "rms": round(rms, 8),
+        "peak": round(peak, 8),
+    }
+
+
 def correct_wav_f0(
     wav_bytes: bytes,
     target_hz: float,

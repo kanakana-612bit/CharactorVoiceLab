@@ -253,4 +253,25 @@ node tests/landmark_schema.test.js
 node tests/voice_control_profile.test.js
 node tests/tube_synthesis_smoke.test.js
 runtime/mm/Scripts/python.exe -m unittest tests/designer_server_test.py tests/audio_postprocess_test.py
+runtime/mm/Scripts/python.exe -m unittest tests/seed_f0_benchmark_test.py
 ```
+
+## Seed/F0 screening benchmark
+
+`seed_f0_benchmark.py` runs a local two-stage pilot experiment without waveform pitch correction. By default it pairs 10 deterministic seeds at 4 and 40 inference steps, measures up to three seconds with WORLD, and writes the original WAV files plus CSV/JSON correlation results under the ignored portion of `benchmark_results/`.
+
+Start the WebUI services, export a profile or project package, then run:
+
+```powershell
+.\benchmark_f0.bat --profile "path\to\profile.json"
+```
+
+```bash
+bash ./benchmark_f0.sh --profile "/path/to/project.zip"
+```
+
+The exact protocol, metrics, interpretation, limitations, and the curated
+4/10/20/35-to-40-step pilot are documented in
+[`BENCHMARK_PROTOCOL.md`](BENCHMARK_PROTOCOL.md). Provenance-checked pilot
+artifacts, including the generated WAV files, are archived under
+[`benchmark_results/published/`](benchmark_results/published/).

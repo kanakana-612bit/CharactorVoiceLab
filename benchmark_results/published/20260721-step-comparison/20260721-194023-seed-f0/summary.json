@@ -1,0 +1,23 @@
+{
+  "schema_version": "seed_f0_benchmark_summary_0.1",
+  "complete_pairs": 10,
+  "pearson_low_to_final_f0": 0.616062,
+  "spearman_low_to_final_f0": 0.357576,
+  "mean_absolute_low_to_final_semitones": 1.02441,
+  "selected_by_low_steps": {
+    "seed": 184568216,
+    "low_f0_hz": 252.88433,
+    "final_f0_hz": 276.974021,
+    "low_target_error_semitones": 0.402694,
+    "final_target_error_semitones": 1.97797
+  },
+  "oracle_selected_by_final_steps": {
+    "seed": 184568221,
+    "low_f0_hz": 226.430714,
+    "final_f0_hz": 238.495824,
+    "low_target_error_semitones": 1.510202,
+    "final_target_error_semitones": 0.61147
+  },
+  "selection_regret_semitones": 1.3665,
+  "total_elapsed_seconds": 22.670484
+}
