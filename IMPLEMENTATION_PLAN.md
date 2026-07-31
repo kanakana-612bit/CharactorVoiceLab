@@ -60,6 +60,35 @@ Next evaluation work:
 4. derive selection rules only after repeated trials establish stable
    within-condition variance.
 
+## 2026-07-31 Standard Generation And Identity Compilation
+
+Implemented:
+
+1. normal TTS generation is fixed at 20 Steps and one candidate in both the
+   normal UI and the server-side `standard_single` request mode;
+2. every normal result receives local F0, waveform-quality, spectral, delivery,
+   and optional compiled-calibration distance evaluation;
+3. thresholds remain provisional, warnings do not discard audio, and automatic
+   retry is disabled;
+4. Speaker state, Style snapshot, and calibration WAV analyses are stored
+   separately and linked through a compiled voice-identity manifest;
+5. the TTS screen displays fixed-state, model-compatibility, calibration, and
+   evaluation status without exposing candidate-count or variable-Step controls;
+6. the Experiment screen independently generates 4/8/12/16/20 Step predicted
+   audio for each seed and reports the earliest acoustic-proxy stabilization
+   point and timing budget.
+
+Adoption gates:
+
+1. enable at most one automatic retry only after held-out trials validate the
+   warning threshold;
+2. do not call the current five-point experiment latent selection: it performs
+   independent same-seed generations because reusable intermediate states are
+   not available;
+3. implement common-prefix two-branch inference only when identity proxies
+   settle by 12 Steps across the test set and measured native branch runtime is
+   lower than one 20 Step generation plus one retry.
+
 ## 2026-07-30 Speaker Condition Reference Milestone
 
 Implemented:

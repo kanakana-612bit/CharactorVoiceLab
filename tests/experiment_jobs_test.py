@@ -43,6 +43,7 @@ class ExperimentJobManagerTest(unittest.TestCase):
                 "runtime_observation",
                 "speaker_compatibility",
                 "seed_f0",
+                "step_stability",
                 "voice_evaluation",
                 "runtime_diagnostics",
             },
@@ -107,6 +108,26 @@ class ExperimentJobManagerTest(unittest.TestCase):
         )
         self.assertIn("--profile", command)
         self.assertEqual(safe["profile_id"], profile["id"])
+
+    def test_step_stability_uses_fixed_schedule_and_bounded_samples(self):
+        command, output, safe = self.manager._build_command(
+            "20260730T120000-1234abcd",
+            "step_stability",
+            {
+                "samples": 3,
+                "seed_start": 5,
+                "target_f0": 180,
+                "text": "test",
+                "caption": "voice",
+                "model": "irodori-vdes",
+                "caption_guidance": 2,
+                "duration_scale": 1,
+            },
+        )
+        self.assertIn(str((self.root / "step_stability_benchmark.py").resolve()), command)
+        self.assertEqual(safe["step_schedule"], [4, 8, 12, 16, 20])
+        self.assertEqual(safe["samples"], 3)
+        self.assertTrue(str(output).startswith(str(self.root)))
 
     def test_speaker_condition_registration_and_fixture_filtering(self):
         source = self.root / "character-a.speaker.safetensors"

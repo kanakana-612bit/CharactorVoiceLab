@@ -140,6 +140,12 @@ class ExperimentJobManager:
             "requires_audio_cpp": True,
         },
         {
+            "id": "step_stability",
+            "label": "段階別安定性",
+            "description": "同一seedを4/8/12/16/20 Stepで生成し、音響proxyの確定時点を調べます。",
+            "requires_audio_cpp": True,
+        },
+        {
             "id": "voice_evaluation",
             "label": "生成音声評価",
             "description": "WAVのF0、波形品質、スペクトル距離をローカルで数値化します。",
@@ -675,6 +681,86 @@ class ExperimentJobManager:
             }
             return command, output, safe
 
+        if tool == "step_stability":
+            output = (
+                self.project_root
+                / "benchmark_results"
+                / f"{stamp}-{job_id[-8:]}-step-stability"
+            )
+            samples = _number(options.get("samples", 3), "samples", 1, 10, integer=True)
+            seed_start = _number(
+                options.get("seed_start", 20260719),
+                "seed_start",
+                0,
+                2147483647 - samples,
+                integer=True,
+            )
+            target_f0 = _optional_number(options.get("target_f0"), "target_f0", 60, 500)
+            text = _text(options.get("text"), "text", 5000, required=True)
+            caption = _text(options.get("caption"), "caption", 2000)
+            model = _text(options.get("model", "irodori-vdes"), "model", 128, required=True)
+            if not re.fullmatch(r"[A-Za-z0-9_.:-]{1,128}", model):
+                raise ExperimentError("model is invalid.")
+            caption_guidance = _number(
+                options.get("caption_guidance", 2),
+                "caption_guidance",
+                0.5,
+                10,
+            )
+            duration_scale = _number(
+                options.get("duration_scale", 1),
+                "duration_scale",
+                0.5,
+                2,
+            )
+            command = [
+                python,
+                str(self.project_root / "step_stability_benchmark.py"),
+                "--samples",
+                str(samples),
+                "--seed-start",
+                str(seed_start),
+                "--text",
+                text,
+                "--caption",
+                caption,
+                "--model",
+                model,
+                "--caption-guidance",
+                str(caption_guidance),
+                "--duration-scale",
+                str(duration_scale),
+                "--bridge-url",
+                self.bridge_base_url,
+                "--output",
+                str(output),
+            ]
+            profile_id = _text(options.get("profile_id"), "profile_id", 256)
+            if profile_id:
+                profile = self._resolve_upload(profile_id, "profile")
+                command.extend(["--profile", str(profile)])
+            speaker = _text(options.get("speaker_condition"), "speaker_condition", 160)
+            speaker_name = None
+            if speaker:
+                speaker_name, _ = self._resolve_speaker(speaker)
+                command.extend(["--speaker-condition", speaker_name])
+            if target_f0 is not None:
+                command.extend(["--target-f0", str(target_f0)])
+            safe = {
+                "samples": samples,
+                "seed_start": seed_start,
+                "step_schedule": [4, 8, 12, 16, 20],
+                "target_f0": target_f0,
+                "model": model,
+                "caption_guidance": caption_guidance,
+                "duration_scale": duration_scale,
+                "profile_id": profile_id or None,
+                "speaker_condition": speaker_name,
+                "text_characters": len(text),
+                "caption_characters": len(caption),
+            }
+            return command, output, safe
+
         if tool == "voice_evaluation":
             output = self.project_root / "evaluation_results" / f"{stamp}-{job_id[-8:]}"
             inputs = self._resolve_resource_list(options.get("inputs"), "inputs", required=True)
@@ -830,8 +916,19 @@ class ExperimentJobManager:
             lines = deque(job["log_lines"], maxlen=MAX_LOG_LINES)
             lines.append(line[:4000])
             job["log_lines"] = list(lines)
+            generic_match = re.search(r"\[progress\s+([0-9]+)/([0-9]+)\]", line)
             match = re.search(r"\[(low|final)\s+([0-9]+)/([0-9]+)\]", line)
-            if match:
+            if generic_match:
+                current, total = generic_match.groups()
+                current_int = int(current)
+                total_int = int(total)
+                job["progress"] = {
+                    "phase": "step stability",
+                    "current": current_int,
+                    "total": total_int,
+                    "ratio": current_int / total_int,
+                }
+            elif match:
                 phase, current, total = match.groups()
                 current_int = int(current)
                 total_int = int(total)
@@ -870,6 +967,7 @@ class ExperimentJobManager:
         job["artifacts"] = artifacts[:500]
         summary_names = {
             "seed_f0": "summary.json",
+            "step_stability": "summary.json",
             "voice_evaluation": "evaluation.json",
             "speaker_compatibility": "compatibility.json",
             "runtime_observation": "observation_runtime.json",
@@ -884,6 +982,7 @@ class ExperimentJobManager:
                     pass
         report_names = {
             "seed_f0": "BENCHMARK_REPORT.md",
+            "step_stability": "STEP_STABILITY_REPORT.md",
             "voice_evaluation": "EVALUATION_REPORT.md",
             "speaker_compatibility": "SPEAKER_INVERSION_COMPATIBILITY_REPORT.md",
         }

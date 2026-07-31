@@ -110,6 +110,18 @@ class SpeechRequestValidationTest(unittest.TestCase):
         self.assertEqual(observation["latent_snapshot_steps"], [4, 20])
         self.assertNotIn("observation", request)
 
+    def test_standard_single_mode_forces_twenty_steps(self):
+        request = MODULE.validate_speech_request(
+            {
+                "model": "irodori-vdes",
+                "input": "test",
+                "generation_mode": "standard_single",
+                "num_inference_steps": 80,
+            }
+        )
+        self.assertEqual(request["num_inference_steps"], 20)
+        self.assertNotIn("generation_mode", request)
+
     def test_invalid_observation_snapshot_step_is_rejected(self):
         with self.assertRaises(ValueError):
             MODULE.validate_speech_request(
@@ -344,6 +356,7 @@ class LocalProxyIntegrationTest(unittest.TestCase):
             bridge_base_url=f"http://127.0.0.1:{self.designer.server_port}",
             audio_cpp_base_url=self.designer.audio_cpp_base_url,
         )
+        self.designer.voice_identity_store = MODULE.VoiceIdentityStore(self.experiment_root)
         self.designer_thread = threading.Thread(target=self.designer.serve_forever, daemon=True)
         self.designer_thread.start()
         self.base_url = f"http://127.0.0.1:{self.designer.server_port}"
@@ -371,6 +384,7 @@ class LocalProxyIntegrationTest(unittest.TestCase):
         self.assertTrue(catalog["local_only"])
         self.assertEqual(catalog["max_parallel_jobs"], 1)
         self.assertIn("seed_f0", {tool["id"] for tool in catalog["tools"]})
+        self.assertIn("step_stability", {tool["id"] for tool in catalog["tools"]})
 
         wav = b"RIFF" + (4).to_bytes(4, "little") + b"WAVE"
         request = urllib.request.Request(
@@ -386,6 +400,13 @@ class LocalProxyIntegrationTest(unittest.TestCase):
         with urllib.request.urlopen(self.base_url + "/api/experiments/resources") as response:
             resources = json.load(response)
         self.assertIn(uploaded["id"], {item["id"] for item in resources["voice_inputs"]})
+
+    def test_voice_identity_resources_expose_standard_single_policy(self):
+        with urllib.request.urlopen(self.base_url + "/api/voice-identities/resources") as response:
+            resources = json.load(response)
+        self.assertEqual(resources["standard_generation"]["num_inference_steps"], 20)
+        self.assertEqual(resources["standard_generation"]["candidate_count"], 1)
+        self.assertFalse(resources["standard_generation"]["automatic_retry"])
 
     def test_models_and_wav_are_proxied(self):
         with urllib.request.urlopen(self.base_url + "/api/audio-cpp/models") as response:

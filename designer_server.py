@@ -41,6 +41,7 @@ from experiment_jobs import (
     ExperimentNotFoundError,
     MAX_UPLOAD_BYTES,
 )
+from voice_identity import VoiceIdentityError, VoiceIdentityStore
 
 
 PROJECT_ROOT = Path(__file__).resolve().parent
@@ -73,6 +74,7 @@ class DesignerServer(ThreadingHTTPServer):
     upstream_timeout_seconds: float
     observation_store: ObservationStore
     experiment_manager: ExperimentJobManager
+    voice_identity_store: VoiceIdentityStore
 
 
 class DesignerHandler(SimpleHTTPRequestHandler):
@@ -94,6 +96,19 @@ class DesignerHandler(SimpleHTTPRequestHandler):
 
     def do_GET(self) -> None:  # noqa: N802 - stdlib handler API
         path = urllib.parse.urlsplit(self.path).path
+        if path == "/api/voice-identities/resources":
+            self._send_json(HTTPStatus.OK, self.server.voice_identity_store.resources())
+            return
+        identity_match = re.fullmatch(r"/api/voice-identities/([^/]+)", path)
+        if identity_match:
+            try:
+                self._send_json(
+                    HTTPStatus.OK,
+                    self.server.voice_identity_store.read(identity_match.group(1)),
+                )
+            except VoiceIdentityError as error:
+                self._send_json(HTTPStatus.NOT_FOUND, {"error": str(error)})
+            return
         if path == "/api/experiments/catalog":
             self._send_json(HTTPStatus.OK, self.server.experiment_manager.catalog())
             return
@@ -218,6 +233,39 @@ class DesignerHandler(SimpleHTTPRequestHandler):
     def do_POST(self) -> None:  # noqa: N802 - stdlib handler API
         parsed = urllib.parse.urlsplit(self.path)
         path = parsed.path
+        if path == "/api/voice-identities/compile":
+            try:
+                identity = self.server.voice_identity_store.compile(self._read_json())
+                self._send_json(HTTPStatus.CREATED, identity)
+            except (VoiceIdentityError, ValueError) as error:
+                self._send_json(HTTPStatus.BAD_REQUEST, {"error": str(error)})
+            return
+        if path == "/api/voice-identities/calibrations":
+            query = urllib.parse.parse_qs(parsed.query)
+            name = query.get("name", ["calibration.wav"])[0]
+            try:
+                calibration = self.server.voice_identity_store.store_calibration(
+                    name,
+                    self._read_body(MAX_AUDIO_BYTES),
+                )
+                self._send_json(HTTPStatus.CREATED, calibration)
+            except (VoiceIdentityError, ValueError) as error:
+                self._send_json(HTTPStatus.BAD_REQUEST, {"error": str(error)})
+            return
+        identity_evaluation_match = re.fullmatch(
+            r"/api/voice-identities(?:/([^/]+))?/evaluate",
+            path,
+        )
+        if identity_evaluation_match:
+            try:
+                evaluation = self.server.voice_identity_store.evaluate(
+                    self._read_body(MAX_AUDIO_BYTES),
+                    identity_evaluation_match.group(1),
+                )
+                self._send_json(HTTPStatus.OK, evaluation)
+            except (VoiceIdentityError, ValueError) as error:
+                self._send_json(HTTPStatus.BAD_REQUEST, {"error": str(error)})
+            return
         if path == "/api/experiments/jobs":
             try:
                 payload = self._read_json()
@@ -580,20 +628,32 @@ def validate_speech_request(payload: dict[str, Any]) -> dict[str, Any]:
     model = payload.get("model")
     text = payload.get("input")
     language = payload.get("language", "ja")
+    generation_mode = payload.get("generation_mode", "experimental")
     if not isinstance(model, str) or not MODEL_ID_PATTERN.fullmatch(model):
         raise ValueError("model must be a configured audio.cpp model id.")
     if not isinstance(text, str) or not text.strip() or len(text) > 5000:
         raise ValueError("input must contain 1 to 5000 characters.")
     if not isinstance(language, str) or not LANGUAGE_PATTERN.fullmatch(language):
         raise ValueError("language is invalid.")
+    if generation_mode not in {"experimental", "standard_single"}:
+        raise ValueError("generation_mode is invalid.")
 
     request: dict[str, Any] = {
         "model": model,
         "input": text.strip(),
         "language": language,
         "seed": int(bounded_number(payload.get("seed", 20260719), "seed", 0, 2147483647)),
-        "num_inference_steps": int(
-            bounded_number(payload.get("num_inference_steps", 40), "num_inference_steps", 4, 100)
+        "num_inference_steps": (
+            20
+            if generation_mode == "standard_single"
+            else int(
+                bounded_number(
+                    payload.get("num_inference_steps", 20),
+                    "num_inference_steps",
+                    4,
+                    100,
+                )
+            )
         ),
     }
     raw_options = payload.get("options", {})
@@ -680,6 +740,7 @@ def main() -> None:
     server.audio_cpp_base_url = normalize_upstream_url(args.audio_cpp_url)
     server.upstream_timeout_seconds = max(1, args.upstream_timeout)
     server.observation_store = ObservationStore(PROJECT_ROOT / "runtime" / "observations", PROJECT_ROOT)
+    server.voice_identity_store = VoiceIdentityStore(PROJECT_ROOT)
     server.experiment_manager = ExperimentJobManager(
         PROJECT_ROOT,
         bridge_base_url=f"http://{bind_host}:{server.server_port}",

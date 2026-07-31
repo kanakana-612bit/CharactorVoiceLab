@@ -78,6 +78,25 @@ the sample.
 
 The current TTS adapter targets a local `audio.cpp` server and Japanese VoiceDesign inference path. The browser does not load native inference code or model weights. `designer_server.py` serves the independent WebUI and exposes a narrow same-origin bridge to the selected loopback audio.cpp port.
 
+Normal TTS generation is deliberately fixed to **20 inference Steps and one
+candidate**. The returned WAV is analyzed locally for F0, waveform quality, and
+lightweight within-character acoustic distance. The current policy only displays
+warnings: it does not discard the result or retry automatically. A maximum of one
+retry remains disabled until calibration data demonstrate that the warning threshold
+is reliable.
+
+The **Compile Voice Identity** operation stores and links three distinct local
+components:
+
+- a managed Speaker condition, when the selected model supports it;
+- a Style snapshot derived from the current VoiceControlProfile;
+- user-selected calibration WAV analyses.
+
+The compiled manifest records model compatibility and the fixed generation policy.
+Speaker tensors, Style JSON, calibration WAVs, and compiled manifests remain separate
+under ignored `runtime/` directories. Compiled proxy distances are engineering
+warnings, not speaker-identification claims.
+
 To start only the WebUI bridge:
 
 ```powershell
@@ -255,7 +274,7 @@ Not implemented in this MVP:
 - SMPL-X, MediaPipe Face Mesh, DensePose, or robust background removal
 - VocalTractLab adapter
 - direct low-level control of learned TTS latent variables beyond the current caption/duration adapter; exact median F0 is available only as an explicit WORLD-measured, Praat-PSOLA waveform postprocess
-- native injection of an optimized Irodori Speaker Inversion embedding; only format, model, provenance, and runtime-capability validation are implemented
+- optimization of a new Speaker Inversion embedding from calibration audio; compatible precomputed states can already be validated and injected by the patched local runtime
 - validated anthropometric database
 - validated mapping from external neck breadth to internal airway dimensions; the prototype deliberately does not make that inference
 - participant-level linkage across external data sources
@@ -314,15 +333,18 @@ node tests/tube_synthesis_smoke.test.js
 runtime/mm/Scripts/python.exe -m unittest tests/designer_server_test.py tests/audio_postprocess_test.py
 runtime/mm/Scripts/python.exe -m unittest tests/experiment_jobs_test.py
 runtime/mm/Scripts/python.exe -m unittest tests/seed_f0_benchmark_test.py
+runtime/mm/Scripts/python.exe -m unittest tests/step_stability_benchmark_test.py
 runtime/mm/Scripts/python.exe -m unittest tests/voice_evaluator_test.py
+runtime/mm/Scripts/python.exe -m unittest tests/voice_identity_test.py
 ```
 
 ## Experiment workspace
 
 The **Experiment** tab beside **TTS Model** is the primary interface for local
 research utilities. It runs generation-observation parity checks, Speaker
-Inversion compatibility checks, Seed/F0 benchmarks, generated-voice evaluation,
-and dependency diagnostics without requiring users to type filesystem paths.
+Inversion compatibility checks, Seed/F0 benchmarks, 4/8/12/16/20 Step stability
+experiments, generated-voice evaluation, and dependency diagnostics without
+requiring users to type filesystem paths.
 Long jobs run asynchronously one at a time, with progress, logs, reports, WAV
 playback, and artifact downloads available in the same tab.
 
@@ -352,6 +374,21 @@ The exact protocol, metrics, interpretation, limitations, and the curated
 [`BENCHMARK_PROTOCOL.md`](BENCHMARK_PROTOCOL.md). Provenance-checked pilot
 artifacts, including the generated WAV files, are archived under
 [`benchmark_results/published/`](benchmark_results/published/).
+
+## Step stability benchmark
+
+`step_stability_benchmark.py` independently generates the same seed at 4, 8,
+12, 16, and 20 Steps. It compares each predicted WAV with its 20 Step result
+using local source/prosody, spectral, and delivery proxies, then reports the
+earliest provisional stabilization point and measured timing.
+
+This is an adoption test, not a shared-prefix implementation. The current
+audio.cpp observation contract does not expose reusable intermediate latents.
+Common-prefix two-branch generation remains disabled unless all tested voices
+stabilize sufficiently early and a future native implementation is measured to
+be faster than one 20 Step generation plus one retry. The tool is available
+from the **Experiment** tab and stores its JSON, report, and WAV artifacts under
+the ignored `benchmark_results/` directory.
 
 ## Local Voice Evaluation
 

@@ -604,13 +604,13 @@
               <input id="ttsSeedInput" type="number" min="0" max="2147483647" step="1" value="20260719" />
             </label>
             <label>
-              推論ステップ
-              <input id="ttsInferenceStepsInput" type="number" min="4" max="100" step="1" value="40" />
-            </label>
-            <label>
               Caption CFG
               <input id="ttsCaptionGuidanceInput" type="number" min="0.5" max="10" step="0.1" value="2" />
             </label>
+          </div>
+          <div class="standard-generation-policy">
+            <strong>標準生成: 20 Step / 1候補</strong>
+            <span>生成後に軽量評価を行い、閾値超過は警告のみ表示します。自動再試行は行いません。</span>
           </div>
           <div class="f0-correction-control">
             <label class="check-line">
@@ -632,6 +632,105 @@
             <button id="regenerateTtsCaptionBtn" type="button">設計値から再生成</button>
           </div>
           <p class="note">現在の第一候補は日本語のIrodori-TTS-600M-v3-VoiceDesignです。モデルはaudio.cppサーバー側で管理します。</p>
+        </section>
+
+        <section class="pane identity-compiler-panel">
+          <div class="pane-head">
+            <div>
+              <span class="section-kicker">Compiled voice identity</span>
+              <h2>音声同一性をコンパイル</h2>
+            </div>
+            <button id="refreshVoiceIdentitiesBtn" type="button">状態更新</button>
+          </div>
+          <div class="identity-compiler-toolbar">
+            <label>
+              コンパイル名
+              <input id="voiceIdentityNameInput" type="text" value="voice_profile" maxlength="64" />
+            </label>
+            <label>
+              通常生成で使用
+              <select id="compiledVoiceIdentitySelect">
+                <option value="">未コンパイル（軽量評価のみ）</option>
+              </select>
+            </label>
+            <button id="compileVoiceIdentityBtn" class="primary" type="button">音声同一性をコンパイル</button>
+          </div>
+
+          <div class="identity-component-grid">
+            <section class="identity-component">
+              <div class="identity-component-heading">
+                <span>01</span>
+                <div>
+                  <strong>Speaker</strong>
+                  <p>固定Speaker Embeddingとモデル互換性</p>
+                </div>
+              </div>
+              <label>
+                管理済み話者状態
+                <select id="identitySpeakerSelect">
+                  <option value="">使用しない</option>
+                </select>
+              </label>
+              <label class="file-command">
+                Speakerを登録
+                <input
+                  id="identitySpeakerUpload"
+                  type="file"
+                  accept=".safetensors,.json,application/json"
+                  multiple
+                />
+              </label>
+              <p id="identitySpeakerStatus" class="identity-component-status">未選択</p>
+            </section>
+
+            <section class="identity-component">
+              <div class="identity-component-heading">
+                <span>02</span>
+                <div>
+                  <strong>Style</strong>
+                  <p>現在のVoiceControlProfileを固定スナップショット化</p>
+                </div>
+              </div>
+              <label>
+                Style状態
+                <select id="identityStyleSelect">
+                  <option value="">現在のVoiceControlProfileを新規固定</option>
+                </select>
+              </label>
+              <dl class="identity-compact-values">
+                <div><dt>F0</dt><dd id="identityCompileStyleF0">-</dd></div>
+                <div><dt>声道長</dt><dd id="identityCompileStyleVtl">-</dd></div>
+                <div><dt>Caption CFG</dt><dd id="identityCompileStyleCfg">-</dd></div>
+              </dl>
+              <p id="identityStyleStatus" class="identity-component-status">現在の設計値をコンパイル時に固定します。</p>
+            </section>
+
+            <section class="identity-component">
+              <div class="identity-component-heading">
+                <span>03</span>
+                <div>
+                  <strong>校正音声</strong>
+                  <p>話者距離と音響値のローカル比較基準</p>
+                </div>
+              </div>
+              <select id="identityCalibrationSelect" multiple size="5" aria-label="校正音声"></select>
+              <label class="file-command">
+                校正WAVを登録
+                <input id="identityCalibrationUpload" type="file" accept=".wav,audio/wav" multiple />
+              </label>
+              <p id="identityCalibrationStatus" class="identity-component-status">3件以上を推奨。閾値は当面、警告専用です。</p>
+            </section>
+          </div>
+
+          <div class="compiled-identity-status">
+            <div><span>固定Embedding</span><strong id="compiledIdentitySpeakerValue">-</strong></div>
+            <div><span>モデル互換性</span><strong id="compiledIdentityCompatibilityValue">-</strong></div>
+            <div><span>校正数</span><strong id="compiledIdentityCalibrationValue">0</strong></div>
+            <div><span>評価方針</span><strong id="compiledIdentityPolicyValue">警告のみ</strong></div>
+          </div>
+          <p id="voiceIdentityCompileStatus" class="status-line">
+            Speaker、Style、校正音声は別々に保存され、コンパイル済みマニフェストから参照されます。
+          </p>
         </section>
       </section>
 
@@ -671,6 +770,7 @@
             <button class="experiment-tool-button active" type="button" data-experiment-tool="runtime_observation">観測疎通</button>
             <button class="experiment-tool-button" type="button" data-experiment-tool="speaker_compatibility">Speaker互換性</button>
             <button class="experiment-tool-button" type="button" data-experiment-tool="seed_f0">Seed / F0</button>
+            <button class="experiment-tool-button" type="button" data-experiment-tool="step_stability">段階別安定性</button>
             <button class="experiment-tool-button" type="button" data-experiment-tool="voice_evaluation">音声評価</button>
             <button class="experiment-tool-button" type="button" data-experiment-tool="runtime_diagnostics">環境診断</button>
           </div>
@@ -801,6 +901,64 @@
               </label>
             </form>
 
+            <form id="stepStabilityForm" class="experiment-tool-form" data-experiment-form="step_stability" hidden>
+              <div class="experiment-form-head">
+                <div>
+                  <h3>4 / 8 / 12 / 16 / 20 Step安定性</h3>
+                  <p>
+                    同一seedの予測音声を各Stepで独立生成し、音響proxyがいつ20 Step結果へ収束するかを調べます。
+                    共通prefixや中間latentの再利用はまだ行いません。
+                  </p>
+                </div>
+                <button class="primary" type="submit">実行</button>
+              </div>
+              <div class="experiment-resource-row">
+                <label>
+                  プロファイル
+                  <select id="experimentStabilityProfile"></select>
+                </label>
+                <button id="experimentStabilityUseCurrentProfileBtn" type="button">現在値を登録</button>
+                <label>
+                  Speaker状態
+                  <select id="experimentStabilitySpeaker"></select>
+                </label>
+              </div>
+              <div class="experiment-field-grid">
+                <label>
+                  Seed数
+                  <input id="experimentStabilitySamples" type="number" min="1" max="10" step="1" value="3" />
+                </label>
+                <label>
+                  開始seed
+                  <input id="experimentStabilitySeed" type="number" min="0" max="2147483647" step="1" value="20260719" />
+                </label>
+                <label>
+                  目標F0 (Hz)
+                  <input id="experimentStabilityTargetF0" type="number" min="60" max="500" step="1" />
+                </label>
+                <label>
+                  Caption CFG
+                  <input id="experimentStabilityCfg" type="number" min="0.5" max="10" step="0.1" value="2" />
+                </label>
+                <label>
+                  発話時間倍率
+                  <input id="experimentStabilityDuration" type="number" min="0.5" max="2" step="0.05" value="1" />
+                </label>
+              </div>
+              <p class="note">
+                既定3 seedでは15回生成します。分岐採用は、12 Step以前の安定と、
+                共通prefix実装後の実測時間が「20 Step単発＋最大1回再試行」未満であることの両方を必要とします。
+              </p>
+              <label class="stacked-field">
+                読み上げテキスト
+                <textarea id="experimentStabilityText" rows="3" maxlength="5000">これは短い音声生成の実験です。</textarea>
+              </label>
+              <label class="stacked-field">
+                VoiceDesign caption
+                <textarea id="experimentStabilityCaption" rows="3" maxlength="2000"></textarea>
+              </label>
+            </form>
+
             <form id="voiceEvaluationForm" class="experiment-tool-form" data-experiment-form="voice_evaluation" hidden>
               <div class="experiment-form-head">
                 <div>
@@ -918,6 +1076,16 @@
           </div>
           <audio id="ttsDemoAudio" class="tts-demo-audio" controls></audio>
           <p id="ttsDemoStatus" class="status-line">audio.cppへ接続するとローカルで音声を生成できます。</p>
+          <section id="ttsIdentityEvaluation" class="tts-identity-evaluation" aria-live="polite">
+            <div class="tts-identity-evaluation-head">
+              <strong>生成後の軽量評価</strong>
+              <span id="ttsIdentityEvaluationBadge">未評価</span>
+            </div>
+            <div id="ttsIdentityEvaluationValues" class="tts-identity-evaluation-values"></div>
+            <p id="ttsIdentityEvaluationWarning" class="note">
+              20 Step単発生成後に評価します。閾値超過時も自動再試行は行いません。
+            </p>
+          </section>
         </section>
 
         <section class="pane output-dataset-panel">

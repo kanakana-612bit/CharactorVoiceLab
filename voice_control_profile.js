@@ -263,7 +263,7 @@
       input: String(settings.text || "").trim(),
       language: "ja",
       seed: Math.trunc(clamp(finite(settings.seed, 20260719), 0, 2147483647)),
-      num_inference_steps: Math.trunc(clamp(finite(settings.num_inference_steps, 40), 4, 100)),
+      num_inference_steps: Math.trunc(clamp(finite(settings.num_inference_steps, 20), 4, 100)),
       options: {
         no_ref: true,
         caption,

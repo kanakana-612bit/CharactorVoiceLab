@@ -81,6 +81,10 @@ const state = {
   ttsResultBlob: null,
   ttsResultUrl: null,
   audioCppModels: [],
+  voiceIdentityResources: null,
+  activeCompiledIdentityId: null,
+  activeCompiledIdentity: null,
+  lastIdentityEvaluation: null,
   experimentResources: null,
   experimentJobs: [],
   activeExperimentTool: "runtime_observation",
@@ -96,6 +100,7 @@ const voiceControlProfile = window.CVD_PROFILE;
 const labels = landmarkSystem.labels;
 const featureDefs = referenceData.anthropometricFeaturePriors;
 const APP_VERSION = "0.1";
+const STANDARD_TTS_INFERENCE_STEPS = 20;
 const GESTURE_EXECUTION_INPUT_MIN = 0.35;
 const GESTURE_EXECUTION_INPUT_MAX = 1.35;
 const LEGACY_GESTURE_EXECUTION_EFFECTIVE_MAX = 1.45;
@@ -392,7 +397,6 @@ const els = {
   audioCppStatus: document.getElementById("audioCppStatus"),
   ttsModelSelect: document.getElementById("ttsModelSelect"),
   ttsSeedInput: document.getElementById("ttsSeedInput"),
-  ttsInferenceStepsInput: document.getElementById("ttsInferenceStepsInput"),
   ttsCaptionGuidanceInput: document.getElementById("ttsCaptionGuidanceInput"),
   ttsF0CorrectionEnabled: document.getElementById("ttsF0CorrectionEnabled"),
   ttsF0CorrectionStrength: document.getElementById("ttsF0CorrectionStrength"),
@@ -407,6 +411,30 @@ const els = {
   exportVoiceControlProfileBtn: document.getElementById("exportVoiceControlProfileBtn"),
   ttsDemoAudio: document.getElementById("ttsDemoAudio"),
   ttsDemoStatus: document.getElementById("ttsDemoStatus"),
+  refreshVoiceIdentitiesBtn: document.getElementById("refreshVoiceIdentitiesBtn"),
+  voiceIdentityNameInput: document.getElementById("voiceIdentityNameInput"),
+  compiledVoiceIdentitySelect: document.getElementById("compiledVoiceIdentitySelect"),
+  compileVoiceIdentityBtn: document.getElementById("compileVoiceIdentityBtn"),
+  identitySpeakerSelect: document.getElementById("identitySpeakerSelect"),
+  identitySpeakerUpload: document.getElementById("identitySpeakerUpload"),
+  identitySpeakerStatus: document.getElementById("identitySpeakerStatus"),
+  identityCompileStyleF0: document.getElementById("identityCompileStyleF0"),
+  identityCompileStyleVtl: document.getElementById("identityCompileStyleVtl"),
+  identityCompileStyleCfg: document.getElementById("identityCompileStyleCfg"),
+  identityStyleSelect: document.getElementById("identityStyleSelect"),
+  identityStyleStatus: document.getElementById("identityStyleStatus"),
+  identityCalibrationSelect: document.getElementById("identityCalibrationSelect"),
+  identityCalibrationUpload: document.getElementById("identityCalibrationUpload"),
+  identityCalibrationStatus: document.getElementById("identityCalibrationStatus"),
+  compiledIdentitySpeakerValue: document.getElementById("compiledIdentitySpeakerValue"),
+  compiledIdentityCompatibilityValue: document.getElementById("compiledIdentityCompatibilityValue"),
+  compiledIdentityCalibrationValue: document.getElementById("compiledIdentityCalibrationValue"),
+  compiledIdentityPolicyValue: document.getElementById("compiledIdentityPolicyValue"),
+  voiceIdentityCompileStatus: document.getElementById("voiceIdentityCompileStatus"),
+  ttsIdentityEvaluation: document.getElementById("ttsIdentityEvaluation"),
+  ttsIdentityEvaluationBadge: document.getElementById("ttsIdentityEvaluationBadge"),
+  ttsIdentityEvaluationValues: document.getElementById("ttsIdentityEvaluationValues"),
+  ttsIdentityEvaluationWarning: document.getElementById("ttsIdentityEvaluationWarning"),
   refreshExperimentsBtn: document.getElementById("refreshExperimentsBtn"),
   experimentToolButtons: Array.from(document.querySelectorAll(".experiment-tool-button")),
   experimentToolForms: Array.from(document.querySelectorAll(".experiment-tool-form")),
@@ -435,6 +463,17 @@ const els = {
   experimentBenchmarkDuration: document.getElementById("experimentBenchmarkDuration"),
   experimentBenchmarkText: document.getElementById("experimentBenchmarkText"),
   experimentBenchmarkCaption: document.getElementById("experimentBenchmarkCaption"),
+  stepStabilityForm: document.getElementById("stepStabilityForm"),
+  experimentStabilityProfile: document.getElementById("experimentStabilityProfile"),
+  experimentStabilityUseCurrentProfileBtn: document.getElementById("experimentStabilityUseCurrentProfileBtn"),
+  experimentStabilitySpeaker: document.getElementById("experimentStabilitySpeaker"),
+  experimentStabilitySamples: document.getElementById("experimentStabilitySamples"),
+  experimentStabilitySeed: document.getElementById("experimentStabilitySeed"),
+  experimentStabilityTargetF0: document.getElementById("experimentStabilityTargetF0"),
+  experimentStabilityCfg: document.getElementById("experimentStabilityCfg"),
+  experimentStabilityDuration: document.getElementById("experimentStabilityDuration"),
+  experimentStabilityText: document.getElementById("experimentStabilityText"),
+  experimentStabilityCaption: document.getElementById("experimentStabilityCaption"),
   voiceEvaluationForm: document.getElementById("voiceEvaluationForm"),
   experimentWavUpload: document.getElementById("experimentWavUpload"),
   experimentManifestUpload: document.getElementById("experimentManifestUpload"),
@@ -4565,7 +4604,10 @@ function buildTtsConfiguration() {
     transport: "audio_cpp_http",
     selected_model: els.ttsModelSelect?.value || "irodori-vdes",
     seed: Math.trunc(num(els.ttsSeedInput, 20260719)),
-    num_inference_steps: Math.trunc(num(els.ttsInferenceStepsInput, 40)),
+    num_inference_steps: STANDARD_TTS_INFERENCE_STEPS,
+    candidate_count: 1,
+    automatic_retry: false,
+    compiled_voice_identity_id: state.activeCompiledIdentityId,
     caption_guidance_scale: num(els.ttsCaptionGuidanceInput, 2),
     f0_postprocess: {
       enabled: els.ttsF0CorrectionEnabled?.checked !== false,
@@ -4580,6 +4622,255 @@ function buildTtsConfiguration() {
 function activeTtsCaption(profile = buildVoiceControlProfile()) {
   const manual = state.ttsCaptionManual ? els.ttsCaptionInput?.value?.trim() : "";
   return manual || profile?.tts_adapters?.audio_cpp?.caption_ja || "";
+}
+
+function compiledRequestProfile(fallback = buildVoiceControlProfile()) {
+  const identity = state.activeCompiledIdentity;
+  if (!identity?.style?.identity_anchor) return fallback;
+  return {
+    ...fallback,
+    identity_anchor: identity.style.identity_anchor,
+    tts_adapters: {
+      ...(fallback?.tts_adapters || {}),
+      audio_cpp: {
+        ...(fallback?.tts_adapters?.audio_cpp || {}),
+        caption_ja: identity.style.caption || "",
+      },
+    },
+  };
+}
+
+function setVoiceIdentityStatus(message, isError = false) {
+  if (!els.voiceIdentityCompileStatus) return;
+  els.voiceIdentityCompileStatus.textContent = message;
+  els.voiceIdentityCompileStatus.classList.toggle("error", isError);
+}
+
+function renderVoiceIdentityWorkspace() {
+  const profile = buildVoiceControlProfile();
+  if (profile) {
+    if (els.identityCompileStyleF0) {
+      els.identityCompileStyleF0.textContent = `${Math.round(profile.identity_anchor.f0_mean_hz)} Hz`;
+    }
+    if (els.identityCompileStyleVtl) {
+      els.identityCompileStyleVtl.textContent = `${Number(profile.identity_anchor.vocal_tract_length_scale).toFixed(2)}x`;
+    }
+    if (els.identityCompileStyleCfg) {
+      els.identityCompileStyleCfg.textContent = Number(num(els.ttsCaptionGuidanceInput, 2)).toFixed(1);
+    }
+  }
+
+  const selectedSpeaker = (state.experimentResources?.speech_speaker_conditions || [])
+    .find((item) => item.id === els.identitySpeakerSelect?.value);
+  if (els.identitySpeakerStatus) {
+    els.identitySpeakerStatus.textContent = selectedSpeaker
+      ? `${selectedSpeaker.shape?.join("x") || "shape不明"} / ${selectedSpeaker.model_binding_status || "unbound"}`
+      : "Speaker Embeddingを使用しない";
+  }
+  const selectedStyle = (state.voiceIdentityResources?.styles || [])
+    .find((item) => item.id === els.identityStyleSelect?.value);
+  if (els.identityStyleStatus) {
+    els.identityStyleStatus.textContent = selectedStyle
+      ? `${selectedStyle.label}を再利用します。現在の設計値は変更されません。`
+      : "現在の設計値をコンパイル時に独立したStyle JSONへ保存します。";
+  }
+  const calibrationCount = selectedOptionValues(els.identityCalibrationSelect).length;
+  if (els.identityCalibrationStatus) {
+    els.identityCalibrationStatus.textContent = calibrationCount
+      ? `${calibrationCount}件を選択中。${calibrationCount >= 3 ? "校正分布を構築できます。" : "閾値尺度は暫定fallbackです。"}`
+      : "未選択。音響値は表示しますが話者距離は算出できません。";
+  }
+
+  const identity = state.activeCompiledIdentity;
+  if (els.compiledIdentitySpeakerValue) {
+    els.compiledIdentitySpeakerValue.textContent = identity?.speaker?.file || "なし";
+  }
+  if (els.compiledIdentityCompatibilityValue) {
+    els.compiledIdentityCompatibilityValue.textContent = identity?.speaker
+      ? identity.speaker.model_contract_compatible ? "互換" : "非互換"
+      : identity ? "Speaker未使用" : "-";
+  }
+  if (els.compiledIdentityCalibrationValue) {
+    els.compiledIdentityCalibrationValue.textContent = String(identity?.calibration?.sample_count ?? 0);
+  }
+  if (els.compiledIdentityPolicyValue) {
+    els.compiledIdentityPolicyValue.textContent = identity
+      ? `${identity.standard_generation?.num_inference_steps ?? 20} Step / 警告のみ`
+      : "警告のみ";
+  }
+  if (identity) {
+    setVoiceIdentityStatus(
+      `${identity.name}を通常生成に使用中。Speaker、Style、校正基準は固定されています。`,
+    );
+  }
+}
+
+function renderVoiceIdentityResources() {
+  const resources = state.voiceIdentityResources || {};
+  const identities = (resources.identities || []).map((item) => ({
+    id: item.id,
+    label: `${item.label} / ${item.model?.id || "model不明"}`,
+  }));
+  populateExperimentSelect(
+    els.compiledVoiceIdentitySelect,
+    identities,
+    "未コンパイル（軽量評価のみ）",
+  );
+  if (els.compiledVoiceIdentitySelect) {
+    els.compiledVoiceIdentitySelect.value = state.activeCompiledIdentityId || "";
+  }
+  populateExperimentSelect(
+    els.identitySpeakerSelect,
+    state.experimentResources?.speech_speaker_conditions || [],
+    "使用しない",
+  );
+  populateExperimentSelect(
+    els.identityStyleSelect,
+    resources.styles || [],
+    "現在のVoiceControlProfileを新規固定",
+  );
+  populateExperimentSelect(els.identityCalibrationSelect, resources.calibrations || []);
+  renderVoiceIdentityWorkspace();
+}
+
+async function refreshVoiceIdentities({ silent = false } = {}) {
+  if (!els.compiledVoiceIdentitySelect) return;
+  if (!silent) setVoiceIdentityStatus("音声同一性の状態を更新しています。");
+  try {
+    const [resources, experimentResources] = await Promise.all([
+      experimentApi("/api/voice-identities/resources"),
+      experimentApi("/api/experiments/resources"),
+    ]);
+    state.voiceIdentityResources = resources;
+    state.experimentResources = experimentResources;
+    if (
+      state.activeCompiledIdentityId &&
+      !(resources.identities || []).some((item) => item.id === state.activeCompiledIdentityId)
+    ) {
+      state.activeCompiledIdentityId = null;
+    }
+    state.activeCompiledIdentity = state.activeCompiledIdentityId
+      ? await experimentApi(`/api/voice-identities/${state.activeCompiledIdentityId}`)
+      : null;
+    renderVoiceIdentityResources();
+    if (!silent && !state.activeCompiledIdentity) {
+      setVoiceIdentityStatus("コンパイルするSpeaker、Style、校正音声を選択してください。");
+    }
+  } catch (error) {
+    setVoiceIdentityStatus(`音声同一性を読み込めません: ${error.message}`, true);
+  }
+}
+
+async function selectCompiledVoiceIdentity(identityId) {
+  state.activeCompiledIdentityId = identityId || null;
+  state.activeCompiledIdentity = identityId
+    ? await experimentApi(`/api/voice-identities/${identityId}`)
+    : null;
+  state.lastIdentityEvaluation = null;
+  renderVoiceIdentityWorkspace();
+  renderTtsRequestSummary();
+  renderTtsIdentityEvaluation(null);
+  renderConstraints();
+}
+
+async function uploadVoiceCalibration(file) {
+  if (!file) return null;
+  setVoiceIdentityStatus(`${file.name}を校正音声として解析しています。`);
+  const query = new URLSearchParams({ name: file.name });
+  const calibration = await experimentApi(`/api/voice-identities/calibrations?${query}`, {
+    method: "POST",
+    headers: { "Content-Type": file.type || "audio/wav" },
+    body: file,
+  });
+  return calibration;
+}
+
+async function compileVoiceIdentity() {
+  const profile = buildVoiceControlProfile();
+  if (!profile) throw new Error("VoiceControlProfileを構築できません。");
+  setVoiceIdentityStatus("音声同一性をコンパイルしています。");
+  const identity = await experimentApi("/api/voice-identities/compile", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      name: els.voiceIdentityNameInput?.value?.trim() || "voice_profile",
+      model: els.ttsModelSelect?.value || "irodori-vdes",
+      speaker_condition: els.identitySpeakerSelect?.value || null,
+      style_id: els.identityStyleSelect?.value || null,
+      style_profile: profile,
+      caption: activeTtsCaption(profile),
+      caption_guidance_scale: num(els.ttsCaptionGuidanceInput, 2),
+      calibration_ids: selectedOptionValues(els.identityCalibrationSelect),
+    }),
+  });
+  state.activeCompiledIdentityId = identity.id;
+  state.activeCompiledIdentity = identity;
+  await refreshVoiceIdentities({ silent: true });
+  if (els.compiledVoiceIdentitySelect) els.compiledVoiceIdentitySelect.value = identity.id;
+  renderVoiceIdentityWorkspace();
+  renderTtsRequestSummary();
+  renderConstraints();
+}
+
+function renderTtsIdentityEvaluation(evaluation = state.lastIdentityEvaluation) {
+  if (!els.ttsIdentityEvaluationValues) return;
+  els.ttsIdentityEvaluationValues.replaceChildren();
+  if (!evaluation) {
+    if (els.ttsIdentityEvaluationBadge) {
+      els.ttsIdentityEvaluationBadge.textContent = "未評価";
+      els.ttsIdentityEvaluationBadge.dataset.status = "";
+    }
+    if (els.ttsIdentityEvaluationWarning) {
+      els.ttsIdentityEvaluationWarning.textContent =
+        "20 Step単発生成後に評価します。閾値超過時も自動再試行は行いません。";
+    }
+    return;
+  }
+  const values = evaluation.acoustic_values || {};
+  const distance = evaluation.distance || {};
+  const items = [
+    ["話者距離 proxy", distance.combined_proxy_distance == null ? "算出不可" : Number(distance.combined_proxy_distance).toFixed(2)],
+    ["F0中央値", values.f0_median_hz == null ? "-" : `${Number(values.f0_median_hz).toFixed(1)} Hz`],
+    ["F0誤差", values.target_error_semitones == null ? "-" : `${Number(values.target_error_semitones).toFixed(2)} st`],
+    ["スペクトル重心", values.spectral_centroid_hz == null ? "-" : `${Math.round(values.spectral_centroid_hz)} Hz`],
+    ["有声率", values.voiced_frame_ratio == null ? "-" : `${Math.round(values.voiced_frame_ratio * 100)}%`],
+    ["RMS", values.rms == null ? "-" : Number(values.rms).toFixed(4)],
+    ["クリップ率", values.clipping_ratio == null ? "-" : `${(values.clipping_ratio * 100).toFixed(3)}%`],
+    ["自動再試行", "なし"],
+  ];
+  for (const [labelText, valueText] of items) {
+    const item = document.createElement("div");
+    const label = document.createElement("span");
+    const value = document.createElement("strong");
+    label.textContent = labelText;
+    value.textContent = valueText;
+    item.append(label, value);
+    els.ttsIdentityEvaluationValues.append(item);
+  }
+  if (els.ttsIdentityEvaluationBadge) {
+    els.ttsIdentityEvaluationBadge.textContent =
+      evaluation.status === "warning" ? "警告" : "暫定範囲内";
+    els.ttsIdentityEvaluationBadge.dataset.status = evaluation.status;
+  }
+  if (els.ttsIdentityEvaluationWarning) {
+    els.ttsIdentityEvaluationWarning.textContent = evaluation.warnings?.length
+      ? `警告: ${evaluation.warnings.join(", ")}。生成結果は保持され、自動再試行しません。`
+      : "暫定基準内です。閾値は未検証であり、話者同一性の証明ではありません。";
+  }
+}
+
+async function evaluateGeneratedTts(blob) {
+  const identityPath = state.activeCompiledIdentityId
+    ? `/api/voice-identities/${state.activeCompiledIdentityId}/evaluate`
+    : "/api/voice-identities/evaluate";
+  const evaluation = await experimentApi(identityPath, {
+    method: "POST",
+    headers: { "Content-Type": "audio/wav" },
+    body: blob,
+  });
+  state.lastIdentityEvaluation = evaluation;
+  renderTtsIdentityEvaluation(evaluation);
+  return evaluation;
 }
 
 function renderVoiceDesignerControls() {
@@ -4667,6 +4958,7 @@ function renderVoiceDesignerDerivedViews(profile = buildVoiceControlProfile()) {
       : "F0後処理は無効です。生成モデル側のF0をそのまま使用します。";
   }
   renderTtsRequestSummary(profile);
+  renderVoiceIdentityWorkspace();
 }
 
 function ttsF0CorrectionSettings() {
@@ -4678,19 +4970,23 @@ function ttsF0CorrectionSettings() {
 
 function renderTtsRequestSummary(profile = buildVoiceControlProfile()) {
   if (!els.ttsRequestSummary || !profile) return;
-  const request = voiceControlProfile.buildAudioCppRequest(profile, {
-    model: els.ttsModelSelect?.value,
+  const requestProfile = compiledRequestProfile(profile);
+  const identity = state.activeCompiledIdentity;
+  const request = voiceControlProfile.buildAudioCppRequest(requestProfile, {
+    model: identity?.model?.id || els.ttsModelSelect?.value,
     text: els.ttsDemoTextInput?.value,
     seed: num(els.ttsSeedInput, 20260719),
-    num_inference_steps: num(els.ttsInferenceStepsInput, 40),
-    caption_guidance_scale: num(els.ttsCaptionGuidanceInput, 2),
-    caption: activeTtsCaption(profile),
+    num_inference_steps: STANDARD_TTS_INFERENCE_STEPS,
+    caption_guidance_scale: identity?.style?.caption_guidance_scale ?? num(els.ttsCaptionGuidanceInput, 2),
+    caption: identity?.style?.caption || activeTtsCaption(profile),
     ...ttsF0CorrectionSettings(),
   });
   const items = [
     ["MODEL", request.model],
-    ["F0 TARGET", `${Math.round(profile.identity_anchor.f0_mean_hz)} Hz`],
-    ["RATE", `${Number(profile.identity_anchor.speaking_rate).toFixed(2)}x`],
+    ["IDENTITY", identity?.name || "未コンパイル"],
+    ["GENERATION", `${STANDARD_TTS_INFERENCE_STEPS} Step / 1候補`],
+    ["F0 TARGET", `${Math.round(requestProfile.identity_anchor.f0_mean_hz)} Hz`],
+    ["RATE", `${Number(requestProfile.identity_anchor.speaking_rate).toFixed(2)}x`],
     ["DURATION", `${Number(request.options.duration_scale).toFixed(2)}x`],
   ];
   els.ttsRequestSummary.innerHTML = "";
@@ -4757,18 +5053,38 @@ async function generateTtsDemo() {
     if (els.ttsDemoStatus) els.ttsDemoStatus.textContent = "読み上げテキストを入力してください。";
     return;
   }
-  const profile = buildVoiceControlProfile();
+  if (state.activeCompiledIdentityId && !state.activeCompiledIdentity) {
+    await refreshVoiceIdentities({ silent: true });
+  }
+  const profile = compiledRequestProfile(buildVoiceControlProfile());
+  const identity = state.activeCompiledIdentity;
   const request = voiceControlProfile.buildAudioCppRequest(profile, {
-    model: els.ttsModelSelect?.value,
+    model: identity?.model?.id || els.ttsModelSelect?.value,
     text,
     seed: num(els.ttsSeedInput, 20260719),
-    num_inference_steps: num(els.ttsInferenceStepsInput, 40),
-    caption_guidance_scale: num(els.ttsCaptionGuidanceInput, 2),
-    caption: activeTtsCaption(profile),
+    num_inference_steps: STANDARD_TTS_INFERENCE_STEPS,
+    caption_guidance_scale: identity?.style?.caption_guidance_scale ?? num(els.ttsCaptionGuidanceInput, 2),
+    caption: identity?.style?.caption || activeTtsCaption(profile),
     ...ttsF0CorrectionSettings(),
   });
+  if (identity?.speaker?.file) {
+    request.speaker_condition = { file: identity.speaker.file };
+  }
+  request.generation_mode = "standard_single";
+  request.observation = {
+    enabled: true,
+    label: "standard-single-20step",
+    include_text: false,
+    analyze_f0: true,
+    capture_internal_conditions: true,
+    latent_snapshot_steps: [],
+  };
+  state.lastIdentityEvaluation = null;
+  renderTtsIdentityEvaluation(null);
   if (els.generateTtsDemoBtn) els.generateTtsDemoBtn.disabled = true;
-  if (els.ttsDemoStatus) els.ttsDemoStatus.textContent = "audio.cppで生成中です。初回はモデル読み込みに時間がかかります。";
+  if (els.ttsDemoStatus) {
+    els.ttsDemoStatus.textContent = "audio.cppで20 Step・1候補を生成中です。初回はモデル読み込みに時間がかかります。";
+  }
   try {
     const response = await fetch("/api/audio-cpp/speech", {
       method: "POST",
@@ -4790,6 +5106,7 @@ async function generateTtsDemo() {
     const targetF0 = responseNumber("X-CVD-F0-Target-Hz");
     const outputF0 = responseNumber("X-CVD-F0-Output-Hz");
     const shiftSemitones = responseNumber("X-CVD-F0-Shift-Semitones");
+    const observationId = response.headers.get("X-CVD-Observation-ID");
     const blob = await response.blob();
     if (!blob.size) throw new Error("空の音声応答を受信しました。");
     if (state.ttsResultUrl) URL.revokeObjectURL(state.ttsResultUrl);
@@ -4802,10 +5119,29 @@ async function generateTtsDemo() {
     }
     if (els.downloadTtsDemoBtn) els.downloadTtsDemoBtn.disabled = false;
     if (els.ttsDemoStatus) {
+      els.ttsDemoStatus.textContent = "生成完了。軽量な話者距離と音響値を評価しています。";
+    }
+    let evaluation = null;
+    try {
+      evaluation = await evaluateGeneratedTts(blob);
+    } catch (evaluationError) {
+      renderTtsIdentityEvaluation({
+        status: "warning",
+        acoustic_values: {},
+        distance: {},
+        warnings: [`evaluation_unavailable: ${evaluationError.message}`],
+      });
+    }
+    if (els.ttsDemoStatus) {
       const correctionSummary = [measuredF0, targetF0, outputF0, shiftSemitones].every(Number.isFinite)
         ? ` / F0 ${measuredF0.toFixed(1)} → ${outputF0.toFixed(1)} Hz（目標 ${targetF0.toFixed(1)} Hz, ${shiftSemitones.toFixed(2)} st）`
         : "";
-      els.ttsDemoStatus.textContent = `生成完了 / ${request.model} / seed ${request.seed}${correctionSummary}`;
+      const identitySummary = identity ? ` / identity ${identity.name}` : " / identity未コンパイル";
+      const evaluationSummary = evaluation?.status === "warning" ? " / 評価警告あり" : " / 評価完了";
+      const observationSummary = observationId ? ` / observation ${observationId}` : "";
+      els.ttsDemoStatus.textContent =
+        `生成完了 / ${request.model} / 20 Step / 1候補 / seed ${request.seed}` +
+        `${identitySummary}${evaluationSummary}${observationSummary}${correctionSummary}`;
     }
     setAudioCppStatus("ready", "接続済み");
   } catch (error) {
@@ -5330,6 +5666,12 @@ function renderExperimentResources() {
   );
   populateExperimentSelect(els.experimentSpeakerEmbeddings, resources.speaker_conditions);
   populateExperimentSelect(els.experimentBenchmarkProfile, resources.profiles, "既定値を使用");
+  populateExperimentSelect(els.experimentStabilityProfile, resources.profiles, "既定値を使用");
+  populateExperimentSelect(
+    els.experimentStabilitySpeaker,
+    resources.speech_speaker_conditions || resources.speaker_conditions,
+    "使用しない",
+  );
   populateExperimentSelect(els.experimentEvaluationInputs, resources.voice_inputs);
   populateExperimentSelect(els.experimentEvaluationReferences, resources.voice_inputs);
   populateExperimentSelect(
@@ -5564,11 +5906,15 @@ async function registerSpeakerConditionFiles(files) {
   await refreshExperimentWorkspace({ silent: true });
   if (registered.length) {
     els.experimentObservationSpeaker.value = registered[registered.length - 1];
+    if (els.experimentStabilitySpeaker) {
+      els.experimentStabilitySpeaker.value = registered[registered.length - 1];
+    }
     for (const option of els.experimentSpeakerEmbeddings.options) {
       option.selected = registered.includes(option.value);
     }
   }
   setExperimentStatus(`${registered.length}件の話者状態を管理領域へ登録しました。`);
+  return registered;
 }
 
 async function registerCurrentExperimentProfile() {
@@ -5583,6 +5929,9 @@ async function registerCurrentExperimentProfile() {
   const resource = await uploadExperimentFile(file, "profile");
   if (resource && els.experimentBenchmarkProfile) {
     els.experimentBenchmarkProfile.value = resource.id;
+  }
+  if (resource && els.experimentStabilityProfile) {
+    els.experimentStabilityProfile.value = resource.id;
   }
 }
 
@@ -5626,6 +5975,21 @@ function installExperimentHandlers() {
       duration_scale: num(els.experimentBenchmarkDuration, 1),
     });
   });
+  els.stepStabilityForm?.addEventListener("submit", (event) => {
+    event.preventDefault();
+    startExperiment("step_stability", {
+      profile_id: els.experimentStabilityProfile?.value || "",
+      speaker_condition: els.experimentStabilitySpeaker?.value || "",
+      samples: num(els.experimentStabilitySamples, 3),
+      seed_start: num(els.experimentStabilitySeed, 20260719),
+      target_f0: optionalNum(els.experimentStabilityTargetF0),
+      text: els.experimentStabilityText?.value || "",
+      caption: els.experimentStabilityCaption?.value || "",
+      model: els.ttsModelSelect?.value || "irodori-vdes",
+      caption_guidance: num(els.experimentStabilityCfg, 2),
+      duration_scale: num(els.experimentStabilityDuration, 1),
+    });
+  });
   els.voiceEvaluationForm?.addEventListener("submit", (event) => {
     event.preventDefault();
     startExperiment("voice_evaluation", {
@@ -5644,6 +6008,11 @@ function installExperimentHandlers() {
       setExperimentStatus(`登録できません: ${error.message}`, true),
     );
   });
+  els.experimentStabilityUseCurrentProfileBtn?.addEventListener("click", () => {
+    registerCurrentExperimentProfile().catch((error) =>
+      setExperimentStatus(`登録できません: ${error.message}`, true),
+    );
+  });
   els.experimentSpeakerUpload?.addEventListener("change", async (event) => {
     try {
       await registerSpeakerConditionFiles(event.target.files);
@@ -5656,7 +6025,12 @@ function installExperimentHandlers() {
   els.experimentProfileUpload?.addEventListener("change", async (event) => {
     try {
       const resource = await uploadExperimentFile(event.target.files?.[0], "profile");
-      if (resource) els.experimentBenchmarkProfile.value = resource.id;
+      if (resource) {
+        els.experimentBenchmarkProfile.value = resource.id;
+        if (els.experimentStabilityProfile) {
+          els.experimentStabilityProfile.value = resource.id;
+        }
+      }
     } catch (error) {
       setExperimentStatus(`登録できません: ${error.message}`, true);
     } finally {
@@ -5716,7 +6090,10 @@ function setActiveTab(tabId) {
     panel.hidden = !active;
   }
   if (els.floatingPreviewDock) els.floatingPreviewDock.hidden = tabId !== "vowelTab";
-  if (tabId === "ttsModelTab" || tabId === "outputTab") renderVoiceDesignerControls();
+  if (tabId === "ttsModelTab" || tabId === "outputTab") {
+    renderVoiceDesignerControls();
+    refreshVoiceIdentities({ silent: true });
+  }
   if (tabId === "experimentTab") {
     const profile = buildVoiceControlProfile();
     if (els.experimentBenchmarkCaption && !els.experimentBenchmarkCaption.value) {
@@ -9237,11 +9614,10 @@ function applyProfile(data) {
   state.voiceControlOverrides = voiceControlProfile?.normalizeOverrides(savedVoiceOverrides) ?? {};
   const savedTtsConfiguration = data.tts_configuration ?? {};
   state.ttsCaptionManual = Boolean(savedTtsConfiguration.caption_override);
+  state.activeCompiledIdentityId = savedTtsConfiguration.compiled_voice_identity_id || null;
+  state.activeCompiledIdentity = null;
   if (els.ttsCaptionInput && state.ttsCaptionManual) els.ttsCaptionInput.value = savedTtsConfiguration.caption_override;
   if (els.ttsSeedInput && Number.isFinite(Number(savedTtsConfiguration.seed))) els.ttsSeedInput.value = String(savedTtsConfiguration.seed);
-  if (els.ttsInferenceStepsInput && Number.isFinite(Number(savedTtsConfiguration.num_inference_steps))) {
-    els.ttsInferenceStepsInput.value = String(savedTtsConfiguration.num_inference_steps);
-  }
   if (els.ttsCaptionGuidanceInput && Number.isFinite(Number(savedTtsConfiguration.caption_guidance_scale))) {
     els.ttsCaptionGuidanceInput.value = String(savedTtsConfiguration.caption_guidance_scale);
   }
@@ -9481,6 +9857,54 @@ function init() {
     renderConstraints();
   });
   els.refreshTtsModelsBtn?.addEventListener("click", refreshAudioCppModels);
+  els.refreshVoiceIdentitiesBtn?.addEventListener("click", () => refreshVoiceIdentities());
+  els.compiledVoiceIdentitySelect?.addEventListener("change", (event) => {
+    selectCompiledVoiceIdentity(event.target.value).catch((error) =>
+      setVoiceIdentityStatus(`音声同一性を選択できません: ${error.message}`, true),
+    );
+  });
+  els.identitySpeakerSelect?.addEventListener("input", renderVoiceIdentityWorkspace);
+  els.identityStyleSelect?.addEventListener("input", renderVoiceIdentityWorkspace);
+  els.identityCalibrationSelect?.addEventListener("input", renderVoiceIdentityWorkspace);
+  els.identitySpeakerUpload?.addEventListener("change", async (event) => {
+    try {
+      const registered = await registerSpeakerConditionFiles(event.target.files);
+      await refreshVoiceIdentities({ silent: true });
+      if (registered.length && els.identitySpeakerSelect) {
+        els.identitySpeakerSelect.value = registered[registered.length - 1];
+      }
+      renderVoiceIdentityWorkspace();
+      setVoiceIdentityStatus(`${registered.length}件のSpeaker状態を登録しました。`);
+    } catch (error) {
+      setVoiceIdentityStatus(`Speaker状態を登録できません: ${error.message}`, true);
+    } finally {
+      event.target.value = "";
+    }
+  });
+  els.identityCalibrationUpload?.addEventListener("change", async (event) => {
+    const uploaded = [];
+    try {
+      for (const file of Array.from(event.target.files || [])) {
+        const calibration = await uploadVoiceCalibration(file);
+        if (calibration) uploaded.push(calibration.id);
+      }
+      await refreshVoiceIdentities({ silent: true });
+      for (const option of els.identityCalibrationSelect?.options || []) {
+        option.selected = uploaded.includes(option.value);
+      }
+      renderVoiceIdentityWorkspace();
+      setVoiceIdentityStatus(`${uploaded.length}件の校正音声を登録しました。`);
+    } catch (error) {
+      setVoiceIdentityStatus(`校正音声を登録できません: ${error.message}`, true);
+    } finally {
+      event.target.value = "";
+    }
+  });
+  els.compileVoiceIdentityBtn?.addEventListener("click", () => {
+    compileVoiceIdentity().catch((error) =>
+      setVoiceIdentityStatus(`コンパイルできません: ${error.message}`, true),
+    );
+  });
   els.ttsCaptionInput?.addEventListener("input", () => {
     state.ttsCaptionManual = true;
     renderTtsRequestSummary();
@@ -9494,7 +9918,6 @@ function init() {
   for (const input of [
     els.ttsModelSelect,
     els.ttsSeedInput,
-    els.ttsInferenceStepsInput,
     els.ttsCaptionGuidanceInput,
     els.ttsF0CorrectionEnabled,
     els.ttsF0CorrectionStrength,
