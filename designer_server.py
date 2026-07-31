@@ -84,6 +84,9 @@ class DesignerHandler(SimpleHTTPRequestHandler):
         super().__init__(*args, directory=str(PROJECT_ROOT), **kwargs)
 
     def end_headers(self) -> None:
+        static_path = urllib.parse.urlsplit(self.path).path.lower()
+        if static_path.endswith((".html", ".js", ".css")) or static_path == "/":
+            self.send_header("Cache-Control", "no-store")
         self.send_header("X-Content-Type-Options", "nosniff")
         self.send_header("Referrer-Policy", "no-referrer")
         self.send_header("Cross-Origin-Resource-Policy", "same-origin")
@@ -144,6 +147,11 @@ class DesignerHandler(SimpleHTTPRequestHandler):
                 HTTPStatus.OK,
                 {
                     "app": "CharacterVoiceDesigner",
+                    "features": {
+                        "voice_identity_compilation": True,
+                        "standard_single_20step": True,
+                        "step_stability_benchmark": True,
+                    },
                     "psola_available": psola_available(),
                     "postprocess_dependencies": postprocess_dependency_status(),
                 },

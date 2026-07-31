@@ -374,6 +374,7 @@ class LocalProxyIntegrationTest(unittest.TestCase):
             health = json.load(response)
             content_security_policy = response.headers.get("Content-Security-Policy", "")
         self.assertEqual(health["app"], "CharacterVoiceDesigner")
+        self.assertTrue(health["features"]["voice_identity_compilation"])
         self.assertIsInstance(health["psola_available"], bool)
         self.assertIn("pyworld", health["postprocess_dependencies"])
         self.assertIn("connect-src 'self'", content_security_policy)
@@ -407,6 +408,41 @@ class LocalProxyIntegrationTest(unittest.TestCase):
         self.assertEqual(resources["standard_generation"]["num_inference_steps"], 20)
         self.assertEqual(resources["standard_generation"]["candidate_count"], 1)
         self.assertFalse(resources["standard_generation"]["automatic_retry"])
+
+    def test_voice_identity_can_be_compiled_through_local_api(self):
+        payload = json.dumps(
+            {
+                "name": "API test",
+                "model": "irodori-vdes",
+                "style_profile": {
+                    "identity_anchor": {
+                        "f0_mean_hz": 180,
+                        "vocal_tract_length_scale": 1,
+                    }
+                },
+                "caption": "natural Japanese voice",
+                "caption_guidance_scale": 2,
+                "calibration_ids": [],
+            }
+        ).encode("utf-8")
+        request = urllib.request.Request(
+            self.base_url + "/api/voice-identities/compile",
+            data=payload,
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        with urllib.request.urlopen(request) as response:
+            identity = json.load(response)
+        self.assertEqual(response.status, 201)
+        self.assertEqual(identity["standard_generation"]["num_inference_steps"], 20)
+        manifest = (
+            self.experiment_root
+            / "runtime"
+            / "voice_identities"
+            / "compiled"
+            / f"{identity['id']}.json"
+        )
+        self.assertTrue(manifest.is_file())
 
     def test_models_and_wav_are_proxied(self):
         with urllib.request.urlopen(self.base_url + "/api/audio-cpp/models") as response:

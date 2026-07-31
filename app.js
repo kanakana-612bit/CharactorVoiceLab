@@ -4646,6 +4646,14 @@ function setVoiceIdentityStatus(message, isError = false) {
   els.voiceIdentityCompileStatus.classList.toggle("error", isError);
 }
 
+function voiceIdentityApiErrorMessage(error, action) {
+  const detail = error?.message || String(error);
+  if (/HTTP 404|不正な応答|Unexpected token|not found/i.test(detail)) {
+    return `${action}できません。更新前のPythonサーバーが動作している可能性があります。WebUIを停止し、webui.batまたはwebui.shで再起動してください。`;
+  }
+  return `${action}できません: ${detail}`;
+}
+
 function renderVoiceIdentityWorkspace() {
   const profile = buildVoiceControlProfile();
   if (profile) {
@@ -4757,7 +4765,7 @@ async function refreshVoiceIdentities({ silent = false } = {}) {
       setVoiceIdentityStatus("コンパイルするSpeaker、Style、校正音声を選択してください。");
     }
   } catch (error) {
-    setVoiceIdentityStatus(`音声同一性を読み込めません: ${error.message}`, true);
+    setVoiceIdentityStatus(voiceIdentityApiErrorMessage(error, "音声同一性を読み込み"), true);
   }
 }
 
@@ -4789,27 +4797,32 @@ async function compileVoiceIdentity() {
   const profile = buildVoiceControlProfile();
   if (!profile) throw new Error("VoiceControlProfileを構築できません。");
   setVoiceIdentityStatus("音声同一性をコンパイルしています。");
-  const identity = await experimentApi("/api/voice-identities/compile", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      name: els.voiceIdentityNameInput?.value?.trim() || "voice_profile",
-      model: els.ttsModelSelect?.value || "irodori-vdes",
-      speaker_condition: els.identitySpeakerSelect?.value || null,
-      style_id: els.identityStyleSelect?.value || null,
-      style_profile: profile,
-      caption: activeTtsCaption(profile),
-      caption_guidance_scale: num(els.ttsCaptionGuidanceInput, 2),
-      calibration_ids: selectedOptionValues(els.identityCalibrationSelect),
-    }),
-  });
-  state.activeCompiledIdentityId = identity.id;
-  state.activeCompiledIdentity = identity;
-  await refreshVoiceIdentities({ silent: true });
-  if (els.compiledVoiceIdentitySelect) els.compiledVoiceIdentitySelect.value = identity.id;
-  renderVoiceIdentityWorkspace();
-  renderTtsRequestSummary();
-  renderConstraints();
+  if (els.compileVoiceIdentityBtn) els.compileVoiceIdentityBtn.disabled = true;
+  try {
+    const identity = await experimentApi("/api/voice-identities/compile", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        name: els.voiceIdentityNameInput?.value?.trim() || "voice_profile",
+        model: els.ttsModelSelect?.value || "irodori-vdes",
+        speaker_condition: els.identitySpeakerSelect?.value || null,
+        style_id: els.identityStyleSelect?.value || null,
+        style_profile: profile,
+        caption: activeTtsCaption(profile),
+        caption_guidance_scale: num(els.ttsCaptionGuidanceInput, 2),
+        calibration_ids: selectedOptionValues(els.identityCalibrationSelect),
+      }),
+    });
+    state.activeCompiledIdentityId = identity.id;
+    state.activeCompiledIdentity = identity;
+    await refreshVoiceIdentities({ silent: true });
+    if (els.compiledVoiceIdentitySelect) els.compiledVoiceIdentitySelect.value = identity.id;
+    renderVoiceIdentityWorkspace();
+    renderTtsRequestSummary();
+    renderConstraints();
+  } finally {
+    if (els.compileVoiceIdentityBtn) els.compileVoiceIdentityBtn.disabled = false;
+  }
 }
 
 function renderTtsIdentityEvaluation(evaluation = state.lastIdentityEvaluation) {
@@ -9740,7 +9753,63 @@ function mountArticulationWorkspaces() {
   }
 }
 
+function installVoiceIdentityHandlers() {
+  if (!els.compileVoiceIdentityBtn || els.compileVoiceIdentityBtn.dataset.handlerInstalled === "true") {
+    return;
+  }
+  els.compileVoiceIdentityBtn.dataset.handlerInstalled = "true";
+  els.refreshVoiceIdentitiesBtn?.addEventListener("click", () => refreshVoiceIdentities());
+  els.compiledVoiceIdentitySelect?.addEventListener("change", (event) => {
+    selectCompiledVoiceIdentity(event.target.value).catch((error) =>
+      setVoiceIdentityStatus(`音声同一性を選択できません: ${error.message}`, true),
+    );
+  });
+  els.identitySpeakerSelect?.addEventListener("input", renderVoiceIdentityWorkspace);
+  els.identityStyleSelect?.addEventListener("input", renderVoiceIdentityWorkspace);
+  els.identityCalibrationSelect?.addEventListener("input", renderVoiceIdentityWorkspace);
+  els.identitySpeakerUpload?.addEventListener("change", async (event) => {
+    try {
+      const registered = await registerSpeakerConditionFiles(event.target.files);
+      await refreshVoiceIdentities({ silent: true });
+      if (registered.length && els.identitySpeakerSelect) {
+        els.identitySpeakerSelect.value = registered[registered.length - 1];
+      }
+      renderVoiceIdentityWorkspace();
+      setVoiceIdentityStatus(`${registered.length}件のSpeaker状態を登録しました。`);
+    } catch (error) {
+      setVoiceIdentityStatus(`Speaker状態を登録できません: ${error.message}`, true);
+    } finally {
+      event.target.value = "";
+    }
+  });
+  els.identityCalibrationUpload?.addEventListener("change", async (event) => {
+    const uploaded = [];
+    try {
+      for (const file of Array.from(event.target.files || [])) {
+        const calibration = await uploadVoiceCalibration(file);
+        if (calibration) uploaded.push(calibration.id);
+      }
+      await refreshVoiceIdentities({ silent: true });
+      for (const option of els.identityCalibrationSelect?.options || []) {
+        option.selected = uploaded.includes(option.value);
+      }
+      renderVoiceIdentityWorkspace();
+      setVoiceIdentityStatus(`${uploaded.length}件の校正音声を登録しました。`);
+    } catch (error) {
+      setVoiceIdentityStatus(`校正音声を登録できません: ${error.message}`, true);
+    } finally {
+      event.target.value = "";
+    }
+  });
+  els.compileVoiceIdentityBtn.addEventListener("click", () => {
+    compileVoiceIdentity().catch((error) =>
+      setVoiceIdentityStatus(voiceIdentityApiErrorMessage(error, "コンパイル"), true),
+    );
+  });
+}
+
 function init() {
+  installVoiceIdentityHandlers();
   refreshLandmarkSelect();
   mountCompositionGuide();
   mountArticulationWorkspaces();
@@ -9857,54 +9926,6 @@ function init() {
     renderConstraints();
   });
   els.refreshTtsModelsBtn?.addEventListener("click", refreshAudioCppModels);
-  els.refreshVoiceIdentitiesBtn?.addEventListener("click", () => refreshVoiceIdentities());
-  els.compiledVoiceIdentitySelect?.addEventListener("change", (event) => {
-    selectCompiledVoiceIdentity(event.target.value).catch((error) =>
-      setVoiceIdentityStatus(`音声同一性を選択できません: ${error.message}`, true),
-    );
-  });
-  els.identitySpeakerSelect?.addEventListener("input", renderVoiceIdentityWorkspace);
-  els.identityStyleSelect?.addEventListener("input", renderVoiceIdentityWorkspace);
-  els.identityCalibrationSelect?.addEventListener("input", renderVoiceIdentityWorkspace);
-  els.identitySpeakerUpload?.addEventListener("change", async (event) => {
-    try {
-      const registered = await registerSpeakerConditionFiles(event.target.files);
-      await refreshVoiceIdentities({ silent: true });
-      if (registered.length && els.identitySpeakerSelect) {
-        els.identitySpeakerSelect.value = registered[registered.length - 1];
-      }
-      renderVoiceIdentityWorkspace();
-      setVoiceIdentityStatus(`${registered.length}件のSpeaker状態を登録しました。`);
-    } catch (error) {
-      setVoiceIdentityStatus(`Speaker状態を登録できません: ${error.message}`, true);
-    } finally {
-      event.target.value = "";
-    }
-  });
-  els.identityCalibrationUpload?.addEventListener("change", async (event) => {
-    const uploaded = [];
-    try {
-      for (const file of Array.from(event.target.files || [])) {
-        const calibration = await uploadVoiceCalibration(file);
-        if (calibration) uploaded.push(calibration.id);
-      }
-      await refreshVoiceIdentities({ silent: true });
-      for (const option of els.identityCalibrationSelect?.options || []) {
-        option.selected = uploaded.includes(option.value);
-      }
-      renderVoiceIdentityWorkspace();
-      setVoiceIdentityStatus(`${uploaded.length}件の校正音声を登録しました。`);
-    } catch (error) {
-      setVoiceIdentityStatus(`校正音声を登録できません: ${error.message}`, true);
-    } finally {
-      event.target.value = "";
-    }
-  });
-  els.compileVoiceIdentityBtn?.addEventListener("click", () => {
-    compileVoiceIdentity().catch((error) =>
-      setVoiceIdentityStatus(`コンパイルできません: ${error.message}`, true),
-    );
-  });
   els.ttsCaptionInput?.addEventListener("input", () => {
     state.ttsCaptionManual = true;
     renderTtsRequestSummary();
