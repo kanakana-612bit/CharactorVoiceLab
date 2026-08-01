@@ -6102,7 +6102,9 @@ function setActiveTab(tabId) {
     panel.classList.toggle("active", active);
     panel.hidden = !active;
   }
-  if (els.floatingPreviewDock) els.floatingPreviewDock.hidden = tabId !== "vowelTab";
+  if (els.floatingPreviewDock) {
+    els.floatingPreviewDock.hidden = !["detailTab", "vowelTab"].includes(tabId);
+  }
   if (tabId === "ttsModelTab" || tabId === "outputTab") {
     renderVoiceDesignerControls();
     refreshVoiceIdentities({ silent: true });
