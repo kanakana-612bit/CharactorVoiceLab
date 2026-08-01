@@ -269,6 +269,17 @@ class ExperimentJobManager:
         path.unlink(missing_ok=True)
         return {"id": normalized, "discarded": True}
 
+    def voice_preview_path(self, resource_id: Any) -> Path:
+        path = self._resolve_voice_resource(resource_id)
+        if path.is_file():
+            return path
+        candidates = sorted(
+            candidate for candidate in path.rglob("*.wav") if candidate.is_file()
+        )
+        if not candidates:
+            raise ExperimentError("Voice resource directory contains no WAV files.")
+        return candidates[0]
+
     def store_upload(
         self,
         kind: str,

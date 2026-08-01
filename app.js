@@ -92,6 +92,10 @@ const state = {
   experimentPollTimer: null,
   evaluationInputIds: new Set(),
   evaluationReferenceResources: [],
+  voiceIdentityCalibrationIds: new Set(),
+  resourcePreviewAudio: null,
+  resourcePreviewButton: null,
+  resourcePreviewUrl: null,
 };
 
 const referenceData = window.CVL_REFERENCE;
@@ -104,6 +108,7 @@ const featureDefs = referenceData.anthropometricFeaturePriors;
 const APP_VERSION = "0.1";
 const STANDARD_TTS_INFERENCE_STEPS = 20;
 const MAX_EVALUATION_RESOURCES = 16;
+const MAX_CALIBRATION_RESOURCES = 16;
 const GESTURE_EXECUTION_INPUT_MIN = 0.35;
 const GESTURE_EXECUTION_INPUT_MAX = 1.35;
 const LEGACY_GESTURE_EXECUTION_EFFECTIVE_MAX = 1.45;
@@ -426,7 +431,7 @@ const els = {
   identityCompileStyleCfg: document.getElementById("identityCompileStyleCfg"),
   identityStyleSelect: document.getElementById("identityStyleSelect"),
   identityStyleStatus: document.getElementById("identityStyleStatus"),
-  identityCalibrationSelect: document.getElementById("identityCalibrationSelect"),
+  identityCalibrationList: document.getElementById("identityCalibrationList"),
   identityCalibrationUpload: document.getElementById("identityCalibrationUpload"),
   identityCalibrationStatus: document.getElementById("identityCalibrationStatus"),
   compiledIdentitySpeakerValue: document.getElementById("compiledIdentitySpeakerValue"),
@@ -4687,7 +4692,7 @@ function renderVoiceIdentityWorkspace() {
       ? `${selectedStyle.label}を再利用します。現在の設計値は変更されません。`
       : "現在の設計値をコンパイル時に独立したStyle JSONへ保存します。";
   }
-  const calibrationCount = selectedOptionValues(els.identityCalibrationSelect).length;
+  const calibrationCount = state.voiceIdentityCalibrationIds.size;
   if (els.identityCalibrationStatus) {
     els.identityCalibrationStatus.textContent = calibrationCount
       ? `${calibrationCount}件を選択中。${calibrationCount >= 3 ? "校正分布を構築できます。" : "閾値尺度は暫定fallbackです。"}`
@@ -4742,8 +4747,60 @@ function renderVoiceIdentityResources() {
     resources.styles || [],
     "現在のVoiceControlProfileを新規固定",
   );
-  populateExperimentSelect(els.identityCalibrationSelect, resources.calibrations || []);
+  renderVoiceIdentityCalibrationList();
   renderVoiceIdentityWorkspace();
+}
+
+function renderVoiceIdentityCalibrationList() {
+  const container = els.identityCalibrationList;
+  if (!container) return;
+  stopResourceAudioPreview(container);
+  const calibrations = state.voiceIdentityResources?.calibrations || [];
+  const availableIds = new Set(calibrations.map((item) => item.id));
+  for (const id of Array.from(state.voiceIdentityCalibrationIds)) {
+    if (!availableIds.has(id)) state.voiceIdentityCalibrationIds.delete(id);
+  }
+  container.replaceChildren();
+  if (!calibrations.length) {
+    const empty = document.createElement("p");
+    empty.className = "evaluation-file-empty";
+    empty.textContent = "校正WAVは未登録です。";
+    container.append(empty);
+    return;
+  }
+  for (const calibration of calibrations) {
+    const row = document.createElement("div");
+    row.className = "evaluation-file-row calibration";
+    row.setAttribute("role", "listitem");
+    const checkbox = document.createElement("input");
+    checkbox.type = "checkbox";
+    checkbox.checked = state.voiceIdentityCalibrationIds.has(calibration.id);
+    checkbox.setAttribute("aria-label", `${calibration.label}を校正に使用する`);
+    checkbox.addEventListener("change", () => {
+      if (checkbox.checked) {
+        if (state.voiceIdentityCalibrationIds.size >= MAX_CALIBRATION_RESOURCES) {
+          checkbox.checked = false;
+          setVoiceIdentityStatus(`校正音声は最大${MAX_CALIBRATION_RESOURCES}件です。`, true);
+          return;
+        }
+        state.voiceIdentityCalibrationIds.add(calibration.id);
+      } else {
+        state.voiceIdentityCalibrationIds.delete(calibration.id);
+      }
+      renderVoiceIdentityWorkspace();
+    });
+    const name = document.createElement("span");
+    name.className = "evaluation-file-name";
+    name.textContent = calibration.label;
+    name.title = calibration.label;
+    const play = createResourceAudioPreviewButton(
+      `/api/voice-identities/calibrations/${encodeURIComponent(calibration.id)}/audio`,
+      calibration.label,
+      (error) => setVoiceIdentityStatus(`校正音声を再生できません: ${error.message}`, true),
+    );
+    row.append(checkbox, name, play);
+    container.append(row);
+  }
 }
 
 async function refreshVoiceIdentities({ silent = false } = {}) {
@@ -4815,7 +4872,7 @@ async function compileVoiceIdentity() {
         style_profile: profile,
         caption: activeTtsCaption(profile),
         caption_guidance_scale: num(els.ttsCaptionGuidanceInput, 2),
-        calibration_ids: selectedOptionValues(els.identityCalibrationSelect),
+        calibration_ids: Array.from(state.voiceIdentityCalibrationIds),
       }),
     });
     state.activeCompiledIdentityId = identity.id;
@@ -5675,8 +5732,62 @@ function populateExperimentSelect(select, items, baseLabel = null) {
   }
 }
 
+function stopResourceAudioPreview(container = null) {
+  const button = state.resourcePreviewButton;
+  if (container && button && !container.contains(button)) return;
+  if (state.resourcePreviewAudio) {
+    state.resourcePreviewAudio.pause();
+    state.resourcePreviewAudio.currentTime = 0;
+  }
+  if (button) {
+    button.textContent = "▶";
+    button.classList.remove("playing");
+    button.setAttribute("aria-pressed", "false");
+  }
+  state.resourcePreviewAudio = null;
+  state.resourcePreviewButton = null;
+  state.resourcePreviewUrl = null;
+}
+
+function createResourceAudioPreviewButton(url, label, onError) {
+  const button = document.createElement("button");
+  button.type = "button";
+  button.className = "resource-audio-preview";
+  button.textContent = "▶";
+  button.title = `${label}を再生`;
+  button.setAttribute("aria-label", `${label}を確認再生`);
+  button.setAttribute("aria-pressed", "false");
+  button.addEventListener("click", async () => {
+    if (state.resourcePreviewUrl === url && state.resourcePreviewAudio) {
+      stopResourceAudioPreview();
+      return;
+    }
+    stopResourceAudioPreview();
+    const audio = new Audio(url);
+    state.resourcePreviewAudio = audio;
+    state.resourcePreviewButton = button;
+    state.resourcePreviewUrl = url;
+    button.textContent = "■";
+    button.classList.add("playing");
+    button.setAttribute("aria-pressed", "true");
+    audio.addEventListener("ended", () => stopResourceAudioPreview(), { once: true });
+    audio.addEventListener("error", () => {
+      stopResourceAudioPreview();
+      onError?.(new Error("音声ファイルを読み込めません。"));
+    }, { once: true });
+    try {
+      await audio.play();
+    } catch (error) {
+      stopResourceAudioPreview();
+      onError?.(error);
+    }
+  });
+  return button;
+}
+
 function renderEvaluationFileList(container, items, { reference = false } = {}) {
   if (!container) return;
+  stopResourceAudioPreview(container);
   container.replaceChildren();
   if (!items.length) {
     const empty = document.createElement("p");
@@ -5714,6 +5825,11 @@ function renderEvaluationFileList(container, items, { reference = false } = {}) 
     name.className = "evaluation-file-name";
     name.textContent = item.label;
     name.title = item.label;
+    const play = createResourceAudioPreviewButton(
+      `/api/experiments/resources/audio?id=${encodeURIComponent(item.id)}`,
+      item.label,
+      (error) => setExperimentStatus(`音声を再生できません: ${error.message}`, true),
+    );
     const remove = document.createElement("button");
     remove.type = "button";
     remove.className = "evaluation-file-remove";
@@ -5724,7 +5840,7 @@ function renderEvaluationFileList(container, items, { reference = false } = {}) 
       const action = reference ? discardEvaluationReference(item.id) : excludeEvaluationInput(item.id);
       action.catch((error) => setExperimentStatus(`一覧を更新できません: ${error.message}`, true));
     });
-    row.append(name, remove);
+    row.append(name, play, remove);
     container.append(row);
   }
 }
@@ -9918,7 +10034,6 @@ function installVoiceIdentityHandlers() {
   });
   els.identitySpeakerSelect?.addEventListener("input", renderVoiceIdentityWorkspace);
   els.identityStyleSelect?.addEventListener("input", renderVoiceIdentityWorkspace);
-  els.identityCalibrationSelect?.addEventListener("input", renderVoiceIdentityWorkspace);
   els.identitySpeakerUpload?.addEventListener("change", async (event) => {
     try {
       const registered = await registerSpeakerConditionFiles(event.target.files);
@@ -9941,12 +10056,23 @@ function installVoiceIdentityHandlers() {
         const calibration = await uploadVoiceCalibration(file);
         if (calibration) uploaded.push(calibration.id);
       }
-      await refreshVoiceIdentities({ silent: true });
-      for (const option of els.identityCalibrationSelect?.options || []) {
-        option.selected = uploaded.includes(option.value);
+      let reachedLimit = false;
+      for (const id of uploaded) {
+        if (state.voiceIdentityCalibrationIds.has(id)) continue;
+        if (state.voiceIdentityCalibrationIds.size >= MAX_CALIBRATION_RESOURCES) {
+          reachedLimit = true;
+          break;
+        }
+        state.voiceIdentityCalibrationIds.add(id);
       }
+      await refreshVoiceIdentities({ silent: true });
       renderVoiceIdentityWorkspace();
-      setVoiceIdentityStatus(`${uploaded.length}件の校正音声を登録しました。`);
+      setVoiceIdentityStatus(
+        reachedLimit
+          ? `校正WAVを登録しました。選択は最大${MAX_CALIBRATION_RESOURCES}件です。`
+          : `${uploaded.length}件の校正音声を登録しました。`,
+        reachedLimit,
+      );
     } catch (error) {
       setVoiceIdentityStatus(`校正音声を登録できません: ${error.message}`, true);
     } finally {

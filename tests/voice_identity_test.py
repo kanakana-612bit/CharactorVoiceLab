@@ -94,6 +94,12 @@ class VoiceIdentityStoreTest(unittest.TestCase):
         self.assertEqual(policy["candidate_count"], 1)
         self.assertFalse(policy["automatic_retry"])
 
+    def test_calibration_audio_can_be_resolved_for_local_preview(self):
+        calibration = self.store.store_calibration("preview.wav", sine_wav())
+        path = self.store.calibration_audio_path(calibration["id"])
+        self.assertTrue(path.is_file())
+        self.assertEqual(path.read_bytes(), sine_wav())
+
 
 if __name__ == "__main__":
     unittest.main()

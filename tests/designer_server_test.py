@@ -1,12 +1,17 @@
 import importlib.util
 import hashlib
+import io
 import json
+import math
 import pathlib
 import shutil
+import struct
 import threading
 import unittest
+import urllib.parse
 import urllib.request
 import uuid
+import wave
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from unittest import mock
 
@@ -19,6 +24,25 @@ SPEC = importlib.util.spec_from_file_location("designer_server", ROOT / "designe
 MODULE = importlib.util.module_from_spec(SPEC)
 assert SPEC.loader is not None
 SPEC.loader.exec_module(MODULE)
+
+
+def sine_wav(frequency=180.0, seconds=0.2, sample_rate=16000):
+    samples = int(seconds * sample_rate)
+    stream = io.BytesIO()
+    with wave.open(stream, "wb") as target:
+        target.setnchannels(1)
+        target.setsampwidth(2)
+        target.setframerate(sample_rate)
+        target.writeframes(
+            b"".join(
+                struct.pack(
+                    "<h",
+                    int(10000 * math.sin(2 * math.pi * frequency * index / sample_rate)),
+                )
+                for index in range(samples)
+            )
+        )
+    return stream.getvalue()
 
 
 def make_speaker_condition_project() -> tuple[pathlib.Path, pathlib.Path]:
@@ -402,6 +426,16 @@ class LocalProxyIntegrationTest(unittest.TestCase):
             resources = json.load(response)
         self.assertIn(uploaded["id"], {item["id"] for item in resources["voice_inputs"]})
 
+        preview_url = (
+            self.base_url
+            + "/api/experiments/resources/audio?"
+            + urllib.parse.urlencode({"id": uploaded["id"]})
+        )
+        with urllib.request.urlopen(preview_url) as response:
+            self.assertEqual(response.headers.get_content_type(), "audio/wav")
+            self.assertEqual(response.headers.get_content_disposition(), "inline")
+            self.assertEqual(response.read(), wav)
+
         exclude_request = urllib.request.Request(
             self.base_url + "/api/experiments/resources/exclude",
             data=json.dumps({"id": uploaded["id"]}).encode("utf-8"),
@@ -416,11 +450,23 @@ class LocalProxyIntegrationTest(unittest.TestCase):
         self.assertNotIn(uploaded["id"], {item["id"] for item in resources["voice_inputs"]})
 
     def test_voice_identity_resources_expose_standard_single_policy(self):
+        wav = sine_wav()
+        calibration = self.designer.voice_identity_store.store_calibration("preview.wav", wav)
         with urllib.request.urlopen(self.base_url + "/api/voice-identities/resources") as response:
             resources = json.load(response)
         self.assertEqual(resources["standard_generation"]["num_inference_steps"], 20)
         self.assertEqual(resources["standard_generation"]["candidate_count"], 1)
         self.assertFalse(resources["standard_generation"]["automatic_retry"])
+        preview_url = (
+            self.base_url
+            + "/api/voice-identities/calibrations/"
+            + urllib.parse.quote(calibration["id"], safe="")
+            + "/audio"
+        )
+        with urllib.request.urlopen(preview_url) as response:
+            self.assertEqual(response.headers.get_content_type(), "audio/wav")
+            self.assertEqual(response.headers.get_content_disposition(), "inline")
+            self.assertEqual(response.read(), wav)
 
     def test_voice_identity_can_be_compiled_through_local_api(self):
         payload = json.dumps(

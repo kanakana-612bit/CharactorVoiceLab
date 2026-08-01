@@ -2284,7 +2284,7 @@ pre {
 
 .evaluation-file-row {
   display: grid;
-  grid-template-columns: 24px minmax(0, 1fr) 34px;
+  grid-template-columns: 24px minmax(0, 1fr) 34px 34px;
   gap: 9px;
   align-items: center;
   min-height: 42px;
@@ -2293,7 +2293,11 @@ pre {
 }
 
 .evaluation-file-row.reference {
-  grid-template-columns: minmax(0, 1fr) 34px;
+  grid-template-columns: minmax(0, 1fr) 34px 34px;
+}
+
+.evaluation-file-row.calibration {
+  grid-template-columns: 24px minmax(0, 1fr) 34px;
 }
 
 .evaluation-file-row input[type="checkbox"] {
@@ -2310,15 +2314,29 @@ pre {
   line-height: 1.35;
 }
 
-.evaluation-file-remove {
+.evaluation-file-remove,
+.resource-audio-preview {
   width: 32px;
   height: 32px;
   padding: 0;
   border: 0;
   background: transparent;
   color: var(--muted);
-  font-size: 1.25rem;
   line-height: 1;
+}
+
+.evaluation-file-remove {
+  font-size: 1.25rem;
+}
+
+.resource-audio-preview {
+  font-size: 0.9rem;
+}
+
+.resource-audio-preview:hover,
+.resource-audio-preview.playing {
+  background: rgba(37, 121, 99, 0.12);
+  color: var(--accent);
 }
 
 .evaluation-file-remove:hover {

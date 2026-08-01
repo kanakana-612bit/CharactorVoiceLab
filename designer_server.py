@@ -98,9 +98,23 @@ class DesignerHandler(SimpleHTTPRequestHandler):
         super().end_headers()
 
     def do_GET(self) -> None:  # noqa: N802 - stdlib handler API
-        path = urllib.parse.urlsplit(self.path).path
+        parsed = urllib.parse.urlsplit(self.path)
+        path = parsed.path
         if path == "/api/voice-identities/resources":
             self._send_json(HTTPStatus.OK, self.server.voice_identity_store.resources())
+            return
+        calibration_audio_match = re.fullmatch(
+            r"/api/voice-identities/calibrations/([^/]+)/audio",
+            path,
+        )
+        if calibration_audio_match:
+            try:
+                audio_path = self.server.voice_identity_store.calibration_audio_path(
+                    calibration_audio_match.group(1)
+                )
+                self._send_file(audio_path, "audio/wav", inline=True)
+            except VoiceIdentityError as error:
+                self._send_json(HTTPStatus.NOT_FOUND, {"error": str(error)})
             return
         identity_match = re.fullmatch(r"/api/voice-identities/([^/]+)", path)
         if identity_match:
@@ -117,6 +131,16 @@ class DesignerHandler(SimpleHTTPRequestHandler):
             return
         if path == "/api/experiments/resources":
             self._send_json(HTTPStatus.OK, self.server.experiment_manager.resources())
+            return
+        if path == "/api/experiments/resources/audio":
+            query = urllib.parse.parse_qs(parsed.query)
+            try:
+                audio_path = self.server.experiment_manager.voice_preview_path(
+                    query.get("id", [None])[0]
+                )
+                self._send_file(audio_path, "audio/wav", inline=True)
+            except ExperimentError as error:
+                self._send_json(HTTPStatus.NOT_FOUND, {"error": str(error)})
             return
         if path == "/api/experiments/jobs":
             self._send_json(HTTPStatus.OK, self.server.experiment_manager.list_jobs())
@@ -569,7 +593,7 @@ class DesignerHandler(SimpleHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
-    def _send_file(self, path: Path, media_type: str) -> None:
+    def _send_file(self, path: Path, media_type: str, *, inline: bool = False) -> None:
         size = path.stat().st_size
         self.send_response(HTTPStatus.OK)
         self.send_header("Content-Type", media_type)
@@ -577,7 +601,8 @@ class DesignerHandler(SimpleHTTPRequestHandler):
         self.send_header("Cache-Control", "no-store")
         self.send_header(
             "Content-Disposition",
-            f'attachment; filename="{path.name.replace(chr(34), "")}"',
+            f'{"inline" if inline else "attachment"}; '
+            f'filename="{path.name.replace(chr(34), "")}"',
         )
         self.end_headers()
         with path.open("rb") as stream:

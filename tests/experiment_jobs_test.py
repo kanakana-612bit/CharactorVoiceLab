@@ -53,8 +53,10 @@ class ExperimentJobManagerTest(unittest.TestCase):
         wav = b"RIFF" + (4).to_bytes(4, "little") + b"WAVE"
         resource = self.manager.store_upload("wav", "../voice.wav", wav)
         self.assertTrue(resource["id"].startswith("upload-wav:wav/"))
+        path = self.manager._resolve_voice_resource(resource["id"])
         resources = self.manager.resources()
         self.assertIn(resource["id"], {item["id"] for item in resources["voice_inputs"]})
+        self.assertEqual(self.manager.voice_preview_path(resource["id"]), path)
 
         with self.assertRaises(ExperimentError):
             self.manager.store_upload("wav", "not-wav.wav", b"not audio")

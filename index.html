@@ -713,7 +713,12 @@
                   <p>話者距離と音響値のローカル比較基準</p>
                 </div>
               </div>
-              <select id="identityCalibrationSelect" multiple size="5" aria-label="校正音声"></select>
+              <div
+                id="identityCalibrationList"
+                class="evaluation-file-list compact identity-calibration-list"
+                role="list"
+                aria-label="校正音声"
+              ></div>
               <label class="file-command">
                 校正WAVを登録
                 <input id="identityCalibrationUpload" type="file" accept=".wav,audio/wav" multiple />

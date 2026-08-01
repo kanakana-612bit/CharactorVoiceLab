@@ -320,6 +320,10 @@ class VoiceIdentityStore:
             "f0_median_hz": body["acoustic_values"]["f0_median_hz"],
         }
 
+    def calibration_audio_path(self, calibration_id: Any) -> Path:
+        record = self._read_calibration(calibration_id)
+        return (self.calibration_root / record["wav_file"]).resolve()
+
     def compile(self, payload: Mapping[str, Any]) -> dict[str, Any]:
         if not isinstance(payload, Mapping):
             raise VoiceIdentityError("Compile request must be an object.")
@@ -512,7 +516,12 @@ class VoiceIdentityStore:
         value = self._read_json(self.calibration_root / f"{calibration_id}.json")
         if not value or value.get("schema_version") != CALIBRATION_SCHEMA:
             raise VoiceIdentityError(f"Calibration was not found: {calibration_id}")
-        wav_path = self.calibration_root / value.get("wav_file", "")
+        wav_file = value.get("wav_file")
+        if not isinstance(wav_file, str) or Path(wav_file).name != wav_file:
+            raise VoiceIdentityError(f"Calibration WAV path is invalid: {calibration_id}")
+        wav_path = (self.calibration_root / wav_file).resolve()
+        if wav_path.parent != self.calibration_root.resolve():
+            raise VoiceIdentityError(f"Calibration WAV path is invalid: {calibration_id}")
         if not wav_path.is_file() or _sha256_bytes(wav_path.read_bytes()) != value.get("wav_sha256"):
             raise VoiceIdentityError(f"Calibration WAV integrity check failed: {calibration_id}")
         return value
