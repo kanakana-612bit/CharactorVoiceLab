@@ -96,6 +96,7 @@ const state = {
   resourcePreviewAudio: null,
   resourcePreviewButton: null,
   resourcePreviewUrl: null,
+  selectedIdentitySpeakerId: null,
 };
 
 const referenceData = window.CVL_REFERENCE;
@@ -4678,8 +4679,9 @@ function renderVoiceIdentityWorkspace() {
     }
   }
 
+  const selectedSpeakerId = state.selectedIdentitySpeakerId || els.identitySpeakerSelect?.value;
   const selectedSpeaker = (state.experimentResources?.speech_speaker_conditions || [])
-    .find((item) => item.id === els.identitySpeakerSelect?.value);
+    .find((item) => item.id === selectedSpeakerId);
   if (els.identitySpeakerStatus) {
     els.identitySpeakerStatus.textContent = selectedSpeaker
       ? `${selectedSpeaker.shape?.join("x") || "shape不明"} / ${selectedSpeaker.model_binding_status || "unbound"}`
@@ -4737,11 +4739,16 @@ function renderVoiceIdentityResources() {
   if (els.compiledVoiceIdentitySelect) {
     els.compiledVoiceIdentitySelect.value = state.activeCompiledIdentityId || "";
   }
-  populateExperimentSelect(
-    els.identitySpeakerSelect,
-    state.experimentResources?.speech_speaker_conditions || [],
-    "使用しない",
-  );
+  const speechSpeakers = state.experimentResources?.speech_speaker_conditions || [];
+  const availableSpeakerIds = new Set(speechSpeakers.map((item) => item.id));
+  const selectedSpeakerId = state.selectedIdentitySpeakerId || els.identitySpeakerSelect?.value;
+  populateExperimentSelect(els.identitySpeakerSelect, speechSpeakers, "使用しない");
+  state.selectedIdentitySpeakerId = availableSpeakerIds.has(selectedSpeakerId)
+    ? selectedSpeakerId
+    : null;
+  if (els.identitySpeakerSelect) {
+    els.identitySpeakerSelect.value = state.selectedIdentitySpeakerId || "";
+  }
   populateExperimentSelect(
     els.identityStyleSelect,
     resources.styles || [],
@@ -4858,6 +4865,16 @@ async function uploadVoiceCalibration(file) {
 async function compileVoiceIdentity() {
   const profile = buildVoiceControlProfile();
   if (!profile) throw new Error("VoiceControlProfileを構築できません。");
+  const speakerCondition = state.selectedIdentitySpeakerId
+    || els.identitySpeakerSelect?.value
+    || null;
+  if (
+    speakerCondition
+    && !(state.experimentResources?.speech_speaker_conditions || [])
+      .some((item) => item.id === speakerCondition)
+  ) {
+    throw new Error("選択したSpeaker Embeddingは現在のモデルで使用できません。状態を更新してください。");
+  }
   setVoiceIdentityStatus("音声同一性をコンパイルしています。");
   if (els.compileVoiceIdentityBtn) els.compileVoiceIdentityBtn.disabled = true;
   try {
@@ -4867,7 +4884,7 @@ async function compileVoiceIdentity() {
       body: JSON.stringify({
         name: els.voiceIdentityNameInput?.value?.trim() || "voice_profile",
         model: els.ttsModelSelect?.value || "irodori-vdes",
-        speaker_condition: els.identitySpeakerSelect?.value || null,
+        speaker_condition: speakerCondition,
         style_id: els.identityStyleSelect?.value || null,
         style_profile: profile,
         caption: activeTtsCaption(profile),
@@ -4875,6 +4892,11 @@ async function compileVoiceIdentity() {
         calibration_ids: Array.from(state.voiceIdentityCalibrationIds),
       }),
     });
+    if (speakerCondition && identity?.speaker?.file !== speakerCondition) {
+      throw new Error(
+        `Speaker Embeddingの固定を確認できません。要求: ${speakerCondition} / 応答: ${identity?.speaker?.file || "未使用"}`,
+      );
+    }
     state.activeCompiledIdentityId = identity.id;
     state.activeCompiledIdentity = identity;
     await refreshVoiceIdentities({ silent: true });
@@ -10032,14 +10054,20 @@ function installVoiceIdentityHandlers() {
       setVoiceIdentityStatus(`音声同一性を選択できません: ${error.message}`, true),
     );
   });
-  els.identitySpeakerSelect?.addEventListener("input", renderVoiceIdentityWorkspace);
+  els.identitySpeakerSelect?.addEventListener("input", (event) => {
+    state.selectedIdentitySpeakerId = event.target.value || null;
+    renderVoiceIdentityWorkspace();
+  });
   els.identityStyleSelect?.addEventListener("input", renderVoiceIdentityWorkspace);
   els.identitySpeakerUpload?.addEventListener("change", async (event) => {
     try {
       const registered = await registerSpeakerConditionFiles(event.target.files);
+      if (registered.length) {
+        state.selectedIdentitySpeakerId = registered[registered.length - 1];
+      }
       await refreshVoiceIdentities({ silent: true });
       if (registered.length && els.identitySpeakerSelect) {
-        els.identitySpeakerSelect.value = registered[registered.length - 1];
+        els.identitySpeakerSelect.value = state.selectedIdentitySpeakerId;
       }
       renderVoiceIdentityWorkspace();
       setVoiceIdentityStatus(`${registered.length}件のSpeaker状態を登録しました。`);

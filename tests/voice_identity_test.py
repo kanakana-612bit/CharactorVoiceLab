@@ -6,6 +6,10 @@ import unittest
 import uuid
 import wave
 from pathlib import Path
+from unittest import mock
+
+import torch
+from safetensors.torch import save_file
 
 from voice_identity import VoiceIdentityStore
 
@@ -99,6 +103,40 @@ class VoiceIdentityStoreTest(unittest.TestCase):
         path = self.store.calibration_audio_path(calibration["id"])
         self.assertTrue(path.is_file())
         self.assertEqual(path.read_bytes(), sine_wav())
+
+    def test_compile_retains_requested_speaker_condition(self):
+        speaker_name = "selected.speaker.safetensors"
+        save_file(
+            {"speaker_embedding": torch.zeros((16, 768), dtype=torch.float32)},
+            str(self.store.speaker_root / speaker_name),
+        )
+        model_metadata = {
+            "metadata_available": True,
+            "model_config_sha256": "a" * 64,
+            "architecture": {"use_speaker_condition": True, "speaker_dim": 768},
+        }
+        model_contract = {
+            "config_sha256": "a" * 64,
+            "checkpoint": {"sha256": None},
+            "speaker_condition": {"enabled": True, "dimension": 768},
+        }
+        with mock.patch(
+            "voice_identity._model_contract",
+            return_value=(model_metadata, model_contract),
+        ):
+            identity = self.store.compile(
+                {
+                    "name": "speaker-fixed",
+                    "model": "irodori-vdes",
+                    "speaker_condition": speaker_name,
+                    "style_profile": {"identity_anchor": {"f0_mean_hz": 180}},
+                    "caption": "natural Japanese voice",
+                    "caption_guidance_scale": 2,
+                    "calibration_ids": [],
+                }
+            )
+        self.assertEqual(identity["speaker"]["file"], speaker_name)
+        self.assertTrue(identity["speaker"]["model_contract_compatible"])
 
 
 if __name__ == "__main__":

@@ -382,7 +382,8 @@ class VoiceIdentityStore:
                 raise VoiceIdentityError("Speaker condition file contract is incompatible.")
             if not artifact["target_model_contract_compatible"]:
                 raise VoiceIdentityError("Speaker condition is incompatible with the model.")
-            if artifact.get("sidecar", {}).get("provenance", {}).get("semantic_voice") is False:
+            sidecar = artifact.get("sidecar") or {}
+            if sidecar.get("provenance", {}).get("semantic_voice") is False:
                 raise VoiceIdentityError("A non-semantic format fixture cannot be compiled for speech.")
             if artifact["model_binding_status"] in {"invalid", "incompatible"}:
                 raise VoiceIdentityError("Speaker condition provenance is incompatible.")

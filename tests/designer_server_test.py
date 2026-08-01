@@ -8,6 +8,7 @@ import shutil
 import struct
 import threading
 import unittest
+import urllib.error
 import urllib.parse
 import urllib.request
 import uuid
@@ -502,6 +503,24 @@ class LocalProxyIntegrationTest(unittest.TestCase):
             / f"{identity['id']}.json"
         )
         self.assertTrue(manifest.is_file())
+
+    def test_unexpected_voice_identity_error_returns_json_instead_of_dropping_connection(self):
+        request = urllib.request.Request(
+            self.base_url + "/api/voice-identities/compile",
+            data=b"{}",
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        with mock.patch.object(
+            self.designer.voice_identity_store,
+            "compile",
+            side_effect=RuntimeError("test failure"),
+        ):
+            with self.assertRaises(urllib.error.HTTPError) as raised:
+                urllib.request.urlopen(request)
+        self.assertEqual(raised.exception.code, 500)
+        payload = json.loads(raised.exception.read())
+        self.assertIn("RuntimeError", payload["error"])
 
     def test_models_and_wav_are_proxied(self):
         with urllib.request.urlopen(self.base_url + "/api/audio-cpp/models") as response:

@@ -271,6 +271,17 @@ class DesignerHandler(SimpleHTTPRequestHandler):
                 self._send_json(HTTPStatus.CREATED, identity)
             except (VoiceIdentityError, ValueError) as error:
                 self._send_json(HTTPStatus.BAD_REQUEST, {"error": str(error)})
+            except Exception as error:  # Keep the local API response intact on unexpected failures.
+                self.log_error("Voice identity compilation failed: %s", error)
+                self._send_json(
+                    HTTPStatus.INTERNAL_SERVER_ERROR,
+                    {
+                        "error": (
+                            "Voice identity compilation failed unexpectedly "
+                            f"({type(error).__name__})."
+                        )
+                    },
+                )
             return
         if path == "/api/voice-identities/calibrations":
             query = urllib.parse.parse_qs(parsed.query)
