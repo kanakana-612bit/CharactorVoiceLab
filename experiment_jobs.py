@@ -174,6 +174,7 @@ class ExperimentJobManager:
         self.job_root = self.project_root / "runtime" / "experiment_jobs"
         self.output_root = self.project_root / "runtime" / "experiment_outputs"
         self.upload_root = self.project_root / "runtime" / "experiment_inputs"
+        self.excluded_voice_inputs_path = self.upload_root / "excluded_voice_inputs.json"
         self.speaker_root = self.project_root / "runtime" / "speaker_conditions"
         for root in (self.job_root, self.output_root, self.upload_root, self.speaker_root):
             root.mkdir(parents=True, exist_ok=True)
@@ -229,6 +230,14 @@ class ExperimentJobManager:
                 voice_inputs.append(
                     {"id": f"benchmark:{relative}", "label": f"ベンチマーク / {relative}"}
                 )
+        stored_excluded_voice_inputs = self._excluded_voice_inputs()
+        available_voice_input_ids = {item["id"] for item in voice_inputs}
+        excluded_voice_inputs = stored_excluded_voice_inputs & available_voice_input_ids
+        if excluded_voice_inputs != stored_excluded_voice_inputs:
+            self._write_excluded_voice_inputs(excluded_voice_inputs)
+        voice_inputs = [
+            item for item in voice_inputs if item["id"] not in excluded_voice_inputs
+        ]
         return {
             "schema_version": "cvd_experiment_resources_0.1",
             "speaker_conditions": speakers,
@@ -237,8 +246,28 @@ class ExperimentJobManager:
             ],
             "profiles": profiles,
             "voice_inputs": voice_inputs,
+            "excluded_voice_input_count": len(excluded_voice_inputs),
             "manifests": manifests,
         }
+
+    def exclude_voice_input(self, resource_id: Any) -> dict[str, Any]:
+        normalized = _text(resource_id, "voice resource", 512, required=True)
+        self._resolve_voice_resource(normalized)
+        excluded = self._excluded_voice_inputs()
+        excluded.add(normalized)
+        self._write_excluded_voice_inputs(excluded)
+        return {"id": normalized, "excluded": True}
+
+    def restore_voice_inputs(self) -> dict[str, Any]:
+        restored = len(self._excluded_voice_inputs())
+        self._write_excluded_voice_inputs(set())
+        return {"restored": restored}
+
+    def discard_reference_upload(self, resource_id: Any) -> dict[str, Any]:
+        normalized = _text(resource_id, "reference resource", 512, required=True)
+        path = self._resolve_upload(normalized, "reference-wav")
+        path.unlink(missing_ok=True)
+        return {"id": normalized, "discarded": True}
 
     def store_upload(
         self,
@@ -254,11 +283,11 @@ class ExperimentJobManager:
             return self._store_speaker(filename, body)
         if kind == "speaker-sidecar":
             return self._store_speaker_sidecar(target, filename, body)
-        if kind not in {"wav", "profile", "manifest"}:
+        if kind not in {"wav", "reference-wav", "profile", "manifest"}:
             raise ExperimentError("Upload kind is invalid.")
         name = _safe_name(filename, f"{kind}.dat")
         suffix = Path(name).suffix.lower()
-        if kind == "wav":
+        if kind in {"wav", "reference-wav"}:
             if suffix != ".wav" or not (
                 body.startswith(b"RIFF") and len(body) >= 12 and body[8:12] == b"WAVE"
             ):
@@ -837,6 +866,8 @@ class ExperimentJobManager:
         resource_id = _text(value, "voice resource", 512, required=True)
         if resource_id.startswith("upload-wav:"):
             return self._resolve_upload(resource_id, "wav")
+        if resource_id.startswith("upload-reference-wav:"):
+            return self._resolve_upload(resource_id, "reference-wav")
         if resource_id.startswith("benchmark:"):
             root = (self.project_root / "benchmark_results").resolve()
             relative = resource_id[len("benchmark:"):]
@@ -853,6 +884,39 @@ class ExperimentJobManager:
         if path.is_dir() and not any(path.rglob("*.wav")):
             raise ExperimentError("Voice resource directory contains no WAV files.")
         return path
+
+    def _excluded_voice_inputs(self) -> set[str]:
+        try:
+            value = json.loads(self.excluded_voice_inputs_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            return set()
+        if not isinstance(value, list):
+            return set()
+        return {
+            item for item in value
+            if isinstance(item, str) and len(item) <= 512
+        }
+
+    def _write_excluded_voice_inputs(self, values: set[str]) -> None:
+        self.excluded_voice_inputs_path.parent.mkdir(parents=True, exist_ok=True)
+        temporary = self.excluded_voice_inputs_path.with_suffix(".tmp")
+        temporary.write_text(
+            json.dumps(sorted(values), ensure_ascii=False, indent=2) + "\n",
+            encoding="utf-8",
+        )
+        temporary.replace(self.excluded_voice_inputs_path)
+
+    def _cleanup_job_reference_uploads(self, job_id: str) -> None:
+        with self._lock:
+            references = list(self._jobs.get(job_id, {}).get("options", {}).get("references", []))
+        for resource_id in references:
+            if not isinstance(resource_id, str) or not resource_id.startswith("upload-reference-wav:"):
+                continue
+            try:
+                path = self._resolve_upload(resource_id, "reference-wav")
+            except ExperimentError:
+                continue
+            path.unlink(missing_ok=True)
 
     def _run_job(self, job_id: str, output_dir: Path | None) -> None:
         with self._lock:
@@ -909,6 +973,8 @@ class ExperimentJobManager:
                 job["finished_at"] = _now()
                 self._processes.pop(job_id, None)
                 self._persist(job)
+        finally:
+            self._cleanup_job_reference_uploads(job_id)
 
     def _append_log(self, job_id: str, line: str) -> None:
         with self._lock:

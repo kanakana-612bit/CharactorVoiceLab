@@ -295,6 +295,28 @@ class DesignerHandler(SimpleHTTPRequestHandler):
             except ExperimentNotFoundError as error:
                 self._send_json(HTTPStatus.NOT_FOUND, {"error": str(error)})
             return
+        if path == "/api/experiments/resources/exclude":
+            try:
+                result = self.server.experiment_manager.exclude_voice_input(
+                    self._read_json().get("id")
+                )
+                self._send_json(HTTPStatus.OK, result)
+            except (ExperimentError, ValueError) as error:
+                self._send_json(HTTPStatus.BAD_REQUEST, {"error": str(error)})
+            return
+        if path == "/api/experiments/resources/restore":
+            result = self.server.experiment_manager.restore_voice_inputs()
+            self._send_json(HTTPStatus.OK, result)
+            return
+        if path == "/api/experiments/uploads/discard-reference":
+            try:
+                result = self.server.experiment_manager.discard_reference_upload(
+                    self._read_json().get("id")
+                )
+                self._send_json(HTTPStatus.OK, result)
+            except (ExperimentError, ValueError) as error:
+                self._send_json(HTTPStatus.BAD_REQUEST, {"error": str(error)})
+            return
         if path == "/api/experiments/uploads":
             query = urllib.parse.parse_qs(parsed.query)
             kind = query.get("kind", [""])[0]

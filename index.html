@@ -967,30 +967,49 @@
                 </div>
                 <button class="primary" type="submit">実行</button>
               </div>
-              <div class="experiment-resource-row">
-                <label class="file-command">
-                  WAVを登録
-                  <input id="experimentWavUpload" type="file" accept=".wav,audio/wav" multiple />
-                </label>
-                <label class="file-command">
-                  manifestを登録
-                  <input id="experimentManifestUpload" type="file" accept=".json,application/json" />
-                </label>
+              <div class="evaluation-resource-stack">
+                <section class="evaluation-resource-panel evaluation-target-panel">
+                  <div class="evaluation-resource-head">
+                    <div>
+                      <strong>評価対象</strong>
+                      <span>チェックした音声・実験ディレクトリを評価します</span>
+                    </div>
+                    <div class="evaluation-resource-actions">
+                      <button id="experimentRestoreExcludedInputsBtn" type="button" hidden>除外を戻す</button>
+                      <label class="file-command">
+                        評価対象を追加
+                        <input id="experimentWavUpload" type="file" accept=".wav,audio/wav" multiple />
+                      </label>
+                    </div>
+                  </div>
+                  <div id="experimentEvaluationInputs" class="evaluation-file-list" role="list"></div>
+                </section>
+
+                <section class="evaluation-resource-panel evaluation-reference-panel">
+                  <div class="evaluation-resource-head">
+                    <div>
+                      <strong>参照音声</strong>
+                      <span>必要な評価でのみアップロードします</span>
+                    </div>
+                    <label class="file-command">
+                      参照音声を追加
+                      <input id="experimentReferenceWavUpload" type="file" accept=".wav,audio/wav" multiple />
+                    </label>
+                  </div>
+                  <div id="experimentEvaluationReferences" class="evaluation-file-list compact" role="list"></div>
+                  <p class="note">参照音声の一時コピーは、評価ジョブ終了後に削除されます。</p>
+                </section>
               </div>
-              <div class="form-grid experiment-form-grid">
-                <label>
-                  評価対象（複数選択可）
-                  <select id="experimentEvaluationInputs" multiple size="7"></select>
-                </label>
-                <label>
-                  参照音声（任意・複数選択可）
-                  <select id="experimentEvaluationReferences" multiple size="7"></select>
-                </label>
+              <div class="form-grid experiment-form-grid evaluation-option-grid">
                 <label>
                   manifest
                   <select id="experimentEvaluationManifest">
                     <option value="">使用しない</option>
                   </select>
+                </label>
+                <label class="file-command evaluation-manifest-upload">
+                  manifestを登録
+                  <input id="experimentManifestUpload" type="file" accept=".json,application/json" />
                 </label>
                 <label>
                   目標F0 Hz

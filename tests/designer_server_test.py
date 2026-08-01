@@ -402,6 +402,19 @@ class LocalProxyIntegrationTest(unittest.TestCase):
             resources = json.load(response)
         self.assertIn(uploaded["id"], {item["id"] for item in resources["voice_inputs"]})
 
+        exclude_request = urllib.request.Request(
+            self.base_url + "/api/experiments/resources/exclude",
+            data=json.dumps({"id": uploaded["id"]}).encode("utf-8"),
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        with urllib.request.urlopen(exclude_request) as response:
+            excluded = json.load(response)
+        self.assertTrue(excluded["excluded"])
+        with urllib.request.urlopen(self.base_url + "/api/experiments/resources") as response:
+            resources = json.load(response)
+        self.assertNotIn(uploaded["id"], {item["id"] for item in resources["voice_inputs"]})
+
     def test_voice_identity_resources_expose_standard_single_policy(self):
         with urllib.request.urlopen(self.base_url + "/api/voice-identities/resources") as response:
             resources = json.load(response)

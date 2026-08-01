@@ -61,6 +61,43 @@ class ExperimentJobManagerTest(unittest.TestCase):
         with self.assertRaises(ExperimentError):
             self.manager.store_upload("profile", "profile.json", b"{broken")
 
+    def test_voice_input_can_be_hidden_without_deleting_source(self):
+        wav = b"RIFF" + (4).to_bytes(4, "little") + b"WAVE"
+        resource = self.manager.store_upload("wav", "candidate.wav", wav)
+        path = self.manager._resolve_voice_resource(resource["id"])
+        self.manager.exclude_voice_input(resource["id"])
+        resources = self.manager.resources()
+        self.assertNotIn(resource["id"], {item["id"] for item in resources["voice_inputs"]})
+        self.assertEqual(resources["excluded_voice_input_count"], 1)
+        self.assertTrue(path.is_file())
+
+        restored = self.manager.restore_voice_inputs()
+        self.assertEqual(restored["restored"], 1)
+        resources = self.manager.resources()
+        self.assertIn(resource["id"], {item["id"] for item in resources["voice_inputs"]})
+
+    def test_reference_upload_is_ephemeral_and_not_listed_as_candidate(self):
+        wav = b"RIFF" + (4).to_bytes(4, "little") + b"WAVE"
+        resource = self.manager.store_upload("reference-wav", "reference.wav", wav)
+        self.assertTrue(resource["id"].startswith("upload-reference-wav:"))
+        self.assertNotIn(
+            resource["id"],
+            {item["id"] for item in self.manager.resources()["voice_inputs"]},
+        )
+        command, _, safe = self.manager._build_command(
+            "20260801T120000-1234abcd",
+            "voice_evaluation",
+            {
+                "inputs": [self.manager.store_upload("wav", "candidate.wav", wav)["id"]],
+                "references": [resource["id"]],
+            },
+        )
+        self.assertIn("--reference", command)
+        self.assertEqual(safe["references"], [resource["id"]])
+        self.manager.discard_reference_upload(resource["id"])
+        with self.assertRaises(ExperimentError):
+            self.manager._resolve_voice_resource(resource["id"])
+
     def test_voice_evaluation_accepts_only_managed_resources(self):
         wav = b"RIFF" + (4).to_bytes(4, "little") + b"WAVE"
         resource = self.manager.store_upload("wav", "candidate.wav", wav)

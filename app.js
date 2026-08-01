@@ -90,6 +90,8 @@ const state = {
   activeExperimentTool: "runtime_observation",
   activeExperimentJobId: null,
   experimentPollTimer: null,
+  evaluationInputIds: new Set(),
+  evaluationReferenceResources: [],
 };
 
 const referenceData = window.CVL_REFERENCE;
@@ -101,6 +103,7 @@ const labels = landmarkSystem.labels;
 const featureDefs = referenceData.anthropometricFeaturePriors;
 const APP_VERSION = "0.1";
 const STANDARD_TTS_INFERENCE_STEPS = 20;
+const MAX_EVALUATION_RESOURCES = 16;
 const GESTURE_EXECUTION_INPUT_MIN = 0.35;
 const GESTURE_EXECUTION_INPUT_MAX = 1.35;
 const LEGACY_GESTURE_EXECUTION_EFFECTIVE_MAX = 1.45;
@@ -476,6 +479,8 @@ const els = {
   experimentStabilityCaption: document.getElementById("experimentStabilityCaption"),
   voiceEvaluationForm: document.getElementById("voiceEvaluationForm"),
   experimentWavUpload: document.getElementById("experimentWavUpload"),
+  experimentReferenceWavUpload: document.getElementById("experimentReferenceWavUpload"),
+  experimentRestoreExcludedInputsBtn: document.getElementById("experimentRestoreExcludedInputsBtn"),
   experimentManifestUpload: document.getElementById("experimentManifestUpload"),
   experimentEvaluationInputs: document.getElementById("experimentEvaluationInputs"),
   experimentEvaluationReferences: document.getElementById("experimentEvaluationReferences"),
@@ -5670,6 +5675,106 @@ function populateExperimentSelect(select, items, baseLabel = null) {
   }
 }
 
+function renderEvaluationFileList(container, items, { reference = false } = {}) {
+  if (!container) return;
+  container.replaceChildren();
+  if (!items.length) {
+    const empty = document.createElement("p");
+    empty.className = "evaluation-file-empty";
+    empty.textContent = reference
+      ? "参照音声は未指定です。必要な場合だけアップロードしてください。"
+      : "表示できる評価対象がありません。WAVを追加してください。";
+    container.append(empty);
+    return;
+  }
+  for (const item of items) {
+    const row = document.createElement("div");
+    row.className = `evaluation-file-row${reference ? " reference" : ""}`;
+    row.setAttribute("role", "listitem");
+    if (!reference) {
+      const checkbox = document.createElement("input");
+      checkbox.type = "checkbox";
+      checkbox.checked = state.evaluationInputIds.has(item.id);
+      checkbox.setAttribute("aria-label", `${item.label}を評価対象にする`);
+      checkbox.addEventListener("change", () => {
+        if (checkbox.checked) {
+          if (state.evaluationInputIds.size >= MAX_EVALUATION_RESOURCES) {
+            checkbox.checked = false;
+            setExperimentStatus(`評価対象は最大${MAX_EVALUATION_RESOURCES}件です。`, true);
+            return;
+          }
+          state.evaluationInputIds.add(item.id);
+        } else {
+          state.evaluationInputIds.delete(item.id);
+        }
+      });
+      row.append(checkbox);
+    }
+    const name = document.createElement("span");
+    name.className = "evaluation-file-name";
+    name.textContent = item.label;
+    name.title = item.label;
+    const remove = document.createElement("button");
+    remove.type = "button";
+    remove.className = "evaluation-file-remove";
+    remove.textContent = "×";
+    remove.title = reference ? "参照音声を取り消す" : "一覧から除外";
+    remove.setAttribute("aria-label", `${item.label}を${reference ? "取り消す" : "一覧から除外する"}`);
+    remove.addEventListener("click", () => {
+      const action = reference ? discardEvaluationReference(item.id) : excludeEvaluationInput(item.id);
+      action.catch((error) => setExperimentStatus(`一覧を更新できません: ${error.message}`, true));
+    });
+    row.append(name, remove);
+    container.append(row);
+  }
+}
+
+function renderEvaluationResources() {
+  const inputs = state.experimentResources?.voice_inputs || [];
+  const availableIds = new Set(inputs.map((item) => item.id));
+  for (const id of Array.from(state.evaluationInputIds)) {
+    if (!availableIds.has(id)) state.evaluationInputIds.delete(id);
+  }
+  renderEvaluationFileList(els.experimentEvaluationInputs, inputs);
+  renderEvaluationFileList(
+    els.experimentEvaluationReferences,
+    state.evaluationReferenceResources,
+    { reference: true },
+  );
+  const excludedCount = Number(state.experimentResources?.excluded_voice_input_count || 0);
+  if (els.experimentRestoreExcludedInputsBtn) {
+    els.experimentRestoreExcludedInputsBtn.hidden = excludedCount <= 0;
+    els.experimentRestoreExcludedInputsBtn.textContent = `除外を戻す (${excludedCount})`;
+  }
+}
+
+async function excludeEvaluationInput(resourceId) {
+  await experimentApi("/api/experiments/resources/exclude", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ id: resourceId }),
+  });
+  state.evaluationInputIds.delete(resourceId);
+  await refreshExperimentWorkspace({ silent: true });
+}
+
+async function restoreEvaluationInputs() {
+  await experimentApi("/api/experiments/resources/restore", { method: "POST" });
+  await refreshExperimentWorkspace({ silent: true });
+}
+
+async function discardEvaluationReference(resourceId) {
+  await experimentApi("/api/experiments/uploads/discard-reference", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ id: resourceId }),
+  });
+  state.evaluationReferenceResources = state.evaluationReferenceResources.filter(
+    (item) => item.id !== resourceId,
+  );
+  renderEvaluationResources();
+}
+
 function renderExperimentResources() {
   const resources = state.experimentResources || {};
   populateExperimentSelect(
@@ -5685,8 +5790,7 @@ function renderExperimentResources() {
     resources.speech_speaker_conditions || resources.speaker_conditions,
     "使用しない",
   );
-  populateExperimentSelect(els.experimentEvaluationInputs, resources.voice_inputs);
-  populateExperimentSelect(els.experimentEvaluationReferences, resources.voice_inputs);
+  renderEvaluationResources();
   populateExperimentSelect(
     els.experimentEvaluationManifest,
     resources.manifests,
@@ -5863,8 +5967,10 @@ async function startExperiment(tool, options) {
     state.activeExperimentJobId = job.id;
     setExperimentStatus(`${job.label}を開始しました。`);
     await refreshExperimentWorkspace({ silent: true });
+    return job;
   } catch (error) {
     setExperimentStatus(`実行できません: ${error.message}`, true);
+    return null;
   }
 }
 
@@ -6003,14 +6109,18 @@ function installExperimentHandlers() {
       duration_scale: num(els.experimentStabilityDuration, 1),
     });
   });
-  els.voiceEvaluationForm?.addEventListener("submit", (event) => {
+  els.voiceEvaluationForm?.addEventListener("submit", async (event) => {
     event.preventDefault();
-    startExperiment("voice_evaluation", {
-      inputs: selectedOptionValues(els.experimentEvaluationInputs),
-      references: selectedOptionValues(els.experimentEvaluationReferences),
+    const job = await startExperiment("voice_evaluation", {
+      inputs: Array.from(state.evaluationInputIds),
+      references: state.evaluationReferenceResources.map((item) => item.id),
       manifest_id: els.experimentEvaluationManifest?.value || "",
       target_f0: optionalNum(els.experimentEvaluationTargetF0),
     });
+    if (job) {
+      state.evaluationReferenceResources = [];
+      renderEvaluationResources();
+    }
   });
   els.runtimeDiagnosticsForm?.addEventListener("submit", (event) => {
     event.preventDefault();
@@ -6062,19 +6172,59 @@ function installExperimentHandlers() {
   });
   els.experimentWavUpload?.addEventListener("change", async (event) => {
     const uploaded = [];
+    let reachedLimit = false;
     try {
       for (const file of Array.from(event.target.files || [])) {
         const resource = await uploadExperimentFile(file, "wav");
         if (resource) uploaded.push(resource.id);
       }
-      for (const option of els.experimentEvaluationInputs.options) {
-        option.selected = uploaded.includes(option.value);
+      for (const id of uploaded) {
+        if (state.evaluationInputIds.has(id)) continue;
+        if (state.evaluationInputIds.size >= MAX_EVALUATION_RESOURCES) {
+          reachedLimit = true;
+          break;
+        }
+        state.evaluationInputIds.add(id);
+      }
+      renderEvaluationResources();
+      if (reachedLimit) {
+        setExperimentStatus(
+          `ファイルは登録しましたが、評価対象の選択は最大${MAX_EVALUATION_RESOURCES}件です。`,
+          true,
+        );
       }
     } catch (error) {
       setExperimentStatus(`登録できません: ${error.message}`, true);
     } finally {
       event.target.value = "";
     }
+  });
+  els.experimentReferenceWavUpload?.addEventListener("change", async (event) => {
+    try {
+      for (const file of Array.from(event.target.files || [])) {
+        if (state.evaluationReferenceResources.length >= MAX_EVALUATION_RESOURCES) {
+          setExperimentStatus(`参照音声は最大${MAX_EVALUATION_RESOURCES}件です。`, true);
+          break;
+        }
+        const resource = await uploadExperimentFile(file, "reference-wav");
+        if (
+          resource
+          && !state.evaluationReferenceResources.some((item) => item.id === resource.id)
+        ) {
+          state.evaluationReferenceResources.push(resource);
+        }
+      }
+      renderEvaluationResources();
+    } catch (error) {
+      setExperimentStatus(`参照音声を登録できません: ${error.message}`, true);
+    } finally {
+      event.target.value = "";
+    }
+  });
+  els.experimentRestoreExcludedInputsBtn?.addEventListener("click", () => {
+    restoreEvaluationInputs().catch((error) =>
+      setExperimentStatus(`除外を戻せません: ${error.message}`, true),
+    );
   });
   els.cancelExperimentBtn?.addEventListener("click", async () => {
     if (!state.activeExperimentJobId) return;

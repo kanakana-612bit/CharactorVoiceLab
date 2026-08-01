@@ -348,6 +348,11 @@ requiring users to type filesystem paths.
 Long jobs run asynchronously one at a time, with progress, logs, reports, WAV
 playback, and artifact downloads available in the same tab.
 
+Generated-voice evaluation uses a wide checklist for candidate WAV resources.
+Candidates can be hidden from that list without deleting their source files and
+restored later. Reference WAV files are uploaded only for the current evaluation
+job and their managed temporary copies are removed when that job finishes.
+
 WAV, profile, and manifest uploads are copied only into the ignored local
 `runtime/experiment_inputs/` directory. Job records are stored under the ignored
 `runtime/experiment_jobs/` directory. The server accepts only allowlisted tools
