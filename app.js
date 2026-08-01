@@ -97,6 +97,9 @@ const state = {
   resourcePreviewButton: null,
   resourcePreviewUrl: null,
   selectedIdentitySpeakerId: null,
+  speakerInversionWorkspace: null,
+  speakerInversionJobId: null,
+  speakerInversionPollTimer: null,
 };
 
 const referenceData = window.CVL_REFERENCE;
@@ -440,6 +443,32 @@ const els = {
   compiledIdentityCalibrationValue: document.getElementById("compiledIdentityCalibrationValue"),
   compiledIdentityPolicyValue: document.getElementById("compiledIdentityPolicyValue"),
   voiceIdentityCompileStatus: document.getElementById("voiceIdentityCompileStatus"),
+  speakerInversionEnvironmentBadge: document.getElementById("speakerInversionEnvironmentBadge"),
+  setupSpeakerInversionBtn: document.getElementById("setupSpeakerInversionBtn"),
+  refreshSpeakerInversionBtn: document.getElementById("refreshSpeakerInversionBtn"),
+  speakerInversionWavUpload: document.getElementById("speakerInversionWavUpload"),
+  speakerInversionDatasetSummary: document.getElementById("speakerInversionDatasetSummary"),
+  speakerInversionSampleList: document.getElementById("speakerInversionSampleList"),
+  speakerInversionVoiceName: document.getElementById("speakerInversionVoiceName"),
+  trainSpeakerInversionBtn: document.getElementById("trainSpeakerInversionBtn"),
+  cancelSpeakerInversionJobBtn: document.getElementById("cancelSpeakerInversionJobBtn"),
+  speakerInversionMaxSteps: document.getElementById("speakerInversionMaxSteps"),
+  speakerInversionTokens: document.getElementById("speakerInversionTokens"),
+  speakerInversionBatchSize: document.getElementById("speakerInversionBatchSize"),
+  speakerInversionAccumulation: document.getElementById("speakerInversionAccumulation"),
+  speakerInversionLearningRate: document.getElementById("speakerInversionLearningRate"),
+  speakerInversionTrainingSeed: document.getElementById("speakerInversionTrainingSeed"),
+  speakerInversionEmbeddingSelect: document.getElementById("speakerInversionEmbeddingSelect"),
+  speakerInversionGenerateSteps: document.getElementById("speakerInversionGenerateSteps"),
+  speakerInversionSpeakerGuidance: document.getElementById("speakerInversionSpeakerGuidance"),
+  speakerInversionTestText: document.getElementById("speakerInversionTestText"),
+  speakerInversionTestCaption: document.getElementById("speakerInversionTestCaption"),
+  generateSpeakerInversionTestBtn: document.getElementById("generateSpeakerInversionTestBtn"),
+  speakerInversionTestAudio: document.getElementById("speakerInversionTestAudio"),
+  speakerInversionProgress: document.getElementById("speakerInversionProgress"),
+  speakerInversionStatus: document.getElementById("speakerInversionStatus"),
+  speakerInversionLogDetails: document.getElementById("speakerInversionLogDetails"),
+  speakerInversionJobLog: document.getElementById("speakerInversionJobLog"),
   ttsIdentityEvaluation: document.getElementById("ttsIdentityEvaluation"),
   ttsIdentityEvaluationBadge: document.getElementById("ttsIdentityEvaluationBadge"),
   ttsIdentityEvaluationValues: document.getElementById("ttsIdentityEvaluationValues"),
@@ -5693,6 +5722,286 @@ function format(value, digits = 2) {
   return Number(value).toFixed(digits);
 }
 
+function setSpeakerInversionStatus(message, isError = false) {
+  if (!els.speakerInversionStatus) return;
+  els.speakerInversionStatus.textContent = message;
+  els.speakerInversionStatus.classList.toggle("error", isError);
+}
+
+function renderSpeakerInversionWorkspace() {
+  const workspace = state.speakerInversionWorkspace || {};
+  const environment = workspace.environment || {};
+  if (els.speakerInversionEnvironmentBadge) {
+    els.speakerInversionEnvironmentBadge.textContent = environment.ready
+      ? "準備完了 / v4-Small"
+      : workspace.platform_supported === false
+        ? "Linux GPU環境が必要"
+        : "未構築";
+    els.speakerInversionEnvironmentBadge.dataset.status = environment.ready ? "complete" : "interrupted";
+  }
+  if (els.setupSpeakerInversionBtn) {
+    els.setupSpeakerInversionBtn.disabled = workspace.platform_supported === false;
+    els.setupSpeakerInversionBtn.textContent = environment.ready ? "学習環境を修復" : "学習環境を準備";
+  }
+  if (!state.speakerInversionJobId) {
+    if (els.trainSpeakerInversionBtn) els.trainSpeakerInversionBtn.disabled = !environment.ready;
+    if (els.generateSpeakerInversionTestBtn) {
+      els.generateSpeakerInversionTestBtn.disabled = !environment.ready || !(workspace.embeddings || []).length;
+    }
+  }
+  const samples = workspace.samples || [];
+  const selectedCount = samples.filter((item) => item.selected).length;
+  if (els.speakerInversionDatasetSummary) {
+    els.speakerInversionDatasetSummary.textContent = `${samples.length}件 / 学習対象 ${selectedCount}件`;
+  }
+  const container = els.speakerInversionSampleList;
+  if (container) {
+    stopResourceAudioPreview(container);
+    container.replaceChildren();
+    if (!samples.length) {
+      const empty = document.createElement("p");
+      empty.className = "evaluation-file-empty";
+      empty.textContent = "学習WAVを追加し、各音声の正確な書き起こしを入力してください。";
+      container.append(empty);
+    }
+    for (const sample of samples) {
+      const row = document.createElement("div");
+      row.className = "speaker-inversion-sample-row";
+      row.setAttribute("role", "listitem");
+      const checkbox = document.createElement("input");
+      checkbox.type = "checkbox";
+      checkbox.checked = sample.selected !== false;
+      checkbox.setAttribute("aria-label", `${sample.name}を学習対象にする`);
+      const name = document.createElement("span");
+      name.className = "evaluation-file-name";
+      name.textContent = sample.name;
+      name.title = sample.name;
+      const play = createResourceAudioPreviewButton(
+        `/api/speaker-inversion/samples/${encodeURIComponent(sample.id)}/audio`,
+        sample.name,
+        (error) => setSpeakerInversionStatus(`学習音声を再生できません: ${error.message}`, true),
+      );
+      const transcript = document.createElement("input");
+      transcript.type = "text";
+      transcript.value = sample.transcript || "";
+      transcript.maxLength = 5000;
+      transcript.placeholder = "この音声で実際に発話している文を入力";
+      transcript.setAttribute("aria-label", `${sample.name}の書き起こし`);
+      const persist = async () => {
+        try {
+          await experimentApi("/api/speaker-inversion/samples/update", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              id: sample.id,
+              transcript: transcript.value,
+              selected: checkbox.checked,
+            }),
+          });
+          sample.transcript = transcript.value.trim();
+          sample.selected = checkbox.checked;
+          if (els.speakerInversionDatasetSummary) {
+            const count = samples.filter((item) => item.selected).length;
+            els.speakerInversionDatasetSummary.textContent = `${samples.length}件 / 学習対象 ${count}件`;
+          }
+        } catch (error) {
+          setSpeakerInversionStatus(`学習条件を保存できません: ${error.message}`, true);
+        }
+      };
+      checkbox.addEventListener("change", persist);
+      transcript.addEventListener("change", persist);
+      const remove = document.createElement("button");
+      remove.type = "button";
+      remove.className = "evaluation-file-remove";
+      remove.textContent = "×";
+      remove.title = "学習音声を削除";
+      remove.setAttribute("aria-label", `${sample.name}を学習領域から削除する`);
+      remove.addEventListener("click", async () => {
+        try {
+          await experimentApi("/api/speaker-inversion/samples/discard", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ id: sample.id }),
+          });
+          await refreshSpeakerInversionWorkspace({ silent: true });
+        } catch (error) {
+          setSpeakerInversionStatus(`学習音声を削除できません: ${error.message}`, true);
+        }
+      });
+      row.append(checkbox, name, play, transcript, remove);
+      container.append(row);
+    }
+  }
+  populateExperimentSelect(
+    els.speakerInversionEmbeddingSelect,
+    workspace.embeddings || [],
+    "学習済みEmbeddingを選択",
+  );
+}
+
+async function refreshSpeakerInversionWorkspace({ silent = false } = {}) {
+  if (!els.speakerInversionSampleList) return;
+  if (!silent) setSpeakerInversionStatus("Speaker Inversion環境を確認しています。");
+  try {
+    state.speakerInversionWorkspace = await experimentApi("/api/speaker-inversion/workspace");
+    renderSpeakerInversionWorkspace();
+    if (!silent || !state.speakerInversionJobId) {
+      const ready = state.speakerInversionWorkspace.environment?.ready;
+      setSpeakerInversionStatus(
+        ready
+          ? "学習音声を選択し、書き起こしを入力して学習できます。"
+          : "初回のみ学習環境の準備と公式モデルのダウンロードが必要です。",
+      );
+    }
+  } catch (error) {
+    setSpeakerInversionStatus(`Speaker Inversion環境を読み込めません: ${error.message}`, true);
+  }
+}
+
+async function uploadSpeakerInversionSamples(files) {
+  for (const file of Array.from(files || [])) {
+    setSpeakerInversionStatus(`${file.name}をローカル学習領域へ登録しています。`);
+    const query = new URLSearchParams({ name: file.name });
+    await experimentApi(`/api/speaker-inversion/samples?${query}`, {
+      method: "POST",
+      headers: { "Content-Type": file.type || "audio/wav" },
+      body: file,
+    });
+  }
+  await refreshSpeakerInversionWorkspace({ silent: true });
+  setSpeakerInversionStatus("WAVを登録しました。各行へ正確な書き起こしを入力してください。");
+}
+
+function renderSpeakerInversionJob(job) {
+  if (!job) return;
+  const active = ["queued", "running", "cancelling"].includes(job.status);
+  if (els.cancelSpeakerInversionJobBtn) els.cancelSpeakerInversionJobBtn.disabled = !active;
+  if (els.trainSpeakerInversionBtn) els.trainSpeakerInversionBtn.disabled = active;
+  if (els.generateSpeakerInversionTestBtn) els.generateSpeakerInversionTestBtn.disabled = active;
+  const ratio = Number(job.progress?.ratio);
+  if (els.speakerInversionProgress) {
+    if (Number.isFinite(ratio)) {
+      els.speakerInversionProgress.value = Math.max(0, Math.min(1, ratio));
+    } else if (active) {
+      els.speakerInversionProgress.removeAttribute("value");
+    } else {
+      els.speakerInversionProgress.value = job.status === "complete" ? 1 : 0;
+    }
+  }
+  const status = experimentStatusLabels[job.status] || job.status;
+  const count = job.progress?.total ? ` ${job.progress.current}/${job.progress.total}` : "";
+  setSpeakerInversionStatus(
+    `${job.label}: ${status} / ${job.progress?.phase || "-"}${count}${job.error ? ` / ${job.error}` : ""}`,
+    ["failed", "cancelled", "interrupted"].includes(job.status),
+  );
+  if (els.speakerInversionJobLog) els.speakerInversionJobLog.textContent = job.log || "";
+  if (els.speakerInversionLogDetails) els.speakerInversionLogDetails.hidden = !job.log;
+  if (job.status === "complete" && job.tool === "speaker_inversion_generate") {
+    const wav = (job.artifacts || []).find((item) => item.name.toLowerCase().endsWith(".wav"));
+    if (wav && els.speakerInversionTestAudio) {
+      els.speakerInversionTestAudio.src = wav.url;
+      els.speakerInversionTestAudio.hidden = false;
+    }
+  }
+}
+
+function scheduleSpeakerInversionPoll() {
+  if (state.speakerInversionPollTimer) clearTimeout(state.speakerInversionPollTimer);
+  state.speakerInversionPollTimer = null;
+  if (!state.speakerInversionJobId) return;
+  state.speakerInversionPollTimer = setTimeout(async () => {
+    try {
+      const job = await experimentApi(`/api/experiments/jobs/${state.speakerInversionJobId}`);
+      renderSpeakerInversionJob(job);
+      if (["queued", "running", "cancelling"].includes(job.status)) {
+        scheduleSpeakerInversionPoll();
+      } else {
+        await refreshSpeakerInversionWorkspace({ silent: true });
+      }
+    } catch (error) {
+      setSpeakerInversionStatus(`ジョブ状態を取得できません: ${error.message}`, true);
+    }
+  }, 1000);
+}
+
+async function startSpeakerInversionJob(tool, options = {}) {
+  const job = await experimentApi("/api/experiments/jobs", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ tool, options }),
+  });
+  state.speakerInversionJobId = job.id;
+  renderSpeakerInversionJob(job);
+  scheduleSpeakerInversionPoll();
+  return job;
+}
+
+function installSpeakerInversionHandlers() {
+  els.refreshSpeakerInversionBtn?.addEventListener("click", () => refreshSpeakerInversionWorkspace());
+  els.setupSpeakerInversionBtn?.addEventListener("click", () => {
+    startSpeakerInversionJob("speaker_inversion_setup").catch((error) =>
+      setSpeakerInversionStatus(`環境を準備できません: ${error.message}`, true),
+    );
+  });
+  els.speakerInversionWavUpload?.addEventListener("change", async (event) => {
+    try {
+      await uploadSpeakerInversionSamples(event.target.files);
+    } catch (error) {
+      setSpeakerInversionStatus(`WAVを登録できません: ${error.message}`, true);
+    } finally {
+      event.target.value = "";
+    }
+  });
+  els.trainSpeakerInversionBtn?.addEventListener("click", () => {
+    const samples = (state.speakerInversionWorkspace?.samples || []).filter((item) => item.selected);
+    const missing = samples.filter((item) => !String(item.transcript || "").trim());
+    if (!samples.length || missing.length) {
+      setSpeakerInversionStatus(
+        !samples.length
+          ? "学習対象WAVを1件以上選択してください。"
+          : `書き起こし未入力の音声が${missing.length}件あります。`,
+        true,
+      );
+      return;
+    }
+    startSpeakerInversionJob("speaker_inversion_train", {
+      voice_name: els.speakerInversionVoiceName?.value || "voice_profile",
+      sample_ids: samples.map((item) => item.id),
+      max_steps: num(els.speakerInversionMaxSteps, 3000),
+      tokens: num(els.speakerInversionTokens, 16),
+      batch_size: num(els.speakerInversionBatchSize, 1),
+      gradient_accumulation_steps: num(els.speakerInversionAccumulation, 1),
+      learning_rate: num(els.speakerInversionLearningRate, 0.01),
+      seed: num(els.speakerInversionTrainingSeed, 0),
+      num_workers: 2,
+    }).catch((error) => setSpeakerInversionStatus(`学習を開始できません: ${error.message}`, true));
+  });
+  els.generateSpeakerInversionTestBtn?.addEventListener("click", () => {
+    startSpeakerInversionJob("speaker_inversion_generate", {
+      embedding: els.speakerInversionEmbeddingSelect?.value || "",
+      text: els.speakerInversionTestText?.value || "",
+      caption: els.speakerInversionTestCaption?.value || activeTtsCaption(),
+      steps: num(els.speakerInversionGenerateSteps, 20),
+      seed: num(els.ttsSeedInput, 20260719),
+      caption_guidance: num(els.ttsCaptionGuidanceInput, 2),
+      speaker_guidance: num(els.speakerInversionSpeakerGuidance, 5),
+      duration_scale: 1,
+    }).catch((error) => setSpeakerInversionStatus(`生成を開始できません: ${error.message}`, true));
+  });
+  els.cancelSpeakerInversionJobBtn?.addEventListener("click", async () => {
+    if (!state.speakerInversionJobId) return;
+    try {
+      const job = await experimentApi(`/api/experiments/jobs/${state.speakerInversionJobId}/cancel`, {
+        method: "POST",
+      });
+      renderSpeakerInversionJob(job);
+      scheduleSpeakerInversionPoll();
+    } catch (error) {
+      setSpeakerInversionStatus(`ジョブを中止できません: ${error.message}`, true);
+    }
+  });
+}
+
 async function experimentApi(path, options = {}) {
   const response = await fetch(path, {
     headers: { Accept: "application/json", ...(options.headers || {}) },
@@ -6396,6 +6705,9 @@ function setActiveTab(tabId) {
   if (tabId === "ttsModelTab" || tabId === "outputTab") {
     renderVoiceDesignerControls();
     refreshVoiceIdentities({ silent: true });
+  }
+  if (tabId === "ttsModelTab") {
+    refreshSpeakerInversionWorkspace({ silent: true });
   }
   if (tabId === "experimentTab") {
     const profile = buildVoiceControlProfile();
@@ -10116,6 +10428,7 @@ function installVoiceIdentityHandlers() {
 
 function init() {
   installVoiceIdentityHandlers();
+  installSpeakerInversionHandlers();
   refreshLandmarkSelect();
   mountCompositionGuide();
   mountArticulationWorkspaces();

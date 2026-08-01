@@ -8,6 +8,7 @@ import json
 import mimetypes
 import os
 import re
+import signal
 import subprocess
 import sys
 import threading
@@ -28,8 +29,17 @@ JOB_ID_PATTERN = re.compile(r"^[0-9]{8}T[0-9]{6}-[a-f0-9]{8}$")
 SPEAKER_NAME_PATTERN = re.compile(
     r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}\.speaker\.safetensors$"
 )
+SPEAKER_INVERSION_UPSTREAM_COMMIT = "d48dd92b943fa5dbcb88150eb974c25d8709df9b"
 SAFE_FILENAME_PATTERN = re.compile(r"[^A-Za-z0-9_.-]+")
-ALLOWED_ARTIFACT_SUFFIXES = {".csv", ".json", ".md", ".wav", ".yaml", ".yml"}
+ALLOWED_ARTIFACT_SUFFIXES = {
+    ".csv",
+    ".json",
+    ".md",
+    ".safetensors",
+    ".wav",
+    ".yaml",
+    ".yml",
+}
 TERMINAL_STATES = {"complete", "failed", "cancelled", "interrupted"}
 MAX_LOG_LINES = 500
 MAX_REPORT_BYTES = 256 * 1024
@@ -157,6 +167,24 @@ class ExperimentJobManager:
             "description": "F0解析・補正に必要なPython依存関係を確認します。",
             "requires_audio_cpp": False,
         },
+        {
+            "id": "speaker_inversion_setup",
+            "label": "Speaker Inversion環境構築",
+            "description": "固定した公式Irodori-TTSとv4-Smallモデルを専用環境へ導入します。",
+            "requires_audio_cpp": False,
+        },
+        {
+            "id": "speaker_inversion_train",
+            "label": "Speaker Inversion学習",
+            "description": "管理WAVと書き起こしから再利用可能な話者Embeddingを学習します。",
+            "requires_audio_cpp": False,
+        },
+        {
+            "id": "speaker_inversion_generate",
+            "label": "Speaker Inversion生成確認",
+            "description": "学習時と同じ公式v4-Smallモデルで話者Embeddingを試聴します。",
+            "requires_audio_cpp": False,
+        },
     ]
 
     def __init__(
@@ -176,7 +204,19 @@ class ExperimentJobManager:
         self.upload_root = self.project_root / "runtime" / "experiment_inputs"
         self.excluded_voice_inputs_path = self.upload_root / "excluded_voice_inputs.json"
         self.speaker_root = self.project_root / "runtime" / "speaker_conditions"
-        for root in (self.job_root, self.output_root, self.upload_root, self.speaker_root):
+        self.speaker_inversion_root = self.project_root / "runtime" / "speaker_inversion"
+        self.speaker_inversion_dataset_root = self.speaker_inversion_root / "dataset"
+        self.speaker_inversion_audio_root = self.speaker_inversion_dataset_root / "audio"
+        self.speaker_inversion_samples_path = self.speaker_inversion_dataset_root / "samples.json"
+        self.speaker_inversion_embedding_root = self.speaker_inversion_root / "embeddings"
+        for root in (
+            self.job_root,
+            self.output_root,
+            self.upload_root,
+            self.speaker_root,
+            self.speaker_inversion_audio_root,
+            self.speaker_inversion_embedding_root,
+        ):
             root.mkdir(parents=True, exist_ok=True)
         self._lock = threading.RLock()
         self._jobs: dict[str, dict[str, Any]] = {}
@@ -279,6 +319,174 @@ class ExperimentJobManager:
         if not candidates:
             raise ExperimentError("Voice resource directory contains no WAV files.")
         return candidates[0]
+
+    def speaker_inversion_workspace(self) -> dict[str, Any]:
+        environment_path = self.speaker_inversion_root / "environment.json"
+        source_root = self.speaker_inversion_root / "Irodori-TTS"
+        model_path = (
+            self.speaker_inversion_root
+            / "models"
+            / "Irodori-TTS-v4-Small"
+            / "model.safetensors"
+        )
+        environment: dict[str, Any] = {}
+        try:
+            value = json.loads(environment_path.read_text(encoding="utf-8"))
+            if isinstance(value, dict):
+                environment = value
+        except (OSError, json.JSONDecodeError):
+            pass
+        required = [
+            source_root / "train.py",
+            source_root / "prepare_manifest.py",
+            source_root / "infer.py",
+            source_root / "configs" / "train_v4_small_speaker_inversion.yaml",
+            model_path,
+            self.project_root / "runtime" / "bootstrap" / "uv" / "uv",
+        ]
+        ready = (
+            environment.get("upstream_commit") == SPEAKER_INVERSION_UPSTREAM_COMMIT
+            and all(path.is_file() for path in required)
+        )
+        samples = self._speaker_inversion_samples()
+        embeddings = []
+        for path in sorted(
+            self.speaker_inversion_embedding_root.glob("*.speaker.safetensors"),
+            key=lambda value: value.stat().st_mtime,
+            reverse=True,
+        ):
+            sidecar = path.with_suffix(".json")
+            metadata: dict[str, Any] = {}
+            try:
+                value = json.loads(sidecar.read_text(encoding="utf-8"))
+                if isinstance(value, dict):
+                    metadata = value
+            except (OSError, json.JSONDecodeError):
+                pass
+            embeddings.append(
+                {
+                    "id": path.name,
+                    "label": path.name,
+                    "bytes": path.stat().st_size,
+                    "model_repository": metadata.get("model", {}).get("repository"),
+                    "sample_count": metadata.get("training", {}).get("sample_count"),
+                    "created_at": metadata.get("created_at"),
+                }
+            )
+        return {
+            "schema_version": "cvd_speaker_inversion_workspace_0.1",
+            "local_only": True,
+            "platform_supported": sys.platform.startswith("linux"),
+            "environment": {
+                "ready": ready,
+                "status": environment,
+                "missing": [path.name for path in required if not path.is_file()],
+                "model_repository": "Aratako/Irodori-TTS-v4-Small",
+            },
+            "samples": samples,
+            "selected_sample_count": sum(bool(item.get("selected")) for item in samples),
+            "embeddings": embeddings,
+            "privacy": {
+                "processing": "local_only",
+                "audio_uploaded_externally": False,
+                "training_audio_retained": True,
+                "embedding_is_biometric_voice_representation": True,
+            },
+        }
+
+    def store_speaker_inversion_sample(self, filename: str, body: bytes) -> dict[str, Any]:
+        if len(body) <= 0 or len(body) > MAX_UPLOAD_BYTES:
+            raise ExperimentError("Training WAV size is invalid.")
+        name = _safe_name(filename, "training.wav")
+        if Path(name).suffix.lower() != ".wav" or not (
+            body.startswith(b"RIFF") and len(body) >= 12 and body[8:12] == b"WAVE"
+        ):
+            raise ExperimentError("Training audio must be a RIFF/WAVE file.")
+        digest = hashlib.sha256(body).hexdigest()
+        sample_id = digest[:16]
+        destination = self.speaker_inversion_audio_root / f"{sample_id}-{name}"
+        with self._lock:
+            samples = self._speaker_inversion_samples()
+            existing = next((item for item in samples if item.get("id") == sample_id), None)
+            if not destination.exists():
+                destination.write_bytes(body)
+            if existing is None:
+                existing = {
+                    "id": sample_id,
+                    "name": name,
+                    "stored_name": destination.name,
+                    "bytes": len(body),
+                    "sha256": digest,
+                    "transcript": "",
+                    "selected": True,
+                    "created_at": _now(),
+                }
+                samples.append(existing)
+                self._write_speaker_inversion_samples(samples)
+            return dict(existing)
+
+    def update_speaker_inversion_sample(self, payload: Any) -> dict[str, Any]:
+        if not isinstance(payload, dict):
+            raise ExperimentError("Training sample update must be an object.")
+        sample_id = _text(payload.get("id"), "sample id", 32, required=True)
+        transcript = _text(payload.get("transcript"), "transcript", 5000)
+        selected = _bool(payload.get("selected"), "selected", True)
+        with self._lock:
+            samples = self._speaker_inversion_samples()
+            sample = next((item for item in samples if item.get("id") == sample_id), None)
+            if sample is None:
+                raise ExperimentNotFoundError("Training sample was not found.")
+            sample["transcript"] = transcript
+            sample["selected"] = selected
+            sample["updated_at"] = _now()
+            self._write_speaker_inversion_samples(samples)
+            return dict(sample)
+
+    def discard_speaker_inversion_sample(self, sample_id: Any) -> dict[str, Any]:
+        normalized = _text(sample_id, "sample id", 32, required=True)
+        with self._lock:
+            samples = self._speaker_inversion_samples()
+            sample = next((item for item in samples if item.get("id") == normalized), None)
+            if sample is None:
+                raise ExperimentNotFoundError("Training sample was not found.")
+            path = (self.speaker_inversion_audio_root / sample["stored_name"]).resolve()
+            if path.parent != self.speaker_inversion_audio_root.resolve():
+                raise ExperimentError("Managed training sample path is invalid.")
+            path.unlink(missing_ok=True)
+            samples = [item for item in samples if item.get("id") != normalized]
+            self._write_speaker_inversion_samples(samples)
+        return {"id": normalized, "discarded": True}
+
+    def speaker_inversion_sample_path(self, sample_id: Any) -> Path:
+        normalized = _text(sample_id, "sample id", 32, required=True)
+        sample = next(
+            (item for item in self._speaker_inversion_samples() if item.get("id") == normalized),
+            None,
+        )
+        if sample is None:
+            raise ExperimentNotFoundError("Training sample was not found.")
+        path = (self.speaker_inversion_audio_root / sample["stored_name"]).resolve()
+        if path.parent != self.speaker_inversion_audio_root.resolve() or not path.is_file():
+            raise ExperimentNotFoundError("Training WAV was not found.")
+        return path
+
+    def _speaker_inversion_samples(self) -> list[dict[str, Any]]:
+        try:
+            value = json.loads(self.speaker_inversion_samples_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            return []
+        if not isinstance(value, list):
+            return []
+        return [dict(item) for item in value if isinstance(item, dict)]
+
+    def _write_speaker_inversion_samples(self, samples: list[dict[str, Any]]) -> None:
+        self.speaker_inversion_samples_path.parent.mkdir(parents=True, exist_ok=True)
+        temporary = self.speaker_inversion_samples_path.with_suffix(".tmp")
+        temporary.write_text(
+            json.dumps(samples, ensure_ascii=False, indent=2, allow_nan=False) + "\n",
+            encoding="utf-8",
+        )
+        temporary.replace(self.speaker_inversion_samples_path)
 
     def store_upload(
         self,
@@ -537,7 +745,7 @@ class ExperimentJobManager:
             job["progress"]["phase"] = "cancelling"
             process = self._processes.get(job_id)
             if process is not None:
-                process.terminate()
+                self._terminate_process(process)
             self._persist(job)
             return self._snapshot(job)
 
@@ -559,7 +767,17 @@ class ExperimentJobManager:
             processes = list(self._processes.values())
         for process in processes:
             if process.poll() is None:
-                process.terminate()
+                self._terminate_process(process)
+
+    @staticmethod
+    def _terminate_process(process: subprocess.Popen[str]) -> None:
+        if sys.platform.startswith("linux"):
+            try:
+                os.killpg(process.pid, signal.SIGTERM)
+                return
+            except (OSError, ProcessLookupError):
+                pass
+        process.terminate()
 
     def _build_command(
         self,
@@ -832,6 +1050,190 @@ class ExperimentJobManager:
             }
             return command, output, safe
 
+        if tool == "speaker_inversion_setup":
+            if not sys.platform.startswith("linux"):
+                raise ExperimentError(
+                    "Speaker Inversion training setup currently supports Linux only."
+                )
+            output = self.output_root / job_id
+            output.mkdir(parents=True, exist_ok=False)
+            command = [
+                "bash",
+                str(self.project_root / "scripts" / "setup_speaker_inversion.sh"),
+                "--output",
+                str(output),
+            ]
+            return command, output, {"upstream": "pinned", "backend": "cu128"}
+
+        if tool == "speaker_inversion_train":
+            if not sys.platform.startswith("linux"):
+                raise ExperimentError("Speaker Inversion training currently supports Linux only.")
+            voice_name = _safe_name(
+                _text(options.get("voice_name"), "voice_name", 64, required=True),
+                "speaker",
+            )
+            tokens = _number(options.get("tokens", 16), "tokens", 1, 128, integer=True)
+            max_steps = _number(
+                options.get("max_steps", 3000), "max_steps", 1, 100000, integer=True
+            )
+            batch_size = _number(
+                options.get("batch_size", 1), "batch_size", 1, 32, integer=True
+            )
+            accumulation = _number(
+                options.get("gradient_accumulation_steps", 1),
+                "gradient_accumulation_steps",
+                1,
+                64,
+                integer=True,
+            )
+            num_workers = _number(
+                options.get("num_workers", 2), "num_workers", 0, 16, integer=True
+            )
+            learning_rate = _number(
+                options.get("learning_rate", 0.01), "learning_rate", 0.000001, 1
+            )
+            seed = _number(options.get("seed", 0), "seed", 0, 2147483647, integer=True)
+            requested_ids = options.get("sample_ids")
+            if requested_ids is None:
+                requested_ids = [
+                    item["id"]
+                    for item in self._speaker_inversion_samples()
+                    if item.get("selected")
+                ]
+            if not isinstance(requested_ids, list) or not 1 <= len(requested_ids) <= 256:
+                raise ExperimentError("Select between 1 and 256 training samples.")
+            samples_by_id = {
+                item.get("id"): item for item in self._speaker_inversion_samples()
+            }
+            selected_samples = []
+            for sample_id in requested_ids:
+                sample = samples_by_id.get(sample_id)
+                if sample is None:
+                    raise ExperimentError("A selected training sample was not found.")
+                transcript = _text(
+                    sample.get("transcript"),
+                    f"transcript for {sample.get('name', 'sample')}",
+                    5000,
+                    required=True,
+                )
+                audio = self.speaker_inversion_sample_path(sample_id)
+                selected_samples.append({"audio": str(audio), "text": transcript})
+            output = self.output_root / job_id
+            output.mkdir(parents=True, exist_ok=False)
+            selection_path = self.job_root / f"{job_id}.speaker-inversion-samples.json"
+            selection_path.write_text(
+                json.dumps(selected_samples, ensure_ascii=False, indent=2) + "\n",
+                encoding="utf-8",
+            )
+            command = [
+                python,
+                str(self.project_root / "speaker_inversion_pipeline.py"),
+                "train",
+                "--project-root",
+                str(self.project_root),
+                "--samples",
+                str(selection_path),
+                "--output",
+                str(output),
+                "--voice-name",
+                voice_name,
+                "--tokens",
+                str(tokens),
+                "--max-steps",
+                str(max_steps),
+                "--batch-size",
+                str(batch_size),
+                "--gradient-accumulation-steps",
+                str(accumulation),
+                "--num-workers",
+                str(num_workers),
+                "--learning-rate",
+                str(learning_rate),
+                "--seed",
+                str(seed),
+            ]
+            safe = {
+                "voice_name": voice_name,
+                "sample_ids": list(requested_ids),
+                "sample_count": len(selected_samples),
+                "tokens": tokens,
+                "max_steps": max_steps,
+                "batch_size": batch_size,
+                "gradient_accumulation_steps": accumulation,
+                "num_workers": num_workers,
+                "learning_rate": learning_rate,
+                "seed": seed,
+                "model_repository": "Aratako/Irodori-TTS-v4-Small",
+            }
+            return command, output, safe
+
+        if tool == "speaker_inversion_generate":
+            if not sys.platform.startswith("linux"):
+                raise ExperimentError("Speaker Inversion generation currently supports Linux only.")
+            embedding = _text(options.get("embedding"), "embedding", 160, required=True)
+            if not SPEAKER_NAME_PATTERN.fullmatch(embedding):
+                raise ExperimentError("Speaker Inversion embedding filename is invalid.")
+            embedding_path = (self.speaker_inversion_embedding_root / embedding).resolve()
+            if (
+                embedding_path.parent != self.speaker_inversion_embedding_root.resolve()
+                or not embedding_path.is_file()
+            ):
+                raise ExperimentError("Managed Speaker Inversion embedding was not found.")
+            text_value = _text(options.get("text"), "text", 5000, required=True)
+            caption = _text(options.get("caption"), "caption", 2000)
+            steps = _number(options.get("steps", 20), "steps", 4, 100, integer=True)
+            seed = _number(
+                options.get("seed", 20260719), "seed", 0, 2147483647, integer=True
+            )
+            caption_guidance = _number(
+                options.get("caption_guidance", 2), "caption_guidance", 0.5, 10
+            )
+            speaker_guidance = _number(
+                options.get("speaker_guidance", 5), "speaker_guidance", 0.5, 12
+            )
+            duration_scale = _number(
+                options.get("duration_scale", 1), "duration_scale", 0.5, 2
+            )
+            output = self.output_root / job_id
+            output.mkdir(parents=True, exist_ok=False)
+            command = [
+                python,
+                str(self.project_root / "speaker_inversion_pipeline.py"),
+                "generate",
+                "--project-root",
+                str(self.project_root),
+                "--output",
+                str(output),
+                "--embedding",
+                embedding,
+                "--text",
+                text_value,
+                "--caption",
+                caption,
+                "--steps",
+                str(steps),
+                "--seed",
+                str(seed),
+                "--caption-guidance",
+                str(caption_guidance),
+                "--speaker-guidance",
+                str(speaker_guidance),
+                "--duration-scale",
+                str(duration_scale),
+            ]
+            safe = {
+                "embedding": embedding,
+                "text_characters": len(text_value),
+                "caption_characters": len(caption),
+                "steps": steps,
+                "seed": seed,
+                "caption_guidance": caption_guidance,
+                "speaker_guidance": speaker_guidance,
+                "duration_scale": duration_scale,
+                "model_repository": "Aratako/Irodori-TTS-v4-Small",
+            }
+            return command, output, safe
+
         command = [
             python,
             str(self.project_root / "audio_postprocess.py"),
@@ -929,6 +1331,10 @@ class ExperimentJobManager:
                 continue
             path.unlink(missing_ok=True)
 
+    def _cleanup_speaker_inversion_selection(self, job_id: str) -> None:
+        path = self.job_root / f"{job_id}.speaker-inversion-samples.json"
+        path.unlink(missing_ok=True)
+
     def _run_job(self, job_id: str, output_dir: Path | None) -> None:
         with self._lock:
             job = self._jobs[job_id]
@@ -950,6 +1356,7 @@ class ExperimentJobManager:
                 encoding="utf-8",
                 errors="replace",
                 bufsize=1,
+                start_new_session=sys.platform.startswith("linux"),
             )
             with self._lock:
                 self._processes[job_id] = process
@@ -986,6 +1393,7 @@ class ExperimentJobManager:
                 self._persist(job)
         finally:
             self._cleanup_job_reference_uploads(job_id)
+            self._cleanup_speaker_inversion_selection(job_id)
 
     def _append_log(self, job_id: str, line: str) -> None:
         with self._lock:
@@ -1048,6 +1456,9 @@ class ExperimentJobManager:
             "voice_evaluation": "evaluation.json",
             "speaker_compatibility": "compatibility.json",
             "runtime_observation": "observation_runtime.json",
+            "speaker_inversion_setup": "summary.json",
+            "speaker_inversion_train": "summary.json",
+            "speaker_inversion_generate": "summary.json",
         }
         summary_name = summary_names.get(job["tool"])
         if summary_name:

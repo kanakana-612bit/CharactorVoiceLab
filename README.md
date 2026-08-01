@@ -97,6 +97,33 @@ Speaker tensors, Style JSON, calibration WAVs, and compiled manifests remain sep
 under ignored `runtime/` directories. Compiled proxy distances are engineering
 warnings, not speaker-identification claims.
 
+### Official Speaker Inversion training
+
+The **TTS Model** tab also provides an isolated, Linux/CUDA Speaker Inversion workflow.
+It accepts multiple local WAV files with an exact transcript for each file, prepares
+the official latent manifest, trains only the speaker tokens, and tests the resulting
+`.speaker.safetensors` with the same `Aratako/Irodori-TTS-v4-Small` checkpoint.
+
+The first **Prepare training environment** operation clones the official
+`Aratako/Irodori-TTS` repository at commit
+`d48dd92b943fa5dbcb88150eb974c25d8709df9b`, installs its locked `cu128` environment,
+and downloads v4-Small under ignored `runtime/speaker_inversion/`. It does not alter
+the system CUDA installation or NVIDIA driver. Training defaults to the official
+16-token, `0.01` learning-rate recipe with 3000 steps, while using batch size 1 as a
+conservative RTX 3060 baseline.
+
+Training audio and transcripts remain under the ignored local runtime and are never
+sent through the CharacterVoiceDesigner API to an external service. The upstream
+setup necessarily contacts GitHub, PyPI/package indexes, and Hugging Face to install
+code, dependencies, and model files. A learned embedding is a compact biometric voice
+representation: use only recordings for which the speaker has explicitly permitted
+this purpose, and protect or delete the resulting local artifacts accordingly.
+
+Speaker Inversion artifacts from this workflow are kept separate from the legacy
+v3/audio.cpp managed-speaker directory. The application will not silently use a
+v4-Small embedding with the v3 VoiceDesign model merely because both expose a
+768-dimensional speaker state.
+
 To start only the WebUI bridge:
 
 ```powershell
@@ -274,7 +301,7 @@ Not implemented in this MVP:
 - SMPL-X, MediaPipe Face Mesh, DensePose, or robust background removal
 - VocalTractLab adapter
 - direct low-level control of learned TTS latent variables beyond the current caption/duration adapter; exact median F0 is available only as an explicit WORLD-measured, Praat-PSOLA waveform postprocess
-- optimization of a new Speaker Inversion embedding from calibration audio; compatible precomputed states can already be validated and injected by the patched local runtime
+- direct use of newly trained v4-Small Speaker Inversion embeddings by the legacy v3/audio.cpp path; training and same-model v4-Small generation are implemented in an isolated official runtime
 - validated anthropometric database
 - validated mapping from external neck breadth to internal airway dimensions; the prototype deliberately does not make that inference
 - participant-level linkage across external data sources

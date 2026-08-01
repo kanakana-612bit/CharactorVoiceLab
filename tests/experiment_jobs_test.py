@@ -2,6 +2,7 @@ import json
 import pathlib
 import unittest
 import uuid
+from unittest import mock
 
 import torch
 from safetensors.torch import save_file
@@ -46,6 +47,9 @@ class ExperimentJobManagerTest(unittest.TestCase):
                 "step_stability",
                 "voice_evaluation",
                 "runtime_diagnostics",
+                "speaker_inversion_setup",
+                "speaker_inversion_train",
+                "speaker_inversion_generate",
             },
         )
 
@@ -222,6 +226,69 @@ class ExperimentJobManagerTest(unittest.TestCase):
                 "broken.speaker.safetensors",
                 b"not safetensors",
             )
+
+    def test_speaker_inversion_samples_are_managed_with_transcripts(self):
+        wav = b"RIFF" + (4).to_bytes(4, "little") + b"WAVE"
+        sample = self.manager.store_speaker_inversion_sample("../training.wav", wav)
+        self.assertEqual(sample["transcript"], "")
+        updated = self.manager.update_speaker_inversion_sample(
+            {"id": sample["id"], "transcript": "テスト音声です。", "selected": True}
+        )
+        self.assertEqual(updated["transcript"], "テスト音声です。")
+        self.assertTrue(self.manager.speaker_inversion_sample_path(sample["id"]).is_file())
+        workspace = self.manager.speaker_inversion_workspace()
+        self.assertEqual(workspace["selected_sample_count"], 1)
+        self.assertTrue(workspace["local_only"])
+        self.manager.discard_speaker_inversion_sample(sample["id"])
+        with self.assertRaises(ExperimentError):
+            self.manager.speaker_inversion_sample_path(sample["id"])
+
+    def test_speaker_inversion_train_and_generate_commands_are_allowlisted(self):
+        wav = b"RIFF" + (4).to_bytes(4, "little") + b"WAVE"
+        sample = self.manager.store_speaker_inversion_sample("training.wav", wav)
+        self.manager.update_speaker_inversion_sample(
+            {"id": sample["id"], "transcript": "テスト音声です。", "selected": True}
+        )
+        job_id = "20260801T120000-1234abcd"
+        with mock.patch("experiment_jobs.sys.platform", "linux"):
+            command, output, safe = self.manager._build_command(
+                job_id,
+                "speaker_inversion_train",
+                {
+                    "voice_name": "character-a",
+                    "sample_ids": [sample["id"]],
+                    "max_steps": 10,
+                    "tokens": 16,
+                    "batch_size": 1,
+                    "gradient_accumulation_steps": 1,
+                    "learning_rate": 0.01,
+                    "seed": 4,
+                },
+            )
+        self.assertIn("speaker_inversion_pipeline.py", " ".join(command))
+        self.assertIn("train", command)
+        self.assertEqual(safe["sample_count"], 1)
+        self.assertTrue(output.is_dir())
+        selection = self.manager.job_root / f"{job_id}.speaker-inversion-samples.json"
+        self.assertTrue(selection.is_file())
+        self.assertNotEqual(selection.parent, output)
+
+        embedding = self.manager.speaker_inversion_embedding_root / "character-a.speaker.safetensors"
+        embedding.write_bytes(b"test")
+        with mock.patch("experiment_jobs.sys.platform", "linux"):
+            generation_command, _, generation_safe = self.manager._build_command(
+                "20260801T120001-1234abcd",
+                "speaker_inversion_generate",
+                {
+                    "embedding": embedding.name,
+                    "text": "生成確認です。",
+                    "caption": "落ち着いた声",
+                    "steps": 20,
+                    "seed": 1,
+                },
+            )
+        self.assertIn("generate", generation_command)
+        self.assertEqual(generation_safe["embedding"], embedding.name)
 
 
 if __name__ == "__main__":

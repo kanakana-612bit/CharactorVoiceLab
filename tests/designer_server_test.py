@@ -469,6 +469,35 @@ class LocalProxyIntegrationTest(unittest.TestCase):
             self.assertEqual(response.headers.get_content_disposition(), "inline")
             self.assertEqual(response.read(), wav)
 
+    def test_speaker_inversion_training_samples_can_be_managed_through_local_api(self):
+        wav = b"RIFF" + (4).to_bytes(4, "little") + b"WAVE"
+        request = urllib.request.Request(
+            self.base_url + "/api/speaker-inversion/samples?name=training.wav",
+            data=wav,
+            headers={"Content-Type": "audio/wav"},
+            method="POST",
+        )
+        with urllib.request.urlopen(request) as response:
+            sample = json.load(response)
+        update = urllib.request.Request(
+            self.base_url + "/api/speaker-inversion/samples/update",
+            data=json.dumps(
+                {"id": sample["id"], "transcript": "学習用音声です。", "selected": True}
+            ).encode("utf-8"),
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        with urllib.request.urlopen(update) as response:
+            updated = json.load(response)
+        self.assertEqual(updated["transcript"], "学習用音声です。")
+        with urllib.request.urlopen(self.base_url + "/api/speaker-inversion/workspace") as response:
+            workspace = json.load(response)
+        self.assertTrue(workspace["local_only"])
+        self.assertEqual(workspace["selected_sample_count"], 1)
+        preview = self.base_url + f"/api/speaker-inversion/samples/{sample['id']}/audio"
+        with urllib.request.urlopen(preview) as response:
+            self.assertEqual(response.read(), wav)
+
     def test_voice_identity_can_be_compiled_through_local_api(self):
         payload = json.dumps(
             {

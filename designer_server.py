@@ -142,6 +142,25 @@ class DesignerHandler(SimpleHTTPRequestHandler):
             except ExperimentError as error:
                 self._send_json(HTTPStatus.NOT_FOUND, {"error": str(error)})
             return
+        if path == "/api/speaker-inversion/workspace":
+            self._send_json(
+                HTTPStatus.OK,
+                self.server.experiment_manager.speaker_inversion_workspace(),
+            )
+            return
+        speaker_inversion_audio_match = re.fullmatch(
+            r"/api/speaker-inversion/samples/([^/]+)/audio",
+            path,
+        )
+        if speaker_inversion_audio_match:
+            try:
+                audio_path = self.server.experiment_manager.speaker_inversion_sample_path(
+                    speaker_inversion_audio_match.group(1)
+                )
+                self._send_file(audio_path, "audio/wav", inline=True)
+            except ExperimentError as error:
+                self._send_json(HTTPStatus.NOT_FOUND, {"error": str(error)})
+            return
         if path == "/api/experiments/jobs":
             self._send_json(HTTPStatus.OK, self.server.experiment_manager.list_jobs())
             return
@@ -366,6 +385,40 @@ class DesignerHandler(SimpleHTTPRequestHandler):
                     target=target,
                 )
                 self._send_json(HTTPStatus.CREATED, resource)
+            except (ExperimentError, ValueError) as error:
+                self._send_json(HTTPStatus.BAD_REQUEST, {"error": str(error)})
+            return
+        if path == "/api/speaker-inversion/samples":
+            query = urllib.parse.parse_qs(parsed.query)
+            name = query.get("name", ["training.wav"])[0]
+            try:
+                sample = self.server.experiment_manager.store_speaker_inversion_sample(
+                    name,
+                    self._read_body(MAX_AUDIO_BYTES),
+                )
+                self._send_json(HTTPStatus.CREATED, sample)
+            except (ExperimentError, ValueError) as error:
+                self._send_json(HTTPStatus.BAD_REQUEST, {"error": str(error)})
+            return
+        if path == "/api/speaker-inversion/samples/update":
+            try:
+                sample = self.server.experiment_manager.update_speaker_inversion_sample(
+                    self._read_json()
+                )
+                self._send_json(HTTPStatus.OK, sample)
+            except ExperimentNotFoundError as error:
+                self._send_json(HTTPStatus.NOT_FOUND, {"error": str(error)})
+            except (ExperimentError, ValueError) as error:
+                self._send_json(HTTPStatus.BAD_REQUEST, {"error": str(error)})
+            return
+        if path == "/api/speaker-inversion/samples/discard":
+            try:
+                result = self.server.experiment_manager.discard_speaker_inversion_sample(
+                    self._read_json().get("id")
+                )
+                self._send_json(HTTPStatus.OK, result)
+            except ExperimentNotFoundError as error:
+                self._send_json(HTTPStatus.NOT_FOUND, {"error": str(error)})
             except (ExperimentError, ValueError) as error:
                 self._send_json(HTTPStatus.BAD_REQUEST, {"error": str(error)})
             return

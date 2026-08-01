@@ -737,6 +737,123 @@
             Speaker、Style、校正音声は別々に保存され、コンパイル済みマニフェストから参照されます。
           </p>
         </section>
+
+        <section class="pane speaker-inversion-panel" aria-labelledby="speakerInversionHeading">
+          <div class="pane-head">
+            <div>
+              <span class="section-kicker">Official Speaker Inversion</span>
+              <h2 id="speakerInversionHeading">学習話者Embedding</h2>
+            </div>
+            <div class="speaker-inversion-environment-actions">
+              <span id="speakerInversionEnvironmentBadge" class="experiment-status-badge">未確認</span>
+              <button id="setupSpeakerInversionBtn" type="button">学習環境を準備</button>
+              <button id="refreshSpeakerInversionBtn" type="button">状態更新</button>
+            </div>
+          </div>
+          <p class="note">
+            公式Irodori-TTS-v4-Smallを固定コミットで使用します。学習音声、書き起こし、EmbeddingはこのPC内にのみ保存されます。
+            Embeddingは声の生体特徴を含むため、本人同意のある音声だけを使用してください。
+          </p>
+
+          <div class="speaker-inversion-dataset-head">
+            <div>
+              <strong>学習音声と書き起こし</strong>
+              <span id="speakerInversionDatasetSummary">0件</span>
+            </div>
+            <label class="file-command">
+              WAVを追加
+              <input id="speakerInversionWavUpload" type="file" accept=".wav,audio/wav" multiple />
+            </label>
+          </div>
+          <div
+            id="speakerInversionSampleList"
+            class="speaker-inversion-sample-list"
+            role="list"
+            aria-label="Speaker Inversion学習音声"
+          ></div>
+
+          <div class="speaker-inversion-training-controls">
+            <label>
+              Embedding名
+              <input id="speakerInversionVoiceName" type="text" value="voice_profile" maxlength="64" />
+            </label>
+            <button id="trainSpeakerInversionBtn" class="primary" type="button">選択音声から学習</button>
+            <button id="cancelSpeakerInversionJobBtn" type="button" disabled>中止</button>
+          </div>
+          <details class="advanced-settings speaker-inversion-advanced">
+            <summary>学習設定</summary>
+            <div class="form-grid speaker-inversion-settings">
+              <label>
+                学習Step
+                <input id="speakerInversionMaxSteps" type="number" min="1" max="100000" step="100" value="3000" />
+              </label>
+              <label>
+                トークン数
+                <input id="speakerInversionTokens" type="number" min="1" max="128" step="1" value="16" />
+              </label>
+              <label>
+                Batch size
+                <input id="speakerInversionBatchSize" type="number" min="1" max="32" step="1" value="1" />
+              </label>
+              <label>
+                勾配蓄積
+                <input id="speakerInversionAccumulation" type="number" min="1" max="64" step="1" value="1" />
+              </label>
+              <label>
+                Learning rate
+                <input id="speakerInversionLearningRate" type="number" min="0.000001" max="1" step="0.001" value="0.01" />
+              </label>
+              <label>
+                Seed
+                <input id="speakerInversionTrainingSeed" type="number" min="0" max="2147483647" step="1" value="0" />
+              </label>
+            </div>
+          </details>
+
+          <div class="speaker-inversion-test">
+            <div class="speaker-inversion-test-head">
+              <strong>学習結果の生成確認</strong>
+              <span>学習時と同じv4-Smallを使用</span>
+            </div>
+            <div class="form-grid speaker-inversion-test-settings">
+              <label>
+                話者Embedding
+                <select id="speakerInversionEmbeddingSelect">
+                  <option value="">未学習</option>
+                </select>
+              </label>
+              <label>
+                生成Step
+                <input id="speakerInversionGenerateSteps" type="number" min="4" max="100" step="1" value="20" />
+              </label>
+              <label>
+                Speaker CFG
+                <input id="speakerInversionSpeakerGuidance" type="number" min="0.5" max="12" step="0.1" value="5" />
+              </label>
+            </div>
+            <label class="stacked-field">
+              読み上げテキスト
+              <textarea id="speakerInversionTestText" rows="3" maxlength="5000">こんにちは。これは学習した話者Embeddingの確認音声です。</textarea>
+            </label>
+            <label class="stacked-field">
+              VoiceDesign caption
+              <textarea id="speakerInversionTestCaption" rows="2" maxlength="2000"></textarea>
+            </label>
+            <div class="audio-actions">
+              <button id="generateSpeakerInversionTestBtn" type="button">学習話者で生成</button>
+            </div>
+            <audio id="speakerInversionTestAudio" controls hidden></audio>
+          </div>
+
+          <div class="speaker-inversion-job-state" aria-live="polite">
+            <progress id="speakerInversionProgress" max="1" value="0"></progress>
+            <p id="speakerInversionStatus" class="status-line">学習環境を確認しています。</p>
+            <details id="speakerInversionLogDetails" class="experiment-output-details" hidden>
+              <summary>実行ログ</summary>
+              <pre id="speakerInversionJobLog"></pre>
+            </details>
+          </div>
+        </section>
       </section>
 
       <section id="experimentTab" class="tab-panel experiment-workspace" aria-label="実験" hidden>
@@ -1216,6 +1333,6 @@
     <script src="./project_package.js"></script>
     <script src="./landmark_schema.js"></script>
     <script src="./voice_control_profile.js?v=20260731-identity-compiler"></script>
-    <script src="./app.js?v=20260731-identity-compiler"></script>
+    <script src="./app.js?v=20260801-speaker-inversion"></script>
   </body>
 </html>
