@@ -439,6 +439,11 @@ if [[ "$NEEDS_BUILD" -eq 1 ]]; then
       done
     fi
 
+    if [[ -f "$BUILD_ROOT/CMakeCache.txt" ]]; then
+      echo "Cleaning stale audio.cpp build artifacts before the required feature rebuild..."
+      "$VENV_BIN/cmake" --build "$BUILD_ROOT" --target clean --parallel "$JOBS"
+    fi
+
     bash ./scripts/build_linux.sh \
       --backend "$BACKEND" \
       --native-cpu ON \

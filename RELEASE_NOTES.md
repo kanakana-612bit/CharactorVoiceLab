@@ -57,6 +57,8 @@ experiments, and automatic generation archives.
   the official DACVAE codec and stops before training when any selected sample is invalid.
 - Fresh Linux audio.cpp builds no longer abort silently after a successful source patch;
   the launcher now also reports child setup failures explicitly.
+- A required audio.cpp feature rebuild now cleans stale CMake/Ninja artifacts first,
+  preventing an old server binary from surviving with `ninja: no work to do`.
 - Lightweight speaker distances and thresholds are engineering warnings, not speaker
   identification claims or validated biometric decisions.
 - The official v4-Small Python generation path and legacy v3 audio.cpp VoiceDesign path

@@ -24,6 +24,18 @@ class LinuxLauncherStaticTest(unittest.TestCase):
         self.assertIn('if ! bash "$SCRIPT_DIR/setup_audio_cpp.sh" "${SETUP_ARGS[@]}"; then', launcher)
         self.assertIn("audio.cpp setup failed", launcher)
 
+    def test_feature_rebuild_cleans_stale_cmake_artifacts(self):
+        setup = (ROOT / "scripts" / "setup_audio_cpp.sh").read_text(encoding="utf-8")
+        self.assertIn('[[ -f "$BUILD_ROOT/CMakeCache.txt" ]]', setup)
+        self.assertIn(
+            '"$VENV_BIN/cmake" --build "$BUILD_ROOT" --target clean --parallel "$JOBS"',
+            setup,
+        )
+        self.assertLess(
+            setup.index('"$VENV_BIN/cmake" --build "$BUILD_ROOT" --target clean'),
+            setup.index("bash ./scripts/build_linux.sh"),
+        )
+
 
 if __name__ == "__main__":
     unittest.main()
