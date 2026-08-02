@@ -239,6 +239,8 @@ def train(args: argparse.Namespace) -> None:
             "--no-sync",
             "python",
             str(paths["local_manifest_preparer"]),
+            "--upstream-source",
+            str(upstream),
             "--samples",
             str(source_jsonl),
             "--output-manifest",

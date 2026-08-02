@@ -6,12 +6,23 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import sys
 from pathlib import Path
 from typing import Any
 
 
 class LocalManifestError(RuntimeError):
     """Raised when a managed local training sample cannot be prepared."""
+
+
+def _add_upstream_import_path(path: Path) -> Path:
+    source = path.resolve()
+    if not (source / "irodori_tts").is_dir():
+        raise LocalManifestError(f"Official Irodori-TTS source was not found under {source}.")
+    source_text = str(source)
+    if source_text not in sys.path:
+        sys.path.insert(0, source_text)
+    return source
 
 
 def _load_source_rows(path: Path) -> list[dict[str, str]]:
@@ -40,6 +51,7 @@ def _load_source_rows(path: Path) -> list[dict[str, str]]:
 
 
 def prepare_manifest(args: argparse.Namespace) -> None:
+    _add_upstream_import_path(args.upstream_source)
     import soundfile
     import torch
 
@@ -124,6 +136,7 @@ def prepare_manifest(args: argparse.Namespace) -> None:
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--samples", type=Path, required=True)
+    parser.add_argument("--upstream-source", type=Path, required=True)
     parser.add_argument("--output-manifest", type=Path, required=True)
     parser.add_argument("--latent-dir", type=Path, required=True)
     parser.add_argument("--codec-repo", default="Aratako/Semantic-DACVAE-Japanese-32dim")

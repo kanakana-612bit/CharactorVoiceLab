@@ -107,6 +107,10 @@ class SpeakerInversionPipelineTest(unittest.TestCase):
         self.assertEqual(summary["sample_count"], 1)
         self.assertEqual(len(calls), 2)
         self.assertIn("speaker_inversion_prepare_local.py", " ".join(calls[0][0]))
+        self.assertEqual(
+            pathlib.Path(calls[0][0][calls[0][0].index("--upstream-source") + 1]),
+            self.paths["source"],
+        )
         self.assertIn("train.py", calls[1][0])
 
     def test_empty_prepared_manifest_stops_before_training(self):

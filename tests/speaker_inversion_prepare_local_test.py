@@ -44,6 +44,22 @@ class SpeakerInversionPrepareLocalTest(unittest.TestCase):
         with self.assertRaisesRegex(prepare_local.LocalManifestError, "requires audio and text"):
             prepare_local._load_source_rows(source)
 
+    def test_upstream_source_is_added_to_import_path(self):
+        upstream = self.root / "Irodori-TTS"
+        (upstream / "irodori_tts").mkdir(parents=True)
+        source_text = str(upstream.resolve())
+        try:
+            resolved = prepare_local._add_upstream_import_path(upstream)
+            self.assertEqual(resolved, upstream.resolve())
+            self.assertEqual(sys.path[0], source_text)
+        finally:
+            if source_text in sys.path:
+                sys.path.remove(source_text)
+
+    def test_missing_upstream_source_is_rejected(self):
+        with self.assertRaisesRegex(prepare_local.LocalManifestError, "source was not found"):
+            prepare_local._add_upstream_import_path(self.root / "missing")
+
 
 if __name__ == "__main__":
     unittest.main()
