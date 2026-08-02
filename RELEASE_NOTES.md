@@ -53,6 +53,8 @@ experiments, and automatic generation archives.
   Linux/CUDA environment. GPU execution is not validated by the Windows test suite.
 - Speaker Inversion setup and job preflight now verify the locked CUDA PyTorch wheel,
   GPU visibility, and an actual CUDA tensor allocation; the GUI exposes repair diagnostics.
+- Managed Speaker Inversion WAV preparation now uses direct SoundFile decoding before
+  the official DACVAE codec and stops before training when any selected sample is invalid.
 - Lightweight speaker distances and thresholds are engineering warnings, not speaker
   identification claims or validated biometric decisions.
 - The official v4-Small Python generation path and legacy v3 audio.cpp VoiceDesign path

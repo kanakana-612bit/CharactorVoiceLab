@@ -33,6 +33,7 @@ class SpeakerInversionPipelineTest(unittest.TestCase):
             paths["model"],
             paths["uv"],
             paths["cuda_probe"],
+            paths["local_manifest_preparer"],
         ):
             path.write_bytes(b"fixture")
         paths["environment"].write_text(
@@ -57,6 +58,24 @@ class SpeakerInversionPipelineTest(unittest.TestCase):
 
         def fake_run(command, *, cwd):
             calls.append((command, cwd))
+            if "speaker_inversion_prepare_local.py" in " ".join(command):
+                manifest = pathlib.Path(command[command.index("--output-manifest") + 1])
+                latent_dir = pathlib.Path(command[command.index("--latent-dir") + 1])
+                latent_dir.mkdir(parents=True, exist_ok=True)
+                latent = latent_dir / "00000000_00000000.pt"
+                latent.write_bytes(b"latent")
+                manifest.write_text(
+                    json.dumps(
+                        {
+                            "text": "これは学習文です。",
+                            "latent_path": str(latent.relative_to(manifest.parent)),
+                            "num_frames": 10,
+                        },
+                        ensure_ascii=False,
+                    )
+                    + "\n",
+                    encoding="utf-8",
+                )
             if "train.py" in command:
                 checkpoint = output / "upstream_training" / "checkpoint_final.speaker.safetensors"
                 checkpoint.parent.mkdir(parents=True, exist_ok=True)
@@ -87,8 +106,14 @@ class SpeakerInversionPipelineTest(unittest.TestCase):
         self.assertNotIn("text", json.dumps(summary, ensure_ascii=False))
         self.assertEqual(summary["sample_count"], 1)
         self.assertEqual(len(calls), 2)
-        self.assertIn("prepare_manifest.py", calls[0][0])
+        self.assertIn("speaker_inversion_prepare_local.py", " ".join(calls[0][0]))
         self.assertIn("train.py", calls[1][0])
+
+    def test_empty_prepared_manifest_stops_before_training(self):
+        manifest = self.root / "empty.jsonl"
+        manifest.write_text("", encoding="utf-8")
+        with self.assertRaisesRegex(pipeline.PipelineError, "0 of 1 expected"):
+            pipeline._validate_prepared_manifest(manifest, 1)
 
     def test_generate_uses_same_checkpoint_and_managed_embedding(self):
         self.paths["embeddings"].mkdir(parents=True, exist_ok=True)

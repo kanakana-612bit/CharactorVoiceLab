@@ -116,6 +116,13 @@ the system CUDA installation or NVIDIA driver. Training defaults to the official
 16-token, `0.01` learning-rate recipe with 3000 steps, while using batch size 1 as a
 conservative RTX 3060 baseline.
 
+Managed local training WAVs are decoded with the locked SoundFile dependency and
+passed directly to the official DACVAE codec. This deliberately avoids the generic
+Hugging Face Datasets/TorchCodec audio iterator for this local-only workflow, while
+retaining the official text normalization, latent manifest format, codec, checkpoint,
+and training implementation. Any WAV decode or codec failure names the affected file,
+and training cannot begin unless every selected sample produced a valid latent.
+
 Setup is considered complete only after the isolated PyTorch reports a CUDA build,
 sees an NVIDIA device, and completes a small CUDA tensor allocation. If an older CPU
 PyTorch wheel remains in the environment, the same GUI setup operation reinstalls the

@@ -55,6 +55,7 @@ def _runtime_paths(project_root: Path) -> dict[str, Path]:
         "uv": project_root / "runtime" / "bootstrap" / "uv" / "uv",
         "embeddings": root / "embeddings",
         "cuda_probe": project_root / "speaker_inversion_cuda_probe.py",
+        "local_manifest_preparer": project_root / "speaker_inversion_prepare_local.py",
     }
 
 
@@ -122,6 +123,7 @@ def _load_environment(project_root: Path) -> tuple[dict[str, Path], dict[str, An
         paths["source"] / "configs" / CONFIG_NAME,
         paths["model"],
         paths["cuda_probe"],
+        paths["local_manifest_preparer"],
     )
     missing = [str(path) for path in required if not path.is_file()]
     if missing:
@@ -192,6 +194,27 @@ def _write_json(path: Path, value: Any) -> None:
     temporary.replace(path)
 
 
+def _validate_prepared_manifest(path: Path, expected_samples: int) -> None:
+    try:
+        lines = [line for line in path.read_text(encoding="utf-8").splitlines() if line.strip()]
+    except OSError as error:
+        raise PipelineError("Local WAV preparation did not produce a training manifest.") from error
+    if len(lines) != expected_samples:
+        raise PipelineError(
+            f"Local WAV preparation produced {len(lines)} of {expected_samples} expected samples."
+        )
+    for index, line in enumerate(lines, start=1):
+        try:
+            value = json.loads(line)
+        except json.JSONDecodeError as error:
+            raise PipelineError(f"Prepared manifest row {index} is invalid JSON.") from error
+        if not isinstance(value, dict) or not value.get("text") or not value.get("latent_path"):
+            raise PipelineError(f"Prepared manifest row {index} is incomplete.")
+        latent_path = (path.parent / str(value["latent_path"])).resolve()
+        if not latent_path.is_file():
+            raise PipelineError(f"Prepared latent file {index} was not found.")
+
+
 def train(args: argparse.Namespace) -> None:
     project_root = args.project_root.resolve()
     paths, environment = _load_environment(project_root)
@@ -215,28 +238,21 @@ def train(args: argparse.Namespace) -> None:
             "run",
             "--no-sync",
             "python",
-            "prepare_manifest.py",
-            "--dataset",
-            "json",
-            "--data-files",
-            f"train={source_jsonl}",
-            "--split",
-            "train",
-            "--audio-column",
-            "audio",
-            "--text-column",
-            "text",
+            str(paths["local_manifest_preparer"]),
+            "--samples",
+            str(source_jsonl),
             "--output-manifest",
             str(manifest),
             "--latent-dir",
             str(latents),
             "--device",
             "cuda",
-            "--log-every",
-            "1",
+            "--seed",
+            str(args.seed),
         ],
         cwd=upstream,
     )
+    _validate_prepared_manifest(manifest, len(samples))
 
     training_output = output / "upstream_training"
     save_every = max(1, min(args.max_steps, args.save_every))
