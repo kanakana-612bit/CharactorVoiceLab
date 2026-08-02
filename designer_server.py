@@ -41,6 +41,7 @@ from experiment_jobs import (
     ExperimentNotFoundError,
     MAX_UPLOAD_BYTES,
 )
+from generated_output_store import GeneratedOutputError, GeneratedOutputStore
 from voice_identity import VoiceIdentityError, VoiceIdentityStore
 
 
@@ -50,6 +51,7 @@ LANGUAGE_PATTERN = re.compile(r"^[A-Za-z][A-Za-z0-9-]{1,15}$")
 SPEAKER_CONDITION_NAME_PATTERN = re.compile(
     r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}\.speaker\.safetensors$"
 )
+OUTPUT_IDENTITY_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$")
 MAX_JSON_BYTES = 128 * 1024
 MAX_AUDIO_BYTES = 256 * 1024 * 1024
 STATIC_EXTENSIONS = {
@@ -65,7 +67,7 @@ STATIC_EXTENSIONS = {
     ".ico",
     ".wav",
 }
-BLOCKED_STATIC_PREFIXES = ("/.git", "/data/", "/scripts/", "/tests/", "/runtime/")
+BLOCKED_STATIC_PREFIXES = ("/.git", "/data/", "/scripts/", "/tests/", "/runtime/", "/outputs/")
 SPEAKER_CONDITION_ROOT = PROJECT_ROOT / "runtime" / "speaker_conditions"
 
 
@@ -75,6 +77,7 @@ class DesignerServer(ThreadingHTTPServer):
     observation_store: ObservationStore
     experiment_manager: ExperimentJobManager
     voice_identity_store: VoiceIdentityStore
+    generated_output_store: GeneratedOutputStore
 
 
 class DesignerHandler(SimpleHTTPRequestHandler):
@@ -100,6 +103,20 @@ class DesignerHandler(SimpleHTTPRequestHandler):
     def do_GET(self) -> None:  # noqa: N802 - stdlib handler API
         parsed = urllib.parse.urlsplit(self.path)
         path = parsed.path
+        output_metadata_match = re.fullmatch(
+            r"/api/outputs/([0-9]{8})/([^/]+)/metadata",
+            path,
+        )
+        if output_metadata_match:
+            try:
+                metadata = self.server.generated_output_store.read_metadata(
+                    output_metadata_match.group(1),
+                    urllib.parse.unquote(output_metadata_match.group(2)),
+                )
+                self._send_json(HTTPStatus.OK, metadata)
+            except GeneratedOutputError as error:
+                self._send_json(HTTPStatus.NOT_FOUND, {"error": str(error)})
+            return
         if path == "/api/voice-identities/resources":
             self._send_json(HTTPStatus.OK, self.server.voice_identity_store.resources())
             return
@@ -434,6 +451,16 @@ class DesignerHandler(SimpleHTTPRequestHandler):
         postprocess = request.pop("_cvd_postprocess", None)
         observation_options = request.pop("_cvd_observation", None)
         speaker_condition = request.pop("_cvd_speaker_condition", None)
+        output_capture = request.pop("_cvd_output_capture", None)
+        output_identity = None
+        if output_capture and output_capture.get("identity_id"):
+            try:
+                output_identity = self.server.voice_identity_store.read(
+                    output_capture["identity_id"]
+                )
+            except VoiceIdentityError as error:
+                self._send_json(HTTPStatus.BAD_REQUEST, {"error": str(error)})
+                return
         observation = (
             self.server.observation_store.begin(request, postprocess, observation_options)
             if observation_options
@@ -459,12 +486,15 @@ class DesignerHandler(SimpleHTTPRequestHandler):
             postprocess,
             observation,
             speaker_condition,
+            output_capture,
+            output_identity,
         )
 
     def _static_path_allowed(self, raw_path: str) -> bool:
         path = urllib.parse.unquote(raw_path)
         normalized = path.replace("\\", "/")
-        if any(normalized.startswith(prefix) for prefix in BLOCKED_STATIC_PREFIXES):
+        normalized_lower = normalized.lower()
+        if any(normalized_lower.startswith(prefix) for prefix in BLOCKED_STATIC_PREFIXES):
             return False
         if normalized in ("", "/") or normalized.endswith("/"):
             return True
@@ -504,6 +534,8 @@ class DesignerHandler(SimpleHTTPRequestHandler):
         postprocess: dict[str, Any] | None = None,
         observation: ObservationCapture | None = None,
         speaker_condition: dict[str, Any] | None = None,
+        output_capture: dict[str, Any] | None = None,
+        output_identity: dict[str, Any] | None = None,
     ) -> None:
         body = json.dumps(payload, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
         request = urllib.request.Request(
@@ -517,6 +549,9 @@ class DesignerHandler(SimpleHTTPRequestHandler):
             postprocess,
             observation,
             speaker_condition,
+            output_capture,
+            output_identity,
+            payload,
         )
 
     def _perform_upstream_request(
@@ -525,6 +560,9 @@ class DesignerHandler(SimpleHTTPRequestHandler):
         postprocess: dict[str, Any] | None = None,
         observation: ObservationCapture | None = None,
         speaker_condition: dict[str, Any] | None = None,
+        output_capture: dict[str, Any] | None = None,
+        output_identity: dict[str, Any] | None = None,
+        generation_request: dict[str, Any] | None = None,
     ) -> None:
         upstream_started = time.perf_counter()
         try:
@@ -557,12 +595,57 @@ class DesignerHandler(SimpleHTTPRequestHandler):
                         upstream_headers=response.headers,
                         f0_analyzer=analyze_wav_f0,
                     )
+                archived_output = None
+                if output_capture and response.headers.get_content_type() == "audio/wav":
+                    identity_id = output_capture.get("identity_id")
+                    try:
+                        evaluation = self.server.voice_identity_store.evaluate(
+                            body,
+                            identity_id,
+                        )
+                    except VoiceIdentityError as error:
+                        evaluation = {
+                            "schema_version": "cvd_identity_warning_evaluation_0.1",
+                            "status": "unavailable",
+                            "warnings": [f"evaluation_unavailable: {error}"],
+                            "identity_id": identity_id,
+                            "identity_name": output_identity.get("name") if output_identity else None,
+                        }
+                    try:
+                        archived_output = self.server.generated_output_store.archive(
+                            wav_bytes=body,
+                            request=generation_request or {},
+                            capture=output_capture,
+                            postprocess=postprocess,
+                            correction_metadata=correction_metadata,
+                            identity=output_identity,
+                            evaluation=evaluation,
+                            speaker_condition=speaker_condition,
+                            observation_id=observation.id if observation_written else None,
+                            upstream_seconds=upstream_seconds,
+                            postprocess_seconds=postprocess_seconds,
+                            upstream_headers=response.headers,
+                        )
+                    except (OSError, ValueError, TypeError) as error:
+                        self.log_error("Generated output archive failed: %s", error)
                 self.send_response(response.status)
                 self.send_header("Content-Type", response.headers.get_content_type())
                 self.send_header("Content-Length", str(len(body)))
                 self.send_header("Cache-Control", "no-store")
                 if observation_written:
                     self.send_header("X-CVD-Observation-ID", observation.id)
+                if archived_output:
+                    self.send_header("X-CVD-Output-Archive-Status", "saved")
+                    self.send_header(
+                        "X-CVD-Output-ID",
+                        urllib.parse.quote(archived_output["id"], safe="/._-"),
+                    )
+                    self.send_header(
+                        "X-CVD-Output-Path",
+                        urllib.parse.quote(archived_output["relative_wav"], safe="/._-"),
+                    )
+                elif output_capture:
+                    self.send_header("X-CVD-Output-Archive-Status", "failed")
                 if speaker_condition:
                     self.send_header(
                         "X-CVD-Speaker-Condition-SHA256",
@@ -821,7 +904,46 @@ def validate_speech_request(payload: dict[str, Any]) -> dict[str, Any]:
     observation = validate_observation_options(payload.get("observation"))
     if observation:
         request["_cvd_observation"] = observation
+    output_capture = validate_output_capture(payload.get("output_capture"), generation_mode)
+    if output_capture:
+        request["_cvd_output_capture"] = output_capture
     return request
+
+
+def validate_output_capture(value: Any, generation_mode: str) -> dict[str, Any] | None:
+    if value is None:
+        return None
+    if not isinstance(value, dict):
+        raise ValueError("output_capture must be an object.")
+    enabled = value.get("enabled", False)
+    if not isinstance(enabled, bool):
+        raise ValueError("output_capture.enabled must be boolean.")
+    if not enabled:
+        return None
+    app_version = value.get("app_version")
+    profile_name = value.get("profile_name")
+    identity_id = value.get("compiled_voice_identity_id")
+    if not isinstance(app_version, str) or not 1 <= len(app_version) <= 32:
+        raise ValueError("output_capture.app_version is invalid.")
+    if not isinstance(profile_name, str) or not 1 <= len(profile_name.strip()) <= 128:
+        raise ValueError("output_capture.profile_name is invalid.")
+    if identity_id is not None and (
+        not isinstance(identity_id, str) or not OUTPUT_IDENTITY_PATTERN.fullmatch(identity_id)
+    ):
+        raise ValueError("output_capture.compiled_voice_identity_id is invalid.")
+    return {
+        "enabled": True,
+        "app_version": app_version,
+        "profile_name": profile_name.strip(),
+        "identity_id": identity_id,
+        "speaking_rate": bounded_number(
+            value.get("speaking_rate", 1), "output_capture.speaking_rate", 0.6, 1.4
+        ),
+        "f0_target_hz": bounded_number(
+            value.get("f0_target_hz"), "output_capture.f0_target_hz", 60, 500
+        ),
+        "generation_mode": generation_mode,
+    }
 
 
 def parse_args() -> argparse.Namespace:
@@ -860,6 +982,7 @@ def main() -> None:
     server.upstream_timeout_seconds = max(1, args.upstream_timeout)
     server.observation_store = ObservationStore(PROJECT_ROOT / "runtime" / "observations", PROJECT_ROOT)
     server.voice_identity_store = VoiceIdentityStore(PROJECT_ROOT)
+    server.generated_output_store = GeneratedOutputStore(PROJECT_ROOT)
     server.experiment_manager = ExperimentJobManager(
         PROJECT_ROOT,
         bridge_base_url=f"http://{bind_host}:{server.server_port}",

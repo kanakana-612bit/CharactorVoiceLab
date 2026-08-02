@@ -232,12 +232,21 @@ The former `glottal_closure` and `side_branch_loss_coupling` master controls are
 Implemented on this branch:
 
 - workflow tabs for image/landmark input, vocal-tract profile audition, phoneme calibration, TTS model selection, and output demo
+- automatic local output-demo archiving under `Outputs/YYYYMMDD/`, with paired WAV and JSON metadata named `NNN-Identity-seed`
 - `character_voice_identity_function_0.1`, which keeps appearance estimates, explicit design overrides, effective anchors, confidence, and source keys separate
 - serializable pitch, breathiness, energy, speaking-rate, articulation, and breath-phrase control functions
 - deterministic mapping of the intermediate profile to an Irodori VoiceDesign caption, fixed seed, inference steps, caption guidance, and duration scale
 - local audio.cpp model discovery and WAV generation through a validated same-origin HTTP bridge
 - opt-in local generation observations with request/model provenance, timing, WAV hashes, acoustic analysis, and explicit internal-tensor availability
 - backward-compatible loading of Character Voice Lab Ver 1.1 physical profiles
+
+Each output-demo JSON records the model and model-config hash, seed, Caption CFG,
+step count, voice-quality caption, full spoken text, compiled identity and Speaker
+condition hashes, design F0 target, speaking rate, duration scale, F0 postprocessing
+request/result, lightweight warning evaluation, output WAV properties and SHA-256,
+generation timing, application version, and observation id. `Outputs/` is local-only
+and ignored by Git because these records can contain full scripts and biometric voice
+references.
 
 - publication-oriented physical-profile workflow: basic information, detailed settings, vowel calibration, consonant calibration, and references/publication policy
 - header-level profile load, `voice_profile` naming, and reproducible package save

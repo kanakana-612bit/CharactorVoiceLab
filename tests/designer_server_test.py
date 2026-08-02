@@ -269,6 +269,7 @@ class StubAudioCppHandler(BaseHTTPRequestHandler):
         assert payload["model"] == "irodori-vdes"
         assert payload["options"]["caption"] == "明るい声。"
         assert "observation" not in payload
+        assert "output_capture" not in payload
         body = b"RIFF\x04\x00\x00\x00WAVE"
         self.send_response(200)
         self.send_header("Content-Type", "audio/wav")
@@ -382,6 +383,7 @@ class LocalProxyIntegrationTest(unittest.TestCase):
             audio_cpp_base_url=self.designer.audio_cpp_base_url,
         )
         self.designer.voice_identity_store = MODULE.VoiceIdentityStore(self.experiment_root)
+        self.designer.generated_output_store = MODULE.GeneratedOutputStore(self.experiment_root)
         self.designer_thread = threading.Thread(target=self.designer.serve_forever, daemon=True)
         self.designer_thread.start()
         self.base_url = f"http://127.0.0.1:{self.designer.server_port}"
@@ -574,6 +576,67 @@ class LocalProxyIntegrationTest(unittest.TestCase):
             content_type = response.headers.get_content_type()
         self.assertEqual(content_type, "audio/wav")
         self.assertTrue(audio.startswith(b"RIFF"))
+
+    def test_output_demo_is_archived_with_generation_metadata(self):
+        payload = {
+            "model": "irodori-vdes",
+            "input": "保存対象の読み上げ文です。",
+            "language": "ja",
+            "seed": 42,
+            "num_inference_steps": 20,
+            "generation_mode": "standard_single",
+            "options": {
+                "caption": "明るい声。",
+                "duration_scale": 0.9,
+                "caption_guidance_scale": 2.5,
+            },
+            "output_capture": {
+                "enabled": True,
+                "app_version": "0.1",
+                "profile_name": "sample-profile",
+                "speaking_rate": 1.1,
+                "f0_target_hz": 190,
+            },
+        }
+        request = urllib.request.Request(
+            self.base_url + "/api/audio-cpp/speech",
+            data=json.dumps(payload, ensure_ascii=False).encode("utf-8"),
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        evaluation = {
+            "schema_version": "cvd_identity_warning_evaluation_0.1",
+            "status": "within_provisional_range",
+            "acoustic_values": {"f0_median_hz": 188.5},
+            "warnings": [],
+        }
+        with mock.patch.object(
+            self.designer.voice_identity_store,
+            "evaluate",
+            return_value=evaluation,
+        ):
+            with urllib.request.urlopen(request) as response:
+                response.read()
+                output_id = urllib.parse.unquote(response.headers["X-CVD-Output-ID"])
+                output_path = urllib.parse.unquote(response.headers["X-CVD-Output-Path"])
+                self.assertEqual(response.headers["X-CVD-Output-Archive-Status"], "saved")
+
+        self.assertRegex(output_id, r"^[0-9]{8}/001-uncompiled-42$")
+        self.assertTrue((self.experiment_root / output_path).is_file())
+        date_name, stem = output_id.split("/", 1)
+        metadata = self.designer.generated_output_store.read_metadata(date_name, stem)
+        self.assertEqual(metadata["generation"]["spoken_text"], payload["input"])
+        self.assertEqual(metadata["generation"]["voice_quality_text"], "明るい声。")
+        self.assertEqual(metadata["generation"]["cfg_scales"]["caption"], 2.5)
+        self.assertEqual(metadata["profile"]["speaking_rate"], 1.1)
+        self.assertEqual(metadata["lightweight_evaluation"], evaluation)
+
+        metadata_url = self.base_url + "/api/outputs/" + "/".join(
+            urllib.parse.quote(part, safe="") for part in output_id.split("/")
+        ) + "/metadata"
+        with urllib.request.urlopen(metadata_url) as response:
+            served_metadata = json.load(response)
+        self.assertEqual(served_metadata["audio"]["file"], f"{stem}.wav")
 
     def test_observation_is_local_opt_in_and_does_not_change_audio(self):
         payload = {

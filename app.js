@@ -5205,6 +5205,14 @@ async function generateTtsDemo() {
     capture_internal_conditions: true,
     latent_snapshot_steps: [],
   };
+  request.output_capture = {
+    enabled: true,
+    app_version: APP_VERSION,
+    profile_name: els.projectTitleInput?.value?.trim() || "voice_profile",
+    compiled_voice_identity_id: state.activeCompiledIdentityId,
+    speaking_rate: profile.identity_anchor.speaking_rate,
+    f0_target_hz: profile.identity_anchor.f0_mean_hz,
+  };
   state.lastIdentityEvaluation = null;
   renderTtsIdentityEvaluation(null);
   if (els.generateTtsDemoBtn) els.generateTtsDemoBtn.disabled = true;
@@ -5233,6 +5241,11 @@ async function generateTtsDemo() {
     const outputF0 = responseNumber("X-CVD-F0-Output-Hz");
     const shiftSemitones = responseNumber("X-CVD-F0-Shift-Semitones");
     const observationId = response.headers.get("X-CVD-Observation-ID");
+    const outputArchiveStatus = response.headers.get("X-CVD-Output-Archive-Status");
+    const rawOutputId = response.headers.get("X-CVD-Output-ID");
+    const rawOutputPath = response.headers.get("X-CVD-Output-Path");
+    const outputId = rawOutputId ? decodeURIComponent(rawOutputId) : null;
+    const outputPath = rawOutputPath ? decodeURIComponent(rawOutputPath) : null;
     const blob = await response.blob();
     if (!blob.size) throw new Error("空の音声応答を受信しました。");
     if (state.ttsResultUrl) URL.revokeObjectURL(state.ttsResultUrl);
@@ -5249,7 +5262,15 @@ async function generateTtsDemo() {
     }
     let evaluation = null;
     try {
-      evaluation = await evaluateGeneratedTts(blob);
+      if (outputId) {
+        const metadataPath = outputId.split("/").map(encodeURIComponent).join("/");
+        const metadata = await experimentApi(`/api/outputs/${metadataPath}/metadata`);
+        evaluation = metadata.lightweight_evaluation || null;
+        state.lastIdentityEvaluation = evaluation;
+        renderTtsIdentityEvaluation(evaluation);
+      } else {
+        evaluation = await evaluateGeneratedTts(blob);
+      }
     } catch (evaluationError) {
       renderTtsIdentityEvaluation({
         status: "warning",
@@ -5265,9 +5286,12 @@ async function generateTtsDemo() {
       const identitySummary = identity ? ` / identity ${identity.name}` : " / identity未コンパイル";
       const evaluationSummary = evaluation?.status === "warning" ? " / 評価警告あり" : " / 評価完了";
       const observationSummary = observationId ? ` / observation ${observationId}` : "";
+      const archiveSummary = outputArchiveStatus === "saved" && outputPath
+        ? ` / 保存 ${outputPath}`
+        : outputArchiveStatus === "failed" ? " / 自動保存失敗" : "";
       els.ttsDemoStatus.textContent =
         `生成完了 / ${request.model} / 20 Step / 1候補 / seed ${request.seed}` +
-        `${identitySummary}${evaluationSummary}${observationSummary}${correctionSummary}`;
+        `${identitySummary}${evaluationSummary}${observationSummary}${archiveSummary}${correctionSummary}`;
     }
     setAudioCppStatus("ready", "接続済み");
   } catch (error) {
