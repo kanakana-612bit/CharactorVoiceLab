@@ -12,6 +12,7 @@ class LinuxLauncherStaticTest(unittest.TestCase):
             "\n}\n\nfind_cuda_nvcc()", 1
         )[0]
         self.assertIn("git -C \"$SOURCE_ROOT\" apply \"$SPEAKER_INVERSION_PATCH\"", function)
+        self.assertIn('source_patch_is_applied "$SPEAKER_INVERSION_PATCH"', function)
         self.assertIn("return 0", function)
         self.assertNotIn(
             'grep -Fq -- "$SPEAKER_INVERSION_MARKER" "$target" &&',

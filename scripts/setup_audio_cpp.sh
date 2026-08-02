@@ -98,6 +98,10 @@ binary_has_speaker_inversion() {
     grep -aFq -- "$SPEAKER_OBSERVATION_MARKER" "$SERVER_BIN"
 }
 
+source_patch_is_applied() {
+  git -C "$SOURCE_ROOT" apply --reverse --check "$1" >/dev/null 2>&1
+}
+
 apply_speaker_inversion_patch() {
   local target="$SOURCE_ROOT/src/models/irodori_tts/session.cpp"
   local observation_target="$SOURCE_ROOT/app/server/runtime.cpp"
@@ -114,21 +118,27 @@ apply_speaker_inversion_patch() {
     return 1
   fi
   if ! grep -Fq -- "$SPEAKER_INVERSION_MARKER" "$target"; then
-    if ! git -C "$SOURCE_ROOT" apply --check "$SPEAKER_INVERSION_PATCH"; then
+    if source_patch_is_applied "$SPEAKER_INVERSION_PATCH"; then
+      echo "The CharacterVoiceDesigner audio.cpp patch is already applied."
+    elif ! git -C "$SOURCE_ROOT" apply --check "$SPEAKER_INVERSION_PATCH"; then
       echo "The audio.cpp source does not match the pinned Speaker Inversion patch." >&2
       return 1
+    else
+      git -C "$SOURCE_ROOT" apply "$SPEAKER_INVERSION_PATCH"
     fi
-    git -C "$SOURCE_ROOT" apply "$SPEAKER_INVERSION_PATCH"
   elif ! grep -Fq -- "$SPEAKER_OBSERVATION_MARKER" "$observation_target"; then
     if [[ ! -f "$SPEAKER_OBSERVATION_PATCH" ]]; then
       echo "The CharacterVoiceDesigner speaker-observation upgrade patch is missing." >&2
       return 1
     fi
-    if ! git -C "$SOURCE_ROOT" apply --check "$SPEAKER_OBSERVATION_PATCH"; then
+    if source_patch_is_applied "$SPEAKER_OBSERVATION_PATCH"; then
+      echo "The CharacterVoiceDesigner observation patch is already applied."
+    elif ! git -C "$SOURCE_ROOT" apply --check "$SPEAKER_OBSERVATION_PATCH"; then
       echo "The existing Speaker Inversion source cannot be upgraded with the pinned observation patch." >&2
       return 1
+    else
+      git -C "$SOURCE_ROOT" apply "$SPEAKER_OBSERVATION_PATCH"
     fi
-    git -C "$SOURCE_ROOT" apply "$SPEAKER_OBSERVATION_PATCH"
   fi
   # git apply --check plus git apply is the authoritative source validation here.
   # The completed server binary is checked for both feature markers below.
