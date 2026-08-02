@@ -36,6 +36,20 @@ class LinuxLauncherStaticTest(unittest.TestCase):
             setup.index("bash ./scripts/build_linux.sh"),
         )
 
+    def test_feature_rebuild_checks_disk_space_after_cleaning(self):
+        setup = (ROOT / "scripts" / "setup_audio_cpp.sh").read_text(encoding="utf-8")
+        self.assertIn('MIN_BUILD_FREE_DISK_GIB="${CVD_MIN_BUILD_FREE_DISK_GIB:-8}"', setup)
+        self.assertIn('require_build_disk_space "$RUNTIME_ROOT"', setup)
+        self.assertIn("Insufficient disk space for the audio.cpp build.", setup)
+        self.assertLess(
+            setup.index('"$VENV_BIN/cmake" --build "$BUILD_ROOT" --target clean'),
+            setup.index('require_build_disk_space "$RUNTIME_ROOT"'),
+        )
+        self.assertLess(
+            setup.index('require_build_disk_space "$RUNTIME_ROOT"'),
+            setup.index("bash ./scripts/build_linux.sh"),
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

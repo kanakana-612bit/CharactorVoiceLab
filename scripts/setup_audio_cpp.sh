@@ -91,6 +91,35 @@ MAMBA_CACHE_ROOT="$RUNTIME_ROOT/micromamba-root"
 TOOLCHAIN_ROOT="$RUNTIME_ROOT/toolchains/gcc13"
 PYWORLD_REQUIREMENT="pyworld==0.3.5"
 SETUPTOOLS_REQUIREMENT="setuptools<81"
+MIN_BUILD_FREE_DISK_GIB="${CVD_MIN_BUILD_FREE_DISK_GIB:-8}"
+
+require_build_disk_space() {
+  local path="$1"
+  local free_kib
+  local required_kib
+
+  if [[ ! "$MIN_BUILD_FREE_DISK_GIB" =~ ^[1-9][0-9]*$ ]]; then
+    echo "CVD_MIN_BUILD_FREE_DISK_GIB must be a positive integer: $MIN_BUILD_FREE_DISK_GIB" >&2
+    return 1
+  fi
+
+  free_kib="$(df -Pk -- "$path" 2>/dev/null | awk 'NR == 2 { print $4 }')"
+  if [[ ! "$free_kib" =~ ^[0-9]+$ ]]; then
+    echo "Could not determine free disk space for the audio.cpp build directory: $path" >&2
+    return 1
+  fi
+
+  required_kib=$((MIN_BUILD_FREE_DISK_GIB * 1024 * 1024))
+  if ((free_kib < required_kib)); then
+    echo "Insufficient disk space for the audio.cpp build." >&2
+    echo "At least ${MIN_BUILD_FREE_DISK_GIB} GiB must be free; 15 GiB or more is recommended." >&2
+    df -h -- "$path" >&2 || true
+    echo "Free space in the project runtime filesystem, then re-run webui.sh." >&2
+    return 1
+  fi
+
+  echo "[diagnostic] audio.cpp build disk space: $((free_kib / 1024 / 1024)) GiB free."
+}
 
 binary_has_speaker_inversion() {
   [[ -x "$SERVER_BIN" ]] &&
@@ -443,6 +472,8 @@ if [[ "$NEEDS_BUILD" -eq 1 ]]; then
       echo "Cleaning stale audio.cpp build artifacts before the required feature rebuild..."
       "$VENV_BIN/cmake" --build "$BUILD_ROOT" --target clean --parallel "$JOBS"
     fi
+
+    require_build_disk_space "$RUNTIME_ROOT"
 
     bash ./scripts/build_linux.sh \
       --backend "$BACKEND" \
