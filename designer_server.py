@@ -46,6 +46,7 @@ from voice_identity import VoiceIdentityError, VoiceIdentityStore
 
 
 PROJECT_ROOT = Path(__file__).resolve().parent
+APPLICATION_VERSION = "0.2"
 MODEL_ID_PATTERN = re.compile(r"^[A-Za-z0-9_.:-]{1,128}$")
 LANGUAGE_PATTERN = re.compile(r"^[A-Za-z][A-Za-z0-9-]{1,15}$")
 SPEAKER_CONDITION_NAME_PATTERN = re.compile(
@@ -81,7 +82,7 @@ class DesignerServer(ThreadingHTTPServer):
 
 
 class DesignerHandler(SimpleHTTPRequestHandler):
-    server_version = "CharacterVoiceDesigner/0.1"
+    server_version = f"CharacterVoiceDesigner/{APPLICATION_VERSION}"
 
     def __init__(self, *args: Any, **kwargs: Any) -> None:
         super().__init__(*args, directory=str(PROJECT_ROOT), **kwargs)
@@ -207,6 +208,7 @@ class DesignerHandler(SimpleHTTPRequestHandler):
                 HTTPStatus.OK,
                 {
                     "app": "CharacterVoiceDesigner",
+                    "version": APPLICATION_VERSION,
                     "features": {
                         "voice_identity_compilation": True,
                         "standard_single_20step": True,

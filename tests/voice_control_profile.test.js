@@ -6,7 +6,7 @@ const projectRoot = path.resolve(__dirname, "..");
 eval(fs.readFileSync(path.join(projectRoot, "voice_control_profile.js"), "utf8"));
 
 const context = {
-  app_version: "0.1",
+  app_version: "0.2",
   project_title: "test_voice",
   age: 17,
   sex_reference_class: "female",

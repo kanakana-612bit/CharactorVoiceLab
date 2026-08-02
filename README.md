@@ -1,6 +1,10 @@
 # CharacterVoiceDesigner
 
-Current branch version: Ver 0.1
+Current branch version: Ver 0.2
+
+See [RELEASE_NOTES.md](RELEASE_NOTES.md) for the Ver 0.2 implementation scope and
+known experimental boundaries. Product versions are independent from serialized
+schema identifiers; existing `*_0.1` schemas remain unchanged for compatibility.
 
 CharacterVoiceDesigner converts appearance-derived and manually designed voice features into backend-neutral identity anchors and serializable control functions. The frozen Character Voice Lab physical synthesizer remains available as the profile-audition and calibration layer.
 

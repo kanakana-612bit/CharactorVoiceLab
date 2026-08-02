@@ -401,6 +401,7 @@ class LocalProxyIntegrationTest(unittest.TestCase):
             health = json.load(response)
             content_security_policy = response.headers.get("Content-Security-Policy", "")
         self.assertEqual(health["app"], "CharacterVoiceDesigner")
+        self.assertEqual(health["version"], "0.2")
         self.assertTrue(health["features"]["voice_identity_compilation"])
         self.assertIsInstance(health["psola_available"], bool)
         self.assertIn("pyworld", health["postprocess_dependencies"])
@@ -592,7 +593,7 @@ class LocalProxyIntegrationTest(unittest.TestCase):
             },
             "output_capture": {
                 "enabled": True,
-                "app_version": "0.1",
+                "app_version": "0.2",
                 "profile_name": "sample-profile",
                 "speaking_rate": 1.1,
                 "f0_target_hz": 190,

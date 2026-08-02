@@ -50,7 +50,7 @@ class GeneratedOutputStoreTest(unittest.TestCase):
             "wav_bytes": sine_wav(),
             "request": request,
             "capture": {
-                "app_version": "0.1",
+                "app_version": "0.2",
                 "profile_name": "voice_profile",
                 "speaking_rate": 0.9,
                 "f0_target_hz": 180,

@@ -5,8 +5,8 @@ const projectRoot = path.resolve(__dirname, "..");
 const indexHtml = fs.readFileSync(path.join(projectRoot, "index.html"), "utf8");
 const styleSheet = fs.readFileSync(path.join(projectRoot, "styles.css"), "utf8");
 
-if (!/<h1>CharacterVoiceDesigner <span class="version-badge">Ver 0\.1<\/span><\/h1>/.test(indexHtml)) {
-  throw new Error("The designer branch version badge is not Ver 0.1");
+if (!/<h1>CharacterVoiceDesigner <span class="version-badge">Ver 0\.2<\/span><\/h1>/.test(indexHtml)) {
+  throw new Error("The designer branch version badge is not Ver 0.2");
 }
 if (!/<button class="tab-button" data-tab-target="ttsModelTab">TTSモデル<\/button>/.test(indexHtml)
   || !/<button class="tab-button" data-tab-target="outputTab">出力デモ<\/button>/.test(indexHtml)) {
@@ -1192,8 +1192,8 @@ const rangeExport = buildExport();
 if (rangeExport.schema_version !== "character_voice_designer_0.1") {
   throw new Error("Export schema was not upgraded for the range-semantics revision");
 }
-if (rangeExport.app_version !== "0.1" || rangeExport.app !== "CharacterVoiceDesigner") {
-  throw new Error("Export metadata is not marked as CharacterVoiceDesigner 0.1");
+if (rangeExport.app_version !== "0.2" || rangeExport.app !== "CharacterVoiceDesigner") {
+  throw new Error("Export metadata is not marked as CharacterVoiceDesigner 0.2");
 }
 if (rangeExport.performance_range_overrides?.respiratory_support?.min !== 0.72
   || state.constraints.respiratory_support.constraint_range?.max !== 1.28) {

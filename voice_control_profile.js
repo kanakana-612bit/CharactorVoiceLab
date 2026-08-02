@@ -233,7 +233,7 @@
     return {
       schema_version: "character_voice_identity_function_0.1",
       app: "CharacterVoiceDesigner",
-      app_version: context.app_version ?? "0.1",
+      app_version: context.app_version ?? "0.2",
       project_title: context.project_title ?? "voice_profile",
       generated_at: context.generated_at ?? new Date().toISOString(),
       purpose: "backend-neutral intermediate functions for preserving designed external voice identity",
