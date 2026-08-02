@@ -55,6 +55,8 @@ experiments, and automatic generation archives.
   GPU visibility, and an actual CUDA tensor allocation; the GUI exposes repair diagnostics.
 - Managed Speaker Inversion WAV preparation now uses direct SoundFile decoding before
   the official DACVAE codec and stops before training when any selected sample is invalid.
+- Fresh Linux audio.cpp builds no longer abort silently after a successful source patch;
+  the launcher now also reports child setup failures explicitly.
 - Lightweight speaker distances and thresholds are engineering warnings, not speaker
   identification claims or validated biometric decisions.
 - The official v4-Small Python generation path and legacy v3 audio.cpp VoiceDesign path

@@ -207,8 +207,10 @@ SETUP_ARGS=(
 if [[ "$AUDIO_BACKEND" == "cuda" ]]; then
   SETUP_ARGS+=(--cuda-architectures "$CUDA_ARCHITECTURES")
 fi
-bash "$SCRIPT_DIR/setup_audio_cpp.sh" \
-  "${SETUP_ARGS[@]}"
+if ! bash "$SCRIPT_DIR/setup_audio_cpp.sh" "${SETUP_ARGS[@]}"; then
+  echo "audio.cpp setup failed. Re-run scripts/setup_audio_cpp.sh with bash -x for detailed diagnostics." >&2
+  exit 1
+fi
 
 DESIGNER_REVISION="$(
   "$PYTHON_BIN" - "$PROJECT_ROOT/designer_server.py" "$PROJECT_ROOT/audio_postprocess.py" <<'PY'
