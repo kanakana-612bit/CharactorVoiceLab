@@ -116,6 +116,13 @@ the system CUDA installation or NVIDIA driver. Training defaults to the official
 16-token, `0.01` learning-rate recipe with 3000 steps, while using batch size 1 as a
 conservative RTX 3060 baseline.
 
+Setup is considered complete only after the isolated PyTorch reports a CUDA build,
+sees an NVIDIA device, and completes a small CUDA tensor allocation. If an older CPU
+PyTorch wheel remains in the environment, the same GUI setup operation reinstalls the
+locked `cu128` torch packages. The TTS Model tab reports the detected GPU, PyTorch
+version, and a repair reason when this preflight fails. The same check runs immediately
+before official training and generation, so a stale environment cannot start a long job.
+
 Training audio and transcripts remain under the ignored local runtime and are never
 sent through the CharacterVoiceDesigner API to an external service. The upstream
 setup necessarily contacts GitHub, PyPI/package indexes, and Hugging Face to install

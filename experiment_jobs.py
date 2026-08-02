@@ -336,6 +336,9 @@ class ExperimentJobManager:
                 environment = value
         except (OSError, json.JSONDecodeError):
             pass
+        cuda = environment.get("cuda")
+        if not isinstance(cuda, dict):
+            cuda = {}
         required = [
             source_root / "train.py",
             source_root / "prepare_manifest.py",
@@ -346,6 +349,8 @@ class ExperimentJobManager:
         ]
         ready = (
             environment.get("upstream_commit") == SPEAKER_INVERSION_UPSTREAM_COMMIT
+            and environment.get("state") == "ready"
+            and cuda.get("ready") is True
             and all(path.is_file() for path in required)
         )
         samples = self._speaker_inversion_samples()
@@ -382,6 +387,7 @@ class ExperimentJobManager:
                 "status": environment,
                 "missing": [path.name for path in required if not path.is_file()],
                 "model_repository": "Aratako/Irodori-TTS-v4-Small",
+                "cuda": cuda,
             },
             "samples": samples,
             "selected_sample_count": sum(bool(item.get("selected")) for item in samples),

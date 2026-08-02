@@ -32,6 +32,7 @@ class SpeakerInversionPipelineTest(unittest.TestCase):
             paths["source"] / "configs" / pipeline.CONFIG_NAME,
             paths["model"],
             paths["uv"],
+            paths["cuda_probe"],
         ):
             path.write_bytes(b"fixture")
         paths["environment"].write_text(
@@ -75,7 +76,10 @@ class SpeakerInversionPipelineTest(unittest.TestCase):
             save_every=10,
             seed=0,
         )
-        with mock.patch.object(pipeline, "_run", side_effect=fake_run):
+        with (
+            mock.patch.object(pipeline, "_run", side_effect=fake_run),
+            mock.patch.object(pipeline, "_probe_cuda_runtime", return_value={"ready": True}),
+        ):
             pipeline.train(args)
         managed = self.paths["embeddings"] / "character-a.speaker.safetensors"
         self.assertEqual(managed.read_bytes(), b"learned-embedding")
@@ -111,12 +115,38 @@ class SpeakerInversionPipelineTest(unittest.TestCase):
             speaker_guidance=5.0,
             duration_scale=1.0,
         )
-        with mock.patch.object(pipeline, "_run", side_effect=fake_run):
+        with (
+            mock.patch.object(pipeline, "_run", side_effect=fake_run),
+            mock.patch.object(pipeline, "_probe_cuda_runtime", return_value={"ready": True}),
+        ):
             pipeline.generate(args)
         command = captured[0]
         self.assertEqual(command[command.index("--checkpoint") + 1], str(self.paths["model"]))
         self.assertEqual(command[command.index("--ref-embed") + 1], str(embedding))
         self.assertTrue(any(path.suffix == ".wav" for path in output.iterdir()))
+
+    def test_environment_preflight_rejects_cpu_only_torch(self):
+        diagnostics = {
+            "ready": False,
+            "failure_kind": "cpu_torch",
+            "message": "The installed PyTorch wheel has no CUDA runtime.",
+        }
+        with mock.patch.object(pipeline, "_probe_cuda_runtime", return_value=diagnostics):
+            with self.assertRaisesRegex(pipeline.PipelineError, "cu128 PyTorch wheel"):
+                pipeline._load_environment(self.root)
+
+    def test_environment_preflight_returns_live_cuda_diagnostics(self):
+        diagnostics = {
+            "ready": True,
+            "torch": {
+                "version": "2.10.0+cu128",
+                "build_cuda": "12.8",
+                "device_name": "NVIDIA GeForce RTX 3060",
+            },
+        }
+        with mock.patch.object(pipeline, "_probe_cuda_runtime", return_value=diagnostics):
+            _, environment = pipeline._load_environment(self.root)
+        self.assertEqual(environment["cuda"], diagnostics)
 
 
 if __name__ == "__main__":

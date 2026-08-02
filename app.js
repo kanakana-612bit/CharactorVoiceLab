@@ -5755,12 +5755,23 @@ function setSpeakerInversionStatus(message, isError = false) {
 function renderSpeakerInversionWorkspace() {
   const workspace = state.speakerInversionWorkspace || {};
   const environment = workspace.environment || {};
+  const cuda = environment.cuda || {};
+  const torch = cuda.torch || {};
   if (els.speakerInversionEnvironmentBadge) {
     els.speakerInversionEnvironmentBadge.textContent = environment.ready
-      ? "準備完了 / v4-Small"
+      ? `CUDA準備完了 / ${torch.device_name || "GPU"}`
       : workspace.platform_supported === false
         ? "Linux GPU環境が必要"
-        : "未構築";
+        : cuda.failure_kind === "cpu_torch"
+          ? "CPU版PyTorch / 修復必要"
+          : cuda.failure_kind === "gpu_unavailable"
+            ? "CUDA GPU未検出"
+            : "未構築・未検証";
+    els.speakerInversionEnvironmentBadge.title = [
+      torch.version ? `PyTorch ${torch.version}` : "",
+      torch.build_cuda ? `CUDA runtime ${torch.build_cuda}` : "",
+      cuda.message || "",
+    ].filter(Boolean).join(" / ");
     els.speakerInversionEnvironmentBadge.dataset.status = environment.ready ? "complete" : "interrupted";
   }
   if (els.setupSpeakerInversionBtn) {
@@ -5870,11 +5881,16 @@ async function refreshSpeakerInversionWorkspace({ silent = false } = {}) {
     state.speakerInversionWorkspace = await experimentApi("/api/speaker-inversion/workspace");
     renderSpeakerInversionWorkspace();
     if (!silent || !state.speakerInversionJobId) {
-      const ready = state.speakerInversionWorkspace.environment?.ready;
+      const currentEnvironment = state.speakerInversionWorkspace.environment || {};
+      const cuda = currentEnvironment.cuda || {};
+      const ready = currentEnvironment.ready;
       setSpeakerInversionStatus(
         ready
-          ? "学習音声を選択し、書き起こしを入力して学習できます。"
-          : "初回のみ学習環境の準備と公式モデルのダウンロードが必要です。",
+          ? `${cuda.torch?.device_name || "CUDA GPU"}で学習できます（PyTorch ${cuda.torch?.version || "確認済み"}）。`
+          : cuda.message
+            ? `学習環境は利用できません: ${cuda.message} 「学習環境を修復」を実行してください。`
+            : "初回のみ学習環境の準備と公式モデルのダウンロードが必要です。",
+        !ready && Boolean(cuda.message),
       );
     }
   } catch (error) {

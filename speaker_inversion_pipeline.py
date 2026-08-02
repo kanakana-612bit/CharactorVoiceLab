@@ -54,7 +54,56 @@ def _runtime_paths(project_root: Path) -> dict[str, Path]:
         "environment": root / "environment.json",
         "uv": project_root / "runtime" / "bootstrap" / "uv" / "uv",
         "embeddings": root / "embeddings",
+        "cuda_probe": project_root / "speaker_inversion_cuda_probe.py",
     }
+
+
+def _probe_cuda_runtime(paths: dict[str, Path]) -> dict[str, Any]:
+    try:
+        result = subprocess.run(
+            [
+                str(paths["uv"]),
+                "run",
+                "--no-sync",
+                "python",
+                str(paths["cuda_probe"]),
+            ],
+            cwd=str(paths["source"]),
+            env={**os.environ, "PYTHONUNBUFFERED": "1"},
+            check=False,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=30,
+        )
+    except (OSError, subprocess.SubprocessError) as error:
+        raise PipelineError(f"CUDA runtime diagnostics could not run: {error}") from error
+    try:
+        diagnostics = json.loads(result.stdout)
+    except json.JSONDecodeError as error:
+        detail = (result.stderr or result.stdout).strip()
+        raise PipelineError(f"CUDA runtime diagnostics returned invalid output: {detail}") from error
+    if not isinstance(diagnostics, dict):
+        raise PipelineError("CUDA runtime diagnostics returned an invalid result.")
+    return diagnostics
+
+
+def _cuda_failure_message(diagnostics: dict[str, Any]) -> str:
+    kind = diagnostics.get("failure_kind")
+    detail = str(diagnostics.get("message") or "CUDA runtime is not ready.")
+    if kind == "cpu_torch":
+        action = "Run 'Prepare/repair training environment' to reinstall the cu128 PyTorch wheel."
+    elif kind == "gpu_unavailable":
+        action = (
+            "Confirm that nvidia-smi works for the WebUI user, CUDA_VISIBLE_DEVICES does not hide "
+            "the GPU, then restart the WebUI and repair the training environment."
+        )
+    elif kind == "cuda_allocation":
+        action = "Stop other GPU workloads if needed, restart the WebUI, and repair the environment."
+    else:
+        action = "Run 'Prepare/repair training environment' and review its CUDA diagnostics."
+    return f"{detail} {action}"
 
 
 def _load_environment(project_root: Path) -> tuple[dict[str, Path], dict[str, Any]]:
@@ -72,12 +121,17 @@ def _load_environment(project_root: Path) -> tuple[dict[str, Path], dict[str, An
         paths["source"] / "infer.py",
         paths["source"] / "configs" / CONFIG_NAME,
         paths["model"],
+        paths["cuda_probe"],
     )
     missing = [str(path) for path in required if not path.is_file()]
     if missing:
         raise PipelineError("Speaker Inversion environment is incomplete: " + ", ".join(missing))
     if status.get("upstream_commit") != UPSTREAM_COMMIT:
         raise PipelineError("Speaker Inversion upstream commit does not match this application build.")
+    diagnostics = _probe_cuda_runtime(paths)
+    if not diagnostics.get("ready"):
+        raise PipelineError(_cuda_failure_message(diagnostics))
+    status["cuda"] = diagnostics
     return paths, status
 
 
