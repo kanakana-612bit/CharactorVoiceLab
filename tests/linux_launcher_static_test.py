@@ -6,17 +6,29 @@ ROOT = pathlib.Path(__file__).resolve().parents[1]
 
 
 class LinuxLauncherStaticTest(unittest.TestCase):
-    def test_patch_application_does_not_silently_fail_on_post_apply_grep(self):
+    def test_patch_application_is_isolated_and_validates_source_markers(self):
         setup = (ROOT / "scripts" / "setup_audio_cpp.sh").read_text(encoding="utf-8")
         function = setup.split("apply_speaker_inversion_patch() {", 1)[1].split(
             "\n}\n\nfind_cuda_nvcc()", 1
         )[0]
-        self.assertIn("git -C \"$SOURCE_ROOT\" apply \"$SPEAKER_INVERSION_PATCH\"", function)
+        helper = setup.split("source_patch_is_applied() {", 1)[1].split(
+            "\n}\n\napply_speaker_inversion_patch()", 1
+        )[0]
+        self.assertIn('git -C "$PROJECT_ROOT" apply', helper)
+        self.assertIn('--reverse --check --directory="$SOURCE_ROOT_RELATIVE"', helper)
+        self.assertIn('--check --directory="$SOURCE_ROOT_RELATIVE"', helper)
+        self.assertNotIn('git -C "$SOURCE_ROOT" apply', helper)
         self.assertIn('source_patch_is_applied "$SPEAKER_INVERSION_PATCH"', function)
+        self.assertIn('apply_source_patch "$SPEAKER_INVERSION_PATCH"', function)
+        self.assertIn("source marker is missing after patch application", function)
         self.assertIn("return 0", function)
-        self.assertNotIn(
-            'grep -Fq -- "$SPEAKER_INVERSION_MARKER" "$target" &&',
-            function,
+
+    def test_audio_source_patch_directory_is_anchored_to_project_root(self):
+        setup = (ROOT / "scripts" / "setup_audio_cpp.sh").read_text(encoding="utf-8")
+        self.assertIn('SOURCE_ROOT_RELATIVE="${SOURCE_ROOT#"$PROJECT_ROOT/"}"', setup)
+        self.assertIn(
+            '[[ "$SOURCE_ROOT" != "$PROJECT_ROOT/"* ]]',
+            setup,
         )
 
     def test_parent_launcher_reports_audio_setup_failure(self):

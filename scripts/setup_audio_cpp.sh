@@ -68,6 +68,11 @@ fi
 AUDIO_ROOT="$(mkdir -p -- "$AUDIO_ROOT" && cd -- "$AUDIO_ROOT" && pwd -P)"
 RUNTIME_ROOT="$(cd -- "$AUDIO_ROOT/.." && pwd -P)"
 SOURCE_ROOT="$RUNTIME_ROOT/audio.cpp-source"
+if [[ "$SOURCE_ROOT" != "$PROJECT_ROOT/"* ]]; then
+  echo "The audio.cpp source directory must remain inside the project root: $SOURCE_ROOT" >&2
+  exit 1
+fi
+SOURCE_ROOT_RELATIVE="${SOURCE_ROOT#"$PROJECT_ROOT/"}"
 SPEAKER_INVERSION_PATCH="$PROJECT_ROOT/patches/audio_cpp/irodori_speaker_inversion.patch"
 SPEAKER_OBSERVATION_PATCH="$PROJECT_ROOT/patches/audio_cpp/irodori_speaker_observation.patch"
 SPEAKER_INVERSION_MARKER="speaker_embedding_path"
@@ -128,7 +133,16 @@ binary_has_speaker_inversion() {
 }
 
 source_patch_is_applied() {
-  git -C "$SOURCE_ROOT" apply --reverse --check "$1" >/dev/null 2>&1
+  git -C "$PROJECT_ROOT" apply \
+    --reverse --check --directory="$SOURCE_ROOT_RELATIVE" "$1" >/dev/null 2>&1
+}
+
+apply_source_patch() {
+  local patch_path="$1"
+  git -C "$PROJECT_ROOT" apply \
+    --check --directory="$SOURCE_ROOT_RELATIVE" "$patch_path" &&
+    git -C "$PROJECT_ROOT" apply \
+      --directory="$SOURCE_ROOT_RELATIVE" "$patch_path"
 }
 
 apply_speaker_inversion_patch() {
@@ -148,12 +162,13 @@ apply_speaker_inversion_patch() {
   fi
   if ! grep -Fq -- "$SPEAKER_INVERSION_MARKER" "$target"; then
     if source_patch_is_applied "$SPEAKER_INVERSION_PATCH"; then
-      echo "The CharacterVoiceDesigner audio.cpp patch is already applied."
-    elif ! git -C "$SOURCE_ROOT" apply --check "$SPEAKER_INVERSION_PATCH"; then
+      echo "The audio.cpp source reports the Speaker Inversion patch as applied, but its source marker is missing." >&2
+      return 1
+    elif ! apply_source_patch "$SPEAKER_INVERSION_PATCH"; then
       echo "The audio.cpp source does not match the pinned Speaker Inversion patch." >&2
       return 1
     else
-      git -C "$SOURCE_ROOT" apply "$SPEAKER_INVERSION_PATCH"
+      echo "Applied the CharacterVoiceDesigner audio.cpp patch."
     fi
   elif ! grep -Fq -- "$SPEAKER_OBSERVATION_MARKER" "$observation_target"; then
     if [[ ! -f "$SPEAKER_OBSERVATION_PATCH" ]]; then
@@ -161,16 +176,24 @@ apply_speaker_inversion_patch() {
       return 1
     fi
     if source_patch_is_applied "$SPEAKER_OBSERVATION_PATCH"; then
-      echo "The CharacterVoiceDesigner observation patch is already applied."
-    elif ! git -C "$SOURCE_ROOT" apply --check "$SPEAKER_OBSERVATION_PATCH"; then
+      echo "The audio.cpp source reports the observation patch as applied, but its source marker is missing." >&2
+      return 1
+    elif ! apply_source_patch "$SPEAKER_OBSERVATION_PATCH"; then
       echo "The existing Speaker Inversion source cannot be upgraded with the pinned observation patch." >&2
       return 1
     else
-      git -C "$SOURCE_ROOT" apply "$SPEAKER_OBSERVATION_PATCH"
+      echo "Applied the CharacterVoiceDesigner observation patch."
     fi
   fi
-  # git apply --check plus git apply is the authoritative source validation here.
-  # The completed server binary is checked for both feature markers below.
+
+  if ! grep -Fq -- "$SPEAKER_INVERSION_MARKER" "$target"; then
+    echo "The Speaker Inversion source marker is missing after patch application: $target" >&2
+    return 1
+  fi
+  if ! grep -Fq -- "$SPEAKER_OBSERVATION_MARKER" "$observation_target"; then
+    echo "The speaker-observation source marker is missing after patch application: $observation_target" >&2
+    return 1
+  fi
   return 0
 }
 
