@@ -1,5 +1,17 @@
 # CharacterVoiceDesigner Release Notes
 
+## Ver 0.2 Runtime Update - 2026-08-05
+
+- `audio.cpp` no longer starts during WebUI bootstrap. The TTS Model screen starts it
+  after model and compute-device selection, and replaces it when those conditions change.
+- Added synchronized CPU/GPU selection to the TTS Model and Output Demo screens.
+- Added explicit physical-GPU selection to Speaker Inversion training and test generation.
+- Added a PyTorch allocator VRAM ceiling for Speaker Inversion and a monitored,
+  stop-on-exceed VRAM safety limit for native `audio.cpp` generation.
+- Generated-output metadata now records the selected compute device and VRAM policy.
+- Updated the isolated Linux toolkit to CUDA 12.8 and compile all compatible detected
+  architectures, including mixed `sm_86` RTX 3060 and `sm_120` RTX 5060 Ti systems.
+
 ## Ver 0.2 - 2026-08-02
 
 Ver 0.2 turns the initial local voice-design prototype into a reproducible TTS

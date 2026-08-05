@@ -22,6 +22,7 @@ import sys
 
 state = json.loads(open(sys.argv[1], encoding="utf-8").read())
 for key in (
+    "designer_port",
     "designer_pid",
     "designer_start_ticks",
     "designer_executable",
@@ -34,13 +35,30 @@ for key in (
 PY
 )
 
-DESIGNER_PID="${STATE_VALUES[0]:-}"
-DESIGNER_TICKS="${STATE_VALUES[1]:-}"
-DESIGNER_EXE="${STATE_VALUES[2]:-}"
-AUDIO_PID="${STATE_VALUES[3]:-}"
-AUDIO_TICKS="${STATE_VALUES[4]:-}"
-AUDIO_EXE="${STATE_VALUES[5]:-}"
+DESIGNER_PORT="${STATE_VALUES[0]:-}"
+DESIGNER_PID="${STATE_VALUES[1]:-}"
+DESIGNER_TICKS="${STATE_VALUES[2]:-}"
+DESIGNER_EXE="${STATE_VALUES[3]:-}"
+AUDIO_PID="${STATE_VALUES[4]:-}"
+AUDIO_TICKS="${STATE_VALUES[5]:-}"
+AUDIO_EXE="${STATE_VALUES[6]:-}"
 HAD_WARNING=0
+
+if [[ -n "${DESIGNER_PID:-}" && -n "${DESIGNER_PORT:-}" ]]; then
+  "$PYTHON_BIN" - "$DESIGNER_PORT" <<'PY' >/dev/null 2>&1 || true
+import sys
+import urllib.request
+
+request = urllib.request.Request(
+    f"http://127.0.0.1:{sys.argv[1]}/api/audio-cpp/stop",
+    data=b"{}",
+    headers={"Content-Type": "application/json"},
+    method="POST",
+)
+with urllib.request.urlopen(request, timeout=5):
+    pass
+PY
+fi
 
 process_start_ticks() {
   local pid="$1"

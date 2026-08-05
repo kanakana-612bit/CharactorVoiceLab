@@ -4,9 +4,11 @@
 from __future__ import annotations
 
 import argparse
+import http.client
 import json
 import os
 import re
+import signal
 import time
 import urllib.error
 import urllib.parse
@@ -15,6 +17,8 @@ from http import HTTPStatus
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any
+
+from audio_cpp_runtime import AudioCppRuntimeError, AudioCppRuntimeManager
 
 from audio_postprocess import (
     AudioPostprocessError,
@@ -74,6 +78,7 @@ SPEAKER_CONDITION_ROOT = PROJECT_ROOT / "runtime" / "speaker_conditions"
 
 class DesignerServer(ThreadingHTTPServer):
     audio_cpp_base_url: str
+    audio_cpp_runtime: AudioCppRuntimeManager | None
     upstream_timeout_seconds: float
     observation_store: ObservationStore
     experiment_manager: ExperimentJobManager
@@ -283,10 +288,38 @@ class DesignerHandler(SimpleHTTPRequestHandler):
             self._send_json(HTTPStatus.OK, record)
             return
         if path == "/api/audio-cpp/health":
-            self._proxy_get("/health")
+            manager = getattr(self.server, "audio_cpp_runtime", None)
+            if manager:
+                self._send_json(HTTPStatus.OK, manager.status())
+            else:
+                self._proxy_get("/health")
             return
         if path == "/api/audio-cpp/models":
-            self._proxy_get("/v1/models")
+            manager = getattr(self.server, "audio_cpp_runtime", None)
+            if manager:
+                self._send_json(
+                    HTTPStatus.OK,
+                    {"data": manager.catalog()["models"], "runtime": manager.status()},
+                )
+            else:
+                self._proxy_get("/v1/models")
+            return
+        if path == "/api/audio-cpp/runtime":
+            manager = getattr(self.server, "audio_cpp_runtime", None)
+            if not manager:
+                self._send_json(
+                    HTTPStatus.OK,
+                    {
+                        "schema_version": "cvd_audio_cpp_runtime_catalog_0.1",
+                        "managed": False,
+                        "models": [],
+                        "devices": [{"id": "external", "label": "External audio.cpp", "backend": "external"}],
+                        "default_device": "external",
+                        "status": {"managed": False, "running": True},
+                    },
+                )
+            else:
+                self._send_json(HTTPStatus.OK, manager.catalog())
             return
         if not self._static_path_allowed(path):
             self.send_error(HTTPStatus.NOT_FOUND)
@@ -303,6 +336,34 @@ class DesignerHandler(SimpleHTTPRequestHandler):
     def do_POST(self) -> None:  # noqa: N802 - stdlib handler API
         parsed = urllib.parse.urlsplit(self.path)
         path = parsed.path
+        if path == "/api/audio-cpp/activate":
+            manager = getattr(self.server, "audio_cpp_runtime", None)
+            if not manager:
+                self._send_json(HTTPStatus.CONFLICT, {"error": "audio.cpp is externally managed."})
+                return
+            try:
+                payload = self._read_json()
+                model = payload.get("model")
+                if not isinstance(model, str) or not MODEL_ID_PATTERN.fullmatch(model):
+                    raise ValueError("model must be a configured audio.cpp model id.")
+                runtime = validate_runtime_options(payload.get("runtime"))
+                status = manager.activate(
+                    model,
+                    runtime.get("device_id"),
+                    runtime.get("vram_limit_mib", 0),
+                )
+                self._send_json(HTTPStatus.OK, status)
+            except (AudioCppRuntimeError, ValueError) as error:
+                self._send_json(HTTPStatus.BAD_REQUEST, {"error": str(error)})
+            return
+        if path == "/api/audio-cpp/stop":
+            manager = getattr(self.server, "audio_cpp_runtime", None)
+            if manager:
+                manager.stop()
+                self._send_json(HTTPStatus.OK, manager.status())
+            else:
+                self._send_json(HTTPStatus.CONFLICT, {"error": "audio.cpp is externally managed."})
+            return
         if path == "/api/voice-identities/compile":
             try:
                 identity = self.server.voice_identity_store.compile(self._read_json())
@@ -451,9 +512,12 @@ class DesignerHandler(SimpleHTTPRequestHandler):
             self._send_json(HTTPStatus.BAD_REQUEST, {"error": str(error)})
             return
         postprocess = request.pop("_cvd_postprocess", None)
+        runtime_options = request.pop("_cvd_runtime", None)
         observation_options = request.pop("_cvd_observation", None)
         speaker_condition = request.pop("_cvd_speaker_condition", None)
         output_capture = request.pop("_cvd_output_capture", None)
+        if output_capture and runtime_options:
+            output_capture["runtime"] = dict(runtime_options)
         output_identity = None
         if output_capture and output_capture.get("identity_id"):
             try:
@@ -482,15 +546,21 @@ class DesignerHandler(SimpleHTTPRequestHandler):
                     "input_shape": speaker_condition["shape"],
                 }
             )
-        self._proxy_json(
-            "/v1/audio/speech",
-            request,
-            postprocess,
-            observation,
-            speaker_condition,
-            output_capture,
-            output_identity,
-        )
+        try:
+            self._proxy_json(
+                "/v1/audio/speech",
+                request,
+                postprocess,
+                observation,
+                speaker_condition,
+                output_capture,
+                output_identity,
+                runtime_options,
+            )
+        except AudioCppRuntimeError as error:
+            if observation:
+                observation.finalize_error("runtime", str(error), 0)
+            self._send_json(HTTPStatus.INSUFFICIENT_STORAGE, {"error": str(error)})
 
     def _static_path_allowed(self, raw_path: str) -> bool:
         path = urllib.parse.unquote(raw_path)
@@ -538,23 +608,39 @@ class DesignerHandler(SimpleHTTPRequestHandler):
         speaker_condition: dict[str, Any] | None = None,
         output_capture: dict[str, Any] | None = None,
         output_identity: dict[str, Any] | None = None,
+        runtime_options: dict[str, Any] | None = None,
     ) -> None:
+        manager = getattr(self.server, "audio_cpp_runtime", None)
+        if manager:
+            manager.ensure_for_request(runtime_options, str(payload.get("model") or ""))
+            upstream_url = manager.request_url(upstream_path)
+            guard = manager.vram_guard()
+        else:
+            upstream_url = self.server.audio_cpp_base_url + upstream_path
+            guard = None
         body = json.dumps(payload, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
         request = urllib.request.Request(
-            self.server.audio_cpp_base_url + upstream_path,
+            upstream_url,
             data=body,
             headers={"Content-Type": "application/json", "Accept": "audio/wav"},
             method="POST",
         )
-        self._perform_upstream_request(
-            request,
-            postprocess,
-            observation,
-            speaker_condition,
-            output_capture,
-            output_identity,
-            payload,
-        )
+        if guard:
+            guard.__enter__()
+        try:
+            self._perform_upstream_request(
+                request,
+                postprocess,
+                observation,
+                speaker_condition,
+                output_capture,
+                output_identity,
+                payload,
+                guard,
+            )
+        finally:
+            if guard:
+                guard.__exit__(None, None, None)
 
     def _perform_upstream_request(
         self,
@@ -565,6 +651,7 @@ class DesignerHandler(SimpleHTTPRequestHandler):
         output_capture: dict[str, Any] | None = None,
         output_identity: dict[str, Any] | None = None,
         generation_request: dict[str, Any] | None = None,
+        runtime_guard: Any = None,
     ) -> None:
         upstream_started = time.perf_counter()
         try:
@@ -720,8 +807,28 @@ class DesignerHandler(SimpleHTTPRequestHandler):
                     time.perf_counter() - upstream_started,
                 )
             self._send_json(HTTPStatus.UNPROCESSABLE_ENTITY, {"error": str(error)})
-        except (urllib.error.URLError, TimeoutError, ValueError) as error:
+        except (
+            urllib.error.URLError,
+            http.client.HTTPException,
+            OSError,
+            TimeoutError,
+            ValueError,
+        ) as error:
             reason = getattr(error, "reason", error)
+            if runtime_guard and runtime_guard.exceeded_mib is not None:
+                message = (
+                    f"audio.cpp was stopped after VRAM usage reached "
+                    f"{runtime_guard.exceeded_mib} MiB (configured limit: "
+                    f"{runtime_guard.limit_mib} MiB)."
+                )
+                if observation:
+                    observation.finalize_error(
+                        "vram_limit",
+                        message,
+                        time.perf_counter() - upstream_started,
+                    )
+                self._send_json(HTTPStatus.INSUFFICIENT_STORAGE, {"error": message})
+                return
             if observation:
                 observation.finalize_error(
                     "upstream",
@@ -860,6 +967,9 @@ def validate_speech_request(payload: dict[str, Any]) -> dict[str, Any]:
             )
         ),
     }
+    runtime = validate_runtime_options(payload.get("runtime"))
+    if runtime:
+        request["_cvd_runtime"] = runtime
     raw_options = payload.get("options", {})
     if not isinstance(raw_options, dict):
         raise ValueError("options must be an object.")
@@ -912,6 +1022,26 @@ def validate_speech_request(payload: dict[str, Any]) -> dict[str, Any]:
     return request
 
 
+def validate_runtime_options(value: Any) -> dict[str, Any]:
+    if value is None:
+        return {}
+    if not isinstance(value, dict):
+        raise ValueError("runtime must be an object.")
+    device_id = value.get("device_id")
+    if device_id is not None and (
+        not isinstance(device_id, str)
+        or not re.fullmatch(r"(?:cpu|cuda:[0-9]+|external)", device_id)
+    ):
+        raise ValueError("runtime.device_id is invalid.")
+    try:
+        vram_limit_mib = int(value.get("vram_limit_mib") or 0)
+    except (TypeError, ValueError) as error:
+        raise ValueError("runtime.vram_limit_mib must be an integer.") from error
+    if not 0 <= vram_limit_mib <= 262144:
+        raise ValueError("runtime.vram_limit_mib must be between 0 and 262144 MiB.")
+    return {"device_id": device_id, "vram_limit_mib": vram_limit_mib}
+
+
 def validate_output_capture(value: Any, generation_mode: str) -> dict[str, Any] | None:
     if value is None:
         return None
@@ -957,6 +1087,11 @@ def parse_args() -> argparse.Namespace:
         default=os.environ.get("AUDIOCPP_BASE_URL", "http://127.0.0.1:8080"),
         help="Fixed local audio.cpp server origin.",
     )
+    parser.add_argument(
+        "--audio-cpp-runtime-config",
+        type=Path,
+        help="Managed audio.cpp runtime manifest. When set, audio.cpp starts after model selection.",
+    )
     parser.add_argument("--upstream-timeout", type=float, default=600)
     return parser.parse_args()
 
@@ -981,6 +1116,11 @@ def main() -> None:
     bind_host = normalize_bind_host(args.host)
     server = DesignerServer((bind_host, args.port), DesignerHandler)
     server.audio_cpp_base_url = normalize_upstream_url(args.audio_cpp_url)
+    server.audio_cpp_runtime = (
+        AudioCppRuntimeManager(PROJECT_ROOT, args.audio_cpp_runtime_config)
+        if args.audio_cpp_runtime_config
+        else None
+    )
     server.upstream_timeout_seconds = max(1, args.upstream_timeout)
     server.observation_store = ObservationStore(PROJECT_ROOT / "runtime" / "observations", PROJECT_ROOT)
     server.voice_identity_store = VoiceIdentityStore(PROJECT_ROOT)
@@ -988,17 +1128,32 @@ def main() -> None:
     server.experiment_manager = ExperimentJobManager(
         PROJECT_ROOT,
         bridge_base_url=f"http://{bind_host}:{server.server_port}",
-        audio_cpp_base_url=server.audio_cpp_base_url,
+        audio_cpp_base_url=(
+            f"http://{bind_host}:{server.server_port}"
+            if server.audio_cpp_runtime
+            else server.audio_cpp_base_url
+        ),
     )
     SPEAKER_CONDITION_ROOT.mkdir(parents=True, exist_ok=True)
     print(f"CharacterVoiceDesigner: http://{bind_host}:{args.port}/")
-    print(f"audio.cpp upstream: {server.audio_cpp_base_url}")
+    print(
+        "audio.cpp runtime: managed/lazy"
+        if server.audio_cpp_runtime
+        else f"audio.cpp upstream: {server.audio_cpp_base_url}"
+    )
+    if hasattr(signal, "SIGTERM"):
+        def stop_on_signal(*_: object) -> None:
+            raise KeyboardInterrupt
+
+        signal.signal(signal.SIGTERM, stop_on_signal)
     try:
         server.serve_forever()
     except KeyboardInterrupt:
         pass
     finally:
         server.experiment_manager.shutdown()
+        if server.audio_cpp_runtime:
+            server.audio_cpp_runtime.shutdown()
         server.server_close()
 
 

@@ -263,11 +263,17 @@ class ExperimentJobManagerTest(unittest.TestCase):
                     "gradient_accumulation_steps": 1,
                     "learning_rate": 0.01,
                     "seed": 4,
+                    "gpu_index": 1,
+                    "vram_limit_mib": 14336,
                 },
             )
         self.assertIn("speaker_inversion_pipeline.py", " ".join(command))
         self.assertIn("train", command)
         self.assertEqual(safe["sample_count"], 1)
+        self.assertEqual(safe["gpu_index"], 1)
+        self.assertEqual(safe["vram_limit_mib"], 14336)
+        self.assertIn("--gpu-index", command)
+        self.assertIn("--vram-limit-mib", command)
         self.assertTrue(output.is_dir())
         selection = self.manager.job_root / f"{job_id}.speaker-inversion-samples.json"
         self.assertTrue(selection.is_file())

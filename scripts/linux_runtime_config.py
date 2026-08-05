@@ -17,7 +17,7 @@ from dataclasses import asdict, dataclass
 
 MIN_CUDA_DRIVER = (580, 65, 6)
 MIN_CUDA_COMPUTE_CAPABILITY = (7, 5)
-PINNED_CUDA_TOOLKIT_VERSION = "12.4"
+PINNED_CUDA_TOOLKIT_VERSION = "12.8"
 DEFAULT_THREAD_CAP = 10
 RECOMMENDED_FREE_VRAM_MIB = 6144
 
@@ -47,6 +47,7 @@ class RuntimeConfig:
     gpu_free_memory_mib: int
     driver_version: str
     selection_reason: str
+    gpus: list[dict[str, object]]
 
 
 def parse_version(value: str, *, field: str) -> tuple[int, ...]:
@@ -161,7 +162,7 @@ def select_runtime(
     if requested not in {"auto", "cpu", "cuda"}:
         raise RuntimeConfigError("CVD_BACKEND must be auto, cpu, or cuda.")
     if requested == "cpu":
-        return RuntimeConfig("cpu", 0, threads, "", "", 0, 0, "", "CPU was explicitly selected.")
+        return RuntimeConfig("cpu", 0, threads, "", "", 0, 0, "", "CPU was explicitly selected.", [])
 
     normalized_arch = architecture.lower()
     if normalized_arch not in {"x86_64", "amd64"}:
@@ -170,7 +171,7 @@ def select_runtime(
                 f"The isolated CUDA {PINNED_CUDA_TOOLKIT_VERSION} build currently supports Linux x86_64 only."
             )
         return RuntimeConfig(
-            "cpu", 0, threads, "", "", 0, 0, "", f"CUDA is not configured for {architecture}; using CPU."
+            "cpu", 0, threads, "", "", 0, 0, "", f"CUDA is not configured for {architecture}; using CPU.", []
         )
 
     compatible: list[GpuInfo] = []
@@ -198,12 +199,16 @@ def select_runtime(
     if not compatible:
         if requested == "cuda":
             raise RuntimeConfigError(incompatibility)
-        return RuntimeConfig("cpu", 0, threads, "", "", 0, 0, "", f"{incompatibility} Using CPU.")
+        return RuntimeConfig("cpu", 0, threads, "", "", 0, 0, "", f"{incompatibility} Using CPU.", [])
 
     gpu = max(compatible, key=lambda item: item.memory_mib)
-    capability = parse_version(gpu.compute_capability, field="CUDA compute capability")
-    detected_architecture = f"{capability[0]}{capability[1]}"
-    cuda_architectures = normalize_cuda_architectures(cuda_architectures_override) or detected_architecture
+    detected_architectures = []
+    for item in compatible:
+        capability = parse_version(item.compute_capability, field="CUDA compute capability")
+        detected_architectures.append(f"{capability[0]}{capability[1]}")
+    cuda_architectures = normalize_cuda_architectures(cuda_architectures_override) or ";".join(
+        dict.fromkeys(detected_architectures)
+    )
     reason = (
         f"Selected {gpu.name} with NVIDIA driver {gpu.driver_version} "
         f"for the pinned CUDA {PINNED_CUDA_TOOLKIT_VERSION} runtime."
@@ -223,6 +228,7 @@ def select_runtime(
         gpu.free_memory_mib,
         gpu.driver_version,
         reason,
+        [asdict(item) for item in compatible],
     )
 
 

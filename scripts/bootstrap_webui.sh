@@ -36,7 +36,7 @@ AUDIO_ROOT="$RUNTIME_ROOT/audio.cpp"
 AUDIO_BUILD_ROOT=""
 AUDIO_SERVER=""
 LOCAL_TOOLCHAIN_ROOT="$RUNTIME_ROOT/toolchains/gcc13"
-PINNED_CUDA_TOOLKIT_VERSION="12.4"
+PINNED_CUDA_TOOLKIT_VERSION="12.8"
 PINNED_CUDA_TOOLKIT_NODOT="${PINNED_CUDA_TOOLKIT_VERSION//./}"
 CUDA_TOOLKIT_ROOT="$RUNTIME_ROOT/toolchains/cuda${PINNED_CUDA_TOOLKIT_NODOT}"
 LOG_ROOT="$RUNTIME_ROOT/logs"
@@ -205,15 +205,88 @@ SETUP_ARGS=(
   --backend "$AUDIO_BACKEND"
 )
 if [[ "$AUDIO_BACKEND" == "cuda" ]]; then
-  SETUP_ARGS+=(--cuda-architectures "$CUDA_ARCHITECTURES")
+  SETUP_ARGS+=(
+    --cuda-architectures "$CUDA_ARCHITECTURES"
+    --cuda-version "$PINNED_CUDA_TOOLKIT_VERSION"
+  )
 fi
 if ! bash "$SCRIPT_DIR/setup_audio_cpp.sh" "${SETUP_ARGS[@]}"; then
   echo "audio.cpp setup failed. Re-run scripts/setup_audio_cpp.sh with bash -x for detailed diagnostics." >&2
   exit 1
 fi
 
+AUDIO_RUNTIME_CONFIG="$RUNTIME_ROOT/audio_cpp.runtime.json"
+configure_runtime_library_path 1
+"$PYTHON_BIN" - \
+  "$AUDIO_RUNTIME_CONFIG" "$PROJECT_ROOT" "$AUDIO_ROOT" "$AUDIO_SERVER" "$LOG_ROOT" \
+  "$INFERENCE_THREADS" "$AUDIO_DEVICE" "$RUNTIME_CONFIG_JSON" "${LD_LIBRARY_PATH:-}" <<'PY'
+import json
+import sys
+
+(
+    destination,
+    project_root,
+    audio_root,
+    executable,
+    log_root,
+    threads,
+    default_device,
+    runtime_json,
+    library_path,
+) = sys.argv[1:]
+runtime = json.loads(runtime_json)
+devices = [{
+    "id": "cpu",
+    "label": "CPU only",
+    "backend": "cpu",
+    "physical_index": None,
+    "memory_mib": 0,
+    "free_memory_mib": 0,
+}]
+for gpu in runtime.get("gpus", []):
+    devices.append({
+        "id": f"cuda:{gpu['index']}",
+        "label": f"GPU {gpu['index']} / {gpu['name']} ({gpu['memory_mib']} MiB)",
+        "backend": "cuda",
+        "physical_index": gpu["index"],
+        "name": gpu["name"],
+        "memory_mib": gpu["memory_mib"],
+        "free_memory_mib": gpu["free_memory_mib"],
+        "compute_capability": gpu["compute_capability"],
+        "driver_version": gpu["driver_version"],
+    })
+default_id = f"cuda:{default_device}" if runtime.get("backend") == "cuda" else "cpu"
+manifest = {
+    "schema_version": "cvd_audio_cpp_runtime_manifest_0.1",
+    "project_root": project_root,
+    "executable": executable,
+    "working_directory": audio_root,
+    "log_root": log_root,
+    "preferred_port": 8080,
+    "threads": int(threads),
+    "default_device": default_id,
+    "devices": devices,
+    "models": [{
+        "id": "irodori-vdes",
+        "label": "Irodori VoiceDesign / Japanese",
+        "family": "irodori_tts",
+        "path": f"{audio_root}/models/Irodori-TTS-600M-v3-VoiceDesign",
+        "task": "vdes",
+        "mode": "offline",
+    }],
+    "environment": {"LD_LIBRARY_PATH": library_path} if library_path else {},
+}
+with open(destination, "w", encoding="utf-8") as handle:
+    json.dump(manifest, handle, ensure_ascii=False, indent=2)
+    handle.write("\n")
+PY
+
 DESIGNER_REVISION="$(
-  "$PYTHON_BIN" - "$PROJECT_ROOT/designer_server.py" "$PROJECT_ROOT/audio_postprocess.py" <<'PY'
+  "$PYTHON_BIN" - \
+    "$PROJECT_ROOT/designer_server.py" \
+    "$PROJECT_ROOT/audio_cpp_runtime.py" \
+    "$PROJECT_ROOT/audio_postprocess.py" \
+    "$AUDIO_RUNTIME_CONFIG" <<'PY'
 from hashlib import sha256
 import sys
 
@@ -364,76 +437,22 @@ PY
   PREVIOUS_DESIGNER_REVISION="${STATE_VALUES[10]:-}"
 fi
 
-NEW_AUDIO_PID=""
 NEW_DESIGNER_PID=""
 cleanup_failed_start() {
   local exit_code=$?
   trap - ERR
   [[ -n "$NEW_DESIGNER_PID" ]] && kill "$NEW_DESIGNER_PID" 2>/dev/null || true
-  [[ -n "$NEW_AUDIO_PID" ]] && kill "$NEW_AUDIO_PID" 2>/dev/null || true
   exit "$exit_code"
 }
 trap cleanup_failed_start ERR
 
-AUDIO_REUSED=0
-if [[ -n "$PREVIOUS_AUDIO_PORT" ]] &&
-  [[ "$PREVIOUS_AUDIO_BACKEND" == "$AUDIO_BACKEND" ]] &&
-  [[ "$PREVIOUS_AUDIO_DEVICE" == "$AUDIO_DEVICE" ]] &&
-  [[ "$PREVIOUS_AUDIO_THREADS" == "$INFERENCE_THREADS" ]] &&
-  process_matches "$PREVIOUS_AUDIO_PID" "$PREVIOUS_AUDIO_TICKS" "$AUDIO_SERVER" &&
-  http_ok "http://127.0.0.1:$PREVIOUS_AUDIO_PORT/health"; then
-  AUDIO_PORT="$PREVIOUS_AUDIO_PORT"
-  AUDIO_PID="$PREVIOUS_AUDIO_PID"
-  AUDIO_TICKS="$PREVIOUS_AUDIO_TICKS"
-  AUDIO_REUSED=1
-  echo "[3/4] Reusing audio.cpp ($AUDIO_BACKEND) on port $AUDIO_PORT."
-else
-  if [[ -n "$PREVIOUS_AUDIO_EXE" ]]; then
-    stop_verified_process "$PREVIOUS_AUDIO_PID" "$PREVIOUS_AUDIO_TICKS" "$PREVIOUS_AUDIO_EXE"
-  fi
-  AUDIO_PORT="$(find_free_port 8080)"
-  AUDIO_CONFIG="$AUDIO_ROOT/server.character_voice_designer.json"
-  "$PYTHON_BIN" - "$AUDIO_CONFIG" "$AUDIO_PORT" "$AUDIO_ROOT/models/Irodori-TTS-600M-v3-VoiceDesign" "$AUDIO_BACKEND" "$AUDIO_DEVICE" "$INFERENCE_THREADS" <<'PY'
-import json
-import sys
-
-path, port, model_path, backend, device, threads = sys.argv[1:7]
-config = {
-    "host": "127.0.0.1",
-    "port": int(port),
-    "backend": backend,
-    "device": int(device),
-    "threads": int(threads),
-    "lazy_load": True,
-    "models": [{
-        "id": "irodori-vdes",
-        "family": "irodori_tts",
-        "path": model_path,
-        "task": "vdes",
-        "mode": "offline",
-    }],
-}
-with open(path, "w", encoding="utf-8") as handle:
-    json.dump(config, handle, ensure_ascii=False, indent=2)
-    handle.write("\n")
-PY
-  AUDIO_OUT_LOG="$LOG_ROOT/audio_cpp.stdout.log"
-  AUDIO_ERROR_LOG="$LOG_ROOT/audio_cpp.stderr.log"
-  echo "[3/4] Starting audio.cpp ($AUDIO_BACKEND, $INFERENCE_THREADS threads) on port $AUDIO_PORT..."
-  (
-    cd -- "$AUDIO_ROOT"
-    configure_runtime_library_path 1
-    exec nohup "$AUDIO_SERVER" --config "$AUDIO_CONFIG"
-  ) >"$AUDIO_OUT_LOG" 2>"$AUDIO_ERROR_LOG" </dev/null &
-  NEW_AUDIO_PID=$!
-  AUDIO_PID="$NEW_AUDIO_PID"
-  AUDIO_TICKS="$(process_start_ticks "$AUDIO_PID")"
-  wait_for_service "http://127.0.0.1:$AUDIO_PORT/health" "" 90 "$AUDIO_PID" "$AUDIO_ERROR_LOG"
+if [[ -n "$PREVIOUS_AUDIO_EXE" ]]; then
+  stop_verified_process "$PREVIOUS_AUDIO_PID" "$PREVIOUS_AUDIO_TICKS" "$PREVIOUS_AUDIO_EXE"
 fi
+echo "[3/4] audio.cpp is installed and will start after model/device selection."
 
 PYTHON_REAL="$(readlink -f -- "$PYTHON_BIN")"
 if [[ -n "$PREVIOUS_DESIGNER_PORT" ]] &&
-  [[ "$AUDIO_REUSED" -eq 1 ]] &&
   [[ "$PREVIOUS_DESIGNER_REVISION" == "$DESIGNER_REVISION" ]] &&
   process_matches "$PREVIOUS_DESIGNER_PID" "$PREVIOUS_DESIGNER_TICKS" "$PYTHON_REAL" &&
   http_ok "http://127.0.0.1:$PREVIOUS_DESIGNER_PORT/api/runtime/health" '"psola_available": true'; then
@@ -442,6 +461,21 @@ if [[ -n "$PREVIOUS_DESIGNER_PORT" ]] &&
   DESIGNER_TICKS="$PREVIOUS_DESIGNER_TICKS"
   echo "[4/4] Reusing CharacterVoiceDesigner on port $DESIGNER_PORT."
 else
+  if [[ -n "$PREVIOUS_DESIGNER_PORT" ]]; then
+    "$PYTHON_BIN" - "$PREVIOUS_DESIGNER_PORT" <<'PY' >/dev/null 2>&1 || true
+import sys
+import urllib.request
+
+request = urllib.request.Request(
+    f"http://127.0.0.1:{sys.argv[1]}/api/audio-cpp/stop",
+    data=b"{}",
+    headers={"Content-Type": "application/json"},
+    method="POST",
+)
+with urllib.request.urlopen(request, timeout=5):
+    pass
+PY
+  fi
   stop_verified_process "$PREVIOUS_DESIGNER_PID" "$PREVIOUS_DESIGNER_TICKS" "$PYTHON_REAL"
   DESIGNER_PORT="$(find_free_port 8765)"
   DESIGNER_OUT_LOG="$LOG_ROOT/designer.stdout.log"
@@ -449,11 +483,11 @@ else
   echo "[4/4] Starting CharacterVoiceDesigner on port $DESIGNER_PORT..."
   (
     cd -- "$PROJECT_ROOT"
-    configure_runtime_library_path 0
+    configure_runtime_library_path 1
     exec nohup "$PYTHON_BIN" -u "$PROJECT_ROOT/designer_server.py" \
       --host 127.0.0.1 \
       --port "$DESIGNER_PORT" \
-      --audio-cpp-url "http://127.0.0.1:$AUDIO_PORT"
+      --audio-cpp-runtime-config "$AUDIO_RUNTIME_CONFIG"
   ) >"$DESIGNER_OUT_LOG" 2>"$DESIGNER_ERROR_LOG" </dev/null &
   NEW_DESIGNER_PID=$!
   DESIGNER_PID="$NEW_DESIGNER_PID"
@@ -463,8 +497,7 @@ fi
 
 "$PYTHON_BIN" - \
   "$STATE_PATH" \
-  "$AUDIO_PORT" "$AUDIO_PID" "$AUDIO_TICKS" "$AUDIO_SERVER" \
-  "$AUDIO_BACKEND" "$AUDIO_DEVICE" "$INFERENCE_THREADS" \
+  "$AUDIO_RUNTIME_CONFIG" "$AUDIO_SERVER" "$AUDIO_BACKEND" "$AUDIO_DEVICE" "$INFERENCE_THREADS" \
   "$CUDA_TOOLKIT_VERSION" "$CUDA_ARCHITECTURES" \
   "$GPU_NAME" "$GPU_MEMORY_MIB" "$GPU_FREE_MEMORY_MIB" "$NVIDIA_DRIVER_VERSION" \
   "$DESIGNER_PORT" "$DESIGNER_PID" "$DESIGNER_TICKS" \
@@ -475,9 +508,7 @@ import sys
 
 (
     state_path,
-    audio_port,
-    audio_pid,
-    audio_ticks,
+    audio_runtime_config,
     audio_exe,
     audio_backend,
     audio_device,
@@ -496,10 +527,8 @@ import sys
 ) = sys.argv[1:]
 state = {
     "app": "CharacterVoiceDesigner",
-    "schema_version": "webui_runtime_state_linux_0.2",
-    "audio_cpp_port": int(audio_port),
-    "audio_cpp_pid": int(audio_pid),
-    "audio_cpp_start_ticks": audio_ticks,
+    "schema_version": "webui_runtime_state_linux_0.3",
+    "audio_cpp_runtime_config": audio_runtime_config,
     "audio_cpp_executable": audio_exe,
     "audio_cpp_backend": audio_backend,
     "audio_cpp_device": int(audio_device),
@@ -523,7 +552,6 @@ with open(state_path, "w", encoding="utf-8") as handle:
 PY
 
 trap - ERR
-NEW_AUDIO_PID=""
 NEW_DESIGNER_PID=""
 WEBUI_URL="http://127.0.0.1:$DESIGNER_PORT/"
 echo

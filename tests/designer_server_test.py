@@ -147,6 +147,28 @@ class SpeechRequestValidationTest(unittest.TestCase):
         self.assertEqual(request["num_inference_steps"], 20)
         self.assertNotIn("generation_mode", request)
 
+    def test_runtime_selection_is_validated_and_kept_out_of_upstream_request(self):
+        request = MODULE.validate_speech_request(
+            {
+                "model": "irodori-vdes",
+                "input": "test",
+                "runtime": {"device_id": "cuda:1", "vram_limit_mib": 12288},
+            }
+        )
+        runtime = request.pop("_cvd_runtime")
+        self.assertEqual(runtime, {"device_id": "cuda:1", "vram_limit_mib": 12288})
+        self.assertNotIn("runtime", request)
+
+    def test_invalid_runtime_device_is_rejected(self):
+        with self.assertRaises(ValueError):
+            MODULE.validate_speech_request(
+                {
+                    "model": "irodori-vdes",
+                    "input": "test",
+                    "runtime": {"device_id": "cuda:any"},
+                }
+            )
+
     def test_invalid_observation_snapshot_step_is_rejected(self):
         with self.assertRaises(ValueError):
             MODULE.validate_speech_request(

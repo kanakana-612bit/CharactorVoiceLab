@@ -142,6 +142,15 @@ function Test-RecordedProcess($ProcessId, $StartedAt, [string[]]$AllowedNames) {
   }
 }
 
+function Stop-RecordedProcess($ProcessId, $StartedAt, [string[]]$AllowedNames) {
+  if (-not (Test-RecordedProcess $ProcessId $StartedAt $AllowedNames)) { return }
+  Stop-Process -Id ([int]$ProcessId) -Force
+  for ($Attempt = 0; $Attempt -lt 50; $Attempt++) {
+    if (-not (Get-Process -Id ([int]$ProcessId) -ErrorAction SilentlyContinue)) { return }
+    Start-Sleep -Milliseconds 100
+  }
+}
+
 Initialize-LocalPython
 
 Write-Host "[2/4] Preparing audio.cpp, the VoiceDesign model, and F0 correction dependencies..."
@@ -153,65 +162,70 @@ if (Test-Path -LiteralPath $StatePath -PathType Leaf) {
   try { $PreviousState = Get-Content -LiteralPath $StatePath -Raw | ConvertFrom-Json } catch { $PreviousState = $null }
 }
 
-$AudioPort = 0
-$AudioOwnedProcess = $null
-$AudioPid = $null
-$AudioStartedAt = $null
-if ($PreviousState -and $PreviousState.audio_cpp_port -and
-    (Test-RecordedProcess $PreviousState.audio_cpp_pid $PreviousState.audio_cpp_started_at @("audiocpp_server")) -and
-    (Test-HttpEndpoint "http://127.0.0.1:$($PreviousState.audio_cpp_port)/health")) {
-  $AudioPort = [int]$PreviousState.audio_cpp_port
-  $AudioPid = $PreviousState.audio_cpp_pid
-  $AudioStartedAt = $PreviousState.audio_cpp_started_at
-  Write-Host "[3/4] Reusing audio.cpp on port $AudioPort."
-} else {
-  $AudioPort = Find-FreePort 8080
-  $ConfigPath = Join-Path $AudioCppRoot "server.character_voice_designer.json"
-  $Config = Get-Content -LiteralPath (Join-Path $PSScriptRoot "audio_cpp.server.example.json") -Raw | ConvertFrom-Json
-  $Config.port = $AudioPort
-  $Config.backend = "cpu"
-  $Config | ConvertTo-Json -Depth 10 | Set-Content -LiteralPath $ConfigPath -Encoding utf8
-  $AudioServer = Get-ChildItem -LiteralPath $AudioCppRoot -Filter "audiocpp_server.exe" -File -Recurse | Select-Object -First 1
-  if (-not $AudioServer) { throw "audiocpp_server.exe was not found after setup." }
-  $AudioOutLog = Join-Path $LogRoot "audio_cpp.stdout.log"
-  $AudioErrorLog = Join-Path $LogRoot "audio_cpp.stderr.log"
-  Write-Host "[3/4] Starting audio.cpp on port $AudioPort..."
-  $AudioOwnedProcess = Start-Process -FilePath $AudioServer.FullName -ArgumentList "--config `"$ConfigPath`"" -WorkingDirectory $AudioCppRoot -WindowStyle Hidden -RedirectStandardOutput $AudioOutLog -RedirectStandardError $AudioErrorLog -PassThru
-  $AudioPid = $AudioOwnedProcess.Id
-  $AudioStartedAt = Get-ProcessStartIso $AudioOwnedProcess
-  Wait-HttpEndpoint "http://127.0.0.1:$AudioPort/health" "" 60 $AudioOwnedProcess $AudioErrorLog
+$AudioServer = Get-ChildItem -LiteralPath $AudioCppRoot -Filter "audiocpp_server.exe" -File -Recurse | Select-Object -First 1
+if (-not $AudioServer) { throw "audiocpp_server.exe was not found after setup." }
+$AudioRuntimeConfig = Join-Path $RuntimeRoot "audio_cpp.runtime.json"
+$AudioManifest = [ordered]@{
+  schema_version = "cvd_audio_cpp_runtime_manifest_0.1"
+  project_root = $ProjectRoot
+  executable = $AudioServer.FullName
+  working_directory = $AudioCppRoot
+  log_root = $LogRoot
+  preferred_port = 8080
+  threads = 4
+  default_device = "cpu"
+  devices = @(
+    [ordered]@{
+      id = "cpu"
+      label = "CPU only"
+      backend = "cpu"
+      physical_index = $null
+      memory_mib = 0
+      free_memory_mib = 0
+    }
+  )
+  models = @(
+    [ordered]@{
+      id = "irodori-vdes"
+      label = "Irodori VoiceDesign / Japanese"
+      family = "irodori_tts"
+      path = Join-Path $AudioCppRoot "models\Irodori-TTS-600M-v3-VoiceDesign"
+      task = "vdes"
+      mode = "offline"
+    }
+  )
+  environment = @{}
 }
+$AudioManifest | ConvertTo-Json -Depth 10 | Set-Content -LiteralPath $AudioRuntimeConfig -Encoding utf8
+if ($PreviousState -and $PreviousState.audio_cpp_pid) {
+  Stop-RecordedProcess $PreviousState.audio_cpp_pid $PreviousState.audio_cpp_started_at @("audiocpp_server")
+}
+Write-Host "[3/4] audio.cpp is installed and will start after model/device selection."
 
-$DesignerPort = 0
-$DesignerOwnedProcess = $null
-$DesignerPid = $null
-$DesignerStartedAt = $null
-if ($PreviousState -and $PreviousState.designer_port -and
-    (Test-RecordedProcess $PreviousState.designer_pid $PreviousState.designer_started_at @("python", "pythonw")) -and
-    (Test-HttpEndpoint "http://127.0.0.1:$($PreviousState.designer_port)/" "CharacterVoiceDesigner")) {
-  $DesignerPort = [int]$PreviousState.designer_port
-  $DesignerPid = $PreviousState.designer_pid
-  $DesignerStartedAt = $PreviousState.designer_started_at
-  Write-Host "[4/4] Reusing CharacterVoiceDesigner on port $DesignerPort."
-} else {
-  $DesignerPort = Find-FreePort 8765
-  $DesignerOutLog = Join-Path $LogRoot "designer.stdout.log"
-  $DesignerErrorLog = Join-Path $LogRoot "designer.stderr.log"
-  $DesignerServer = Join-Path $ProjectRoot "designer_server.py"
-  $DesignerArguments = "-u `"$DesignerServer`" --host 127.0.0.1 --port $DesignerPort --audio-cpp-url `"http://127.0.0.1:$AudioPort`""
-  Write-Host "[4/4] Starting CharacterVoiceDesigner on port $DesignerPort..."
-  $DesignerOwnedProcess = Start-Process -FilePath $RuntimePython -ArgumentList $DesignerArguments -WorkingDirectory $ProjectRoot -WindowStyle Hidden -RedirectStandardOutput $DesignerOutLog -RedirectStandardError $DesignerErrorLog -PassThru
-  $DesignerPid = $DesignerOwnedProcess.Id
-  $DesignerStartedAt = Get-ProcessStartIso $DesignerOwnedProcess
-  Wait-HttpEndpoint "http://127.0.0.1:$DesignerPort/" "CharacterVoiceDesigner" 30 $DesignerOwnedProcess $DesignerErrorLog
+if ($PreviousState -and $PreviousState.designer_pid) {
+  if ($PreviousState.designer_port) {
+    try {
+      Invoke-WebRequest -UseBasicParsing -Method Post -ContentType "application/json" -Body "{}" -Uri "http://127.0.0.1:$($PreviousState.designer_port)/api/audio-cpp/stop" -TimeoutSec 5 | Out-Null
+    } catch {}
+  }
+  Stop-RecordedProcess $PreviousState.designer_pid $PreviousState.designer_started_at @("python", "pythonw")
 }
+$DesignerPort = Find-FreePort 8765
+$DesignerOutLog = Join-Path $LogRoot "designer.stdout.log"
+$DesignerErrorLog = Join-Path $LogRoot "designer.stderr.log"
+$DesignerServer = Join-Path $ProjectRoot "designer_server.py"
+$DesignerArguments = "-u `"$DesignerServer`" --host 127.0.0.1 --port $DesignerPort --audio-cpp-runtime-config `"$AudioRuntimeConfig`""
+Write-Host "[4/4] Starting CharacterVoiceDesigner on port $DesignerPort..."
+$DesignerOwnedProcess = Start-Process -FilePath $RuntimePython -ArgumentList $DesignerArguments -WorkingDirectory $ProjectRoot -WindowStyle Hidden -RedirectStandardOutput $DesignerOutLog -RedirectStandardError $DesignerErrorLog -PassThru
+$DesignerPid = $DesignerOwnedProcess.Id
+$DesignerStartedAt = Get-ProcessStartIso $DesignerOwnedProcess
+Wait-HttpEndpoint "http://127.0.0.1:$DesignerPort/" "CharacterVoiceDesigner" 30 $DesignerOwnedProcess $DesignerErrorLog
 
 $State = [ordered]@{
   app = "CharacterVoiceDesigner"
-  schema_version = "webui_runtime_state_0.1"
-  audio_cpp_port = $AudioPort
-  audio_cpp_pid = $AudioPid
-  audio_cpp_started_at = $AudioStartedAt
+  schema_version = "webui_runtime_state_0.2"
+  audio_cpp_runtime_config = $AudioRuntimeConfig
+  audio_cpp_executable = $AudioServer.FullName
   designer_port = $DesignerPort
   designer_pid = $DesignerPid
   designer_started_at = $DesignerStartedAt

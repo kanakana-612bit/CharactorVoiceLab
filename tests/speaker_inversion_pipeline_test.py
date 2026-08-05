@@ -34,6 +34,7 @@ class SpeakerInversionPipelineTest(unittest.TestCase):
             paths["uv"],
             paths["cuda_probe"],
             paths["local_manifest_preparer"],
+            paths["compute_launcher"],
         ):
             path.write_bytes(b"fixture")
         paths["environment"].write_text(
@@ -76,7 +77,7 @@ class SpeakerInversionPipelineTest(unittest.TestCase):
                     + "\n",
                     encoding="utf-8",
                 )
-            if "train.py" in command:
+            if any(str(item).endswith("train.py") for item in command):
                 checkpoint = output / "upstream_training" / "checkpoint_final.speaker.safetensors"
                 checkpoint.parent.mkdir(parents=True, exist_ok=True)
                 checkpoint.write_bytes(b"learned-embedding")
@@ -111,7 +112,9 @@ class SpeakerInversionPipelineTest(unittest.TestCase):
             pathlib.Path(calls[0][0][calls[0][0].index("--upstream-source") + 1]),
             self.paths["source"],
         )
-        self.assertIn("train.py", calls[1][0])
+        self.assertTrue(any(str(item).endswith("train.py") for item in calls[1][0]))
+        self.assertEqual(calls[1][0][calls[1][0].index("--gpu-index") + 1], "0")
+        self.assertEqual(calls[1][0][calls[1][0].index("--vram-limit-mib") + 1], "0")
 
     def test_empty_prepared_manifest_stops_before_training(self):
         manifest = self.root / "empty.jsonl"
@@ -152,6 +155,8 @@ class SpeakerInversionPipelineTest(unittest.TestCase):
         command = captured[0]
         self.assertEqual(command[command.index("--checkpoint") + 1], str(self.paths["model"]))
         self.assertEqual(command[command.index("--ref-embed") + 1], str(embedding))
+        self.assertEqual(command[command.index("--gpu-index") + 1], "0")
+        self.assertEqual(command[command.index("--vram-limit-mib") + 1], "0")
         self.assertTrue(any(path.suffix == ".wav" for path in output.iterdir()))
 
     def test_environment_preflight_rejects_cpu_only_torch(self):

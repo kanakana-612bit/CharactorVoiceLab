@@ -8,7 +8,7 @@ PYTHON_BIN=""
 RELEASE_TAG="release-0.3-qwen3-tts"
 BACKEND="cpu"
 CUDA_ARCHITECTURES="native"
-CUDA_VERSION="12.4"
+CUDA_VERSION="12.8"
 PINNED_SOURCE_SHA256="fd50dc3d331357886dd0e6475e4060c165351dfcf5d33ceaa083766285c1ce59"
 
 while [[ $# -gt 0 ]]; do
@@ -31,6 +31,10 @@ while [[ $# -gt 0 ]]; do
       ;;
     --cuda-architectures)
       CUDA_ARCHITECTURES="$2"
+      shift 2
+      ;;
+    --cuda-version)
+      CUDA_VERSION="$2"
       shift 2
       ;;
     *)

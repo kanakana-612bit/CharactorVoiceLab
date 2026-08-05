@@ -8,6 +8,11 @@ if (-not (Test-Path -LiteralPath $StatePath -PathType Leaf)) {
 }
 
 $State = Get-Content -LiteralPath $StatePath -Raw | ConvertFrom-Json
+if ($State.designer_port) {
+  try {
+    Invoke-WebRequest -UseBasicParsing -Method Post -ContentType "application/json" -Body "{}" -Uri "http://127.0.0.1:$($State.designer_port)/api/audio-cpp/stop" -TimeoutSec 5 | Out-Null
+  } catch {}
+}
 $HadWarning = $false
 
 function Stop-RecordedProcess([string]$Label, $ProcessId, $StartedAt, [string[]]$AllowedNames) {

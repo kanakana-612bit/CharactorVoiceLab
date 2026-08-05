@@ -586,7 +586,7 @@
               <span class="section-kicker">Local inference</span>
               <h2>audio.cpp</h2>
             </div>
-            <button id="refreshTtsModelsBtn" type="button">接続確認</button>
+            <button id="refreshTtsModelsBtn" type="button">状態更新</button>
           </div>
           <div class="backend-status-line">
             <span id="audioCppStatusDot" class="status-dot" aria-hidden="true"></span>
@@ -600,6 +600,17 @@
               </select>
             </label>
             <label>
+              生成デバイス
+              <select id="ttsRuntimeDeviceSelect">
+                <option value="cpu">CPU only</option>
+              </select>
+            </label>
+            <label>
+              VRAM監視上限
+              <input id="ttsRuntimeVramLimit" type="number" min="0" step="256" value="0" />
+              <small>MiB / 0で無制限</small>
+            </label>
+            <label>
               乱数シード
               <input id="ttsSeedInput" type="number" min="0" max="2147483647" step="1" value="20260719" />
             </label>
@@ -608,6 +619,13 @@
               <input id="ttsCaptionGuidanceInput" type="number" min="0.5" max="10" step="0.1" value="2" />
             </label>
           </div>
+          <div class="audio-actions runtime-actions">
+            <button id="startAudioCppRuntimeBtn" class="primary" type="button">選択条件でaudio.cppを起動</button>
+            <button id="stopAudioCppRuntimeBtn" type="button">停止</button>
+          </div>
+          <p id="audioCppRuntimeGuide" class="note">
+            モデルは選択条件の確定後に読み込まれます。GPU生成の上限超過時はaudio.cppを停止します。
+          </p>
           <div class="standard-generation-policy">
             <strong>標準生成: 20 Step / 1候補</strong>
             <span>生成後に軽量評価を行い、閾値超過は警告のみ表示します。自動再試行は行いません。</span>
@@ -776,6 +794,17 @@
             <label>
               Embedding名
               <input id="speakerInversionVoiceName" type="text" value="voice_profile" maxlength="64" />
+            </label>
+            <label>
+              学習GPU
+              <select id="speakerInversionGpuSelect">
+                <option value="0">GPU 0</option>
+              </select>
+            </label>
+            <label>
+              学習VRAM上限
+              <input id="speakerInversionVramLimit" type="number" min="0" step="256" value="0" />
+              <small>MiB / 0で無制限</small>
             </label>
             <button id="trainSpeakerInversionBtn" class="primary" type="button">選択音声から学習</button>
             <button id="cancelSpeakerInversionJobBtn" type="button" disabled>中止</button>
@@ -1209,6 +1238,19 @@
             読み上げテキスト
             <textarea id="ttsDemoTextInput" rows="7" maxlength="5000">こんにちは。これはキャラクター音声デザインの確認用サンプルです。</textarea>
           </label>
+          <div class="form-grid tts-output-runtime-settings">
+            <label>
+              生成デバイス
+              <select id="ttsDemoRuntimeDeviceSelect">
+                <option value="cpu">CPU only</option>
+              </select>
+            </label>
+            <label>
+              VRAM監視上限
+              <input id="ttsDemoRuntimeVramLimit" type="number" min="0" step="256" value="0" />
+              <small>MiB / 0で無制限</small>
+            </label>
+          </div>
           <div class="tts-request-summary" id="ttsRequestSummary"></div>
           <div class="audio-actions tts-demo-actions">
             <button id="generateTtsDemoBtn" class="primary" type="button">音声を生成</button>

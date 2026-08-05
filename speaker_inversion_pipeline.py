@@ -56,10 +56,11 @@ def _runtime_paths(project_root: Path) -> dict[str, Path]:
         "embeddings": root / "embeddings",
         "cuda_probe": project_root / "speaker_inversion_cuda_probe.py",
         "local_manifest_preparer": project_root / "speaker_inversion_prepare_local.py",
+        "compute_launcher": project_root / "speaker_inversion_compute_launcher.py",
     }
 
 
-def _probe_cuda_runtime(paths: dict[str, Path]) -> dict[str, Any]:
+def _probe_cuda_runtime(paths: dict[str, Path], gpu_index: int) -> dict[str, Any]:
     try:
         result = subprocess.run(
             [
@@ -70,7 +71,11 @@ def _probe_cuda_runtime(paths: dict[str, Path]) -> dict[str, Any]:
                 str(paths["cuda_probe"]),
             ],
             cwd=str(paths["source"]),
-            env={**os.environ, "PYTHONUNBUFFERED": "1"},
+            env={
+                **os.environ,
+                "PYTHONUNBUFFERED": "1",
+                "CUDA_VISIBLE_DEVICES": str(gpu_index),
+            },
             check=False,
             capture_output=True,
             text=True,
@@ -107,7 +112,7 @@ def _cuda_failure_message(diagnostics: dict[str, Any]) -> str:
     return f"{detail} {action}"
 
 
-def _load_environment(project_root: Path) -> tuple[dict[str, Path], dict[str, Any]]:
+def _load_environment(project_root: Path, gpu_index: int = 0) -> tuple[dict[str, Path], dict[str, Any]]:
     paths = _runtime_paths(project_root)
     try:
         status = json.loads(paths["environment"].read_text(encoding="utf-8"))
@@ -124,17 +129,42 @@ def _load_environment(project_root: Path) -> tuple[dict[str, Path], dict[str, An
         paths["model"],
         paths["cuda_probe"],
         paths["local_manifest_preparer"],
+        paths["compute_launcher"],
     )
     missing = [str(path) for path in required if not path.is_file()]
     if missing:
         raise PipelineError("Speaker Inversion environment is incomplete: " + ", ".join(missing))
     if status.get("upstream_commit") != UPSTREAM_COMMIT:
         raise PipelineError("Speaker Inversion upstream commit does not match this application build.")
-    diagnostics = _probe_cuda_runtime(paths)
+    diagnostics = _probe_cuda_runtime(paths, gpu_index)
     if not diagnostics.get("ready"):
         raise PipelineError(_cuda_failure_message(diagnostics))
     status["cuda"] = diagnostics
     return paths, status
+
+
+def _compute_command(
+    paths: dict[str, Path],
+    target: Path,
+    arguments: list[str],
+    *,
+    gpu_index: int,
+    vram_limit_mib: int,
+) -> list[str]:
+    return [
+        str(paths["uv"]),
+        "run",
+        "--no-sync",
+        "python",
+        str(paths["compute_launcher"]),
+        "--gpu-index",
+        str(gpu_index),
+        "--vram-limit-mib",
+        str(vram_limit_mib),
+        "--target",
+        str(target),
+        *arguments,
+    ]
 
 
 def _run(command: list[str], *, cwd: Path) -> None:
@@ -217,7 +247,9 @@ def _validate_prepared_manifest(path: Path, expected_samples: int) -> None:
 
 def train(args: argparse.Namespace) -> None:
     project_root = args.project_root.resolve()
-    paths, environment = _load_environment(project_root)
+    gpu_index = int(getattr(args, "gpu_index", 0))
+    vram_limit_mib = int(getattr(args, "vram_limit_mib", 0))
+    paths, environment = _load_environment(project_root, gpu_index)
     output = args.output.resolve()
     output.mkdir(parents=True, exist_ok=True)
     samples = _load_samples(args.samples, project_root)
@@ -229,16 +261,12 @@ def train(args: argparse.Namespace) -> None:
     manifest = output / "train_manifest.jsonl"
     latents = output / "latents"
     upstream = paths["source"]
-    uv = str(paths["uv"])
-
     print(f"[progress 0/3] Preparing {len(samples)} local training samples", flush=True)
     _run(
-        [
-            uv,
-            "run",
-            "--no-sync",
-            "python",
-            str(paths["local_manifest_preparer"]),
+        _compute_command(
+            paths,
+            paths["local_manifest_preparer"],
+            [
             "--upstream-source",
             str(upstream),
             "--samples",
@@ -251,7 +279,10 @@ def train(args: argparse.Namespace) -> None:
             "cuda",
             "--seed",
             str(args.seed),
-        ],
+            ],
+            gpu_index=gpu_index,
+            vram_limit_mib=vram_limit_mib,
+        ),
         cwd=upstream,
     )
     _validate_prepared_manifest(manifest, len(samples))
@@ -260,12 +291,10 @@ def train(args: argparse.Namespace) -> None:
     save_every = max(1, min(args.max_steps, args.save_every))
     print(f"[progress 1/3] Training {args.tokens} Speaker Inversion tokens", flush=True)
     _run(
-        [
-            uv,
-            "run",
-            "--no-sync",
-            "python",
-            "train.py",
+        _compute_command(
+            paths,
+            upstream / "train.py",
+            [
             "--config",
             str(upstream / "configs" / CONFIG_NAME),
             "--manifest",
@@ -294,7 +323,10 @@ def train(args: argparse.Namespace) -> None:
             str(max(1, min(20, args.max_steps))),
             "--seed",
             str(args.seed),
-        ],
+            ],
+            gpu_index=gpu_index,
+            vram_limit_mib=vram_limit_mib,
+        ),
         cwd=upstream,
     )
 
@@ -336,6 +368,8 @@ def train(args: argparse.Namespace) -> None:
             "gradient_accumulation_steps": args.gradient_accumulation_steps,
             "learning_rate": args.learning_rate,
             "seed": args.seed,
+            "gpu_index": gpu_index,
+            "vram_limit_mib": vram_limit_mib,
         },
         "privacy": {
             "local_processing_only": True,
@@ -358,6 +392,8 @@ def train(args: argparse.Namespace) -> None:
         "sample_count": len(samples),
         "model_repository": MODEL_REPOSITORY,
         "upstream_commit": UPSTREAM_COMMIT,
+        "gpu_index": gpu_index,
+        "vram_limit_mib": vram_limit_mib,
     }
     _write_json(output / "summary.json", summary)
     print(f"[progress 3/3] Registered {managed_name}", flush=True)
@@ -365,7 +401,9 @@ def train(args: argparse.Namespace) -> None:
 
 def generate(args: argparse.Namespace) -> None:
     project_root = args.project_root.resolve()
-    paths, _ = _load_environment(project_root)
+    gpu_index = int(getattr(args, "gpu_index", 0))
+    vram_limit_mib = int(getattr(args, "vram_limit_mib", 0))
+    paths, _ = _load_environment(project_root, gpu_index)
     embedding_root = paths["embeddings"].resolve()
     embedding = (embedding_root / args.embedding).resolve()
     try:
@@ -377,12 +415,7 @@ def generate(args: argparse.Namespace) -> None:
     output = args.output.resolve()
     output.mkdir(parents=True, exist_ok=True)
     wav = output / f"{_safe_name(embedding.name.removesuffix('.speaker.safetensors'))}-test.wav"
-    command = [
-        str(paths["uv"]),
-        "run",
-        "--no-sync",
-        "python",
-        "infer.py",
+    inference_arguments = [
         "--checkpoint",
         str(paths["model"]),
         "--ref-embed",
@@ -413,7 +446,14 @@ def generate(args: argparse.Namespace) -> None:
         str(args.duration_scale),
     ]
     if args.caption:
-        command.extend(["--caption", args.caption])
+        inference_arguments.extend(["--caption", args.caption])
+    command = _compute_command(
+        paths,
+        paths["source"] / "infer.py",
+        inference_arguments,
+        gpu_index=gpu_index,
+        vram_limit_mib=vram_limit_mib,
+    )
     print("[progress 0/1] Generating with the learned speaker embedding", flush=True)
     _run(command, cwd=paths["source"])
     if not wav.is_file():
@@ -427,6 +467,8 @@ def generate(args: argparse.Namespace) -> None:
             "steps": args.steps,
             "seed": args.seed,
             "output_wav": wav.name,
+            "gpu_index": gpu_index,
+            "vram_limit_mib": vram_limit_mib,
         },
     )
     print("[progress 1/1] Generation complete", flush=True)
@@ -448,6 +490,8 @@ def build_parser() -> argparse.ArgumentParser:
     train_parser.add_argument("--learning-rate", type=float, default=0.01)
     train_parser.add_argument("--save-every", type=int, default=250)
     train_parser.add_argument("--seed", type=int, default=0)
+    train_parser.add_argument("--gpu-index", type=int, default=0)
+    train_parser.add_argument("--vram-limit-mib", type=int, default=0)
     train_parser.set_defaults(handler=train)
     generate_parser = subparsers.add_parser("generate")
     generate_parser.add_argument("--project-root", type=Path, required=True)
@@ -460,6 +504,8 @@ def build_parser() -> argparse.ArgumentParser:
     generate_parser.add_argument("--caption-guidance", type=float, default=2.0)
     generate_parser.add_argument("--speaker-guidance", type=float, default=5.0)
     generate_parser.add_argument("--duration-scale", type=float, default=1.0)
+    generate_parser.add_argument("--gpu-index", type=int, default=0)
+    generate_parser.add_argument("--vram-limit-mib", type=int, default=0)
     generate_parser.set_defaults(handler=generate)
     return parser
 

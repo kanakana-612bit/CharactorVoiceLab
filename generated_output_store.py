@@ -148,6 +148,13 @@ class GeneratedOutputStore:
                     "duration_scale": options.get("duration_scale"),
                     "trim_tail": options.get("trim_tail"),
                 },
+                "compute_runtime": {
+                    "device_id": (capture.get("runtime") or {}).get("device_id"),
+                    "vram_limit_mib": (capture.get("runtime") or {}).get(
+                        "vram_limit_mib", 0
+                    ),
+                    "vram_limit_policy": "process_monitor_stop_on_exceed",
+                },
                 "identity": identity_record,
                 "postprocess": {
                     "enabled": bool(postprocess),

@@ -408,8 +408,19 @@ select:focus {
 }
 
 .tts-model-settings {
-  grid-template-columns: repeat(2, minmax(130px, 1fr));
+  grid-template-columns: repeat(3, minmax(130px, 1fr));
   margin-bottom: 14px;
+}
+
+.tts-model-settings small,
+.speaker-inversion-training-controls small,
+.tts-output-runtime-settings small {
+  color: var(--muted);
+  font-size: 0.72rem;
+}
+
+.runtime-actions {
+  margin-bottom: 8px;
 }
 
 .standard-generation-policy {
@@ -746,6 +757,11 @@ select:focus {
 
 .tts-demo-actions {
   margin: 12px 0;
+}
+
+.tts-output-runtime-settings {
+  grid-template-columns: repeat(2, minmax(160px, 1fr));
+  margin-top: 12px;
 }
 
 .tts-demo-audio {

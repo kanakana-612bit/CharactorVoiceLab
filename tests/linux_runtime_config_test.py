@@ -17,6 +17,7 @@ SPEC.loader.exec_module(runtime)
 class LinuxRuntimeConfigTest(unittest.TestCase):
     def setUp(self) -> None:
         self.rtx3060 = runtime.GpuInfo(0, "NVIDIA GeForce RTX 3060", "580.159.03", "8.6", 12288, 3727)
+        self.rtx5060ti = runtime.GpuInfo(1, "NVIDIA GeForce RTX 5060 Ti", "580.173.02", "12.0", 16384, 15000)
 
     def test_auto_selects_pinned_cuda_for_compatible_rtx3060(self) -> None:
         config = runtime.select_runtime("auto", "x86_64", [self.rtx3060], 10)
@@ -24,8 +25,16 @@ class LinuxRuntimeConfigTest(unittest.TestCase):
         self.assertEqual(config.cuda_architectures, "86")
         self.assertEqual(config.device, 0)
         self.assertEqual(config.threads, 10)
-        self.assertIn("CUDA 12.4", config.selection_reason)
+        self.assertIn("CUDA 12.8", config.selection_reason)
         self.assertIn("free at least", config.selection_reason)
+
+    def test_auto_builds_for_all_compatible_gpus_and_selects_largest(self) -> None:
+        config = runtime.select_runtime(
+            "auto", "x86_64", [self.rtx3060, self.rtx5060ti], 10
+        )
+        self.assertEqual(config.device, 1)
+        self.assertEqual(config.cuda_architectures, "86;120")
+        self.assertEqual([item["index"] for item in config.gpus], [0, 1])
 
     def test_nvidia_smi_query_output_is_parsed(self) -> None:
         gpus = runtime.parse_nvidia_smi_output(

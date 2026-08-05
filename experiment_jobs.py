@@ -1099,6 +1099,16 @@ class ExperimentJobManager:
                 options.get("learning_rate", 0.01), "learning_rate", 0.000001, 1
             )
             seed = _number(options.get("seed", 0), "seed", 0, 2147483647, integer=True)
+            gpu_index = _number(
+                options.get("gpu_index", 0), "gpu_index", 0, 31, integer=True
+            )
+            vram_limit_mib = _number(
+                options.get("vram_limit_mib", 0),
+                "vram_limit_mib",
+                0,
+                262144,
+                integer=True,
+            )
             requested_ids = options.get("sample_ids")
             if requested_ids is None:
                 requested_ids = [
@@ -1157,6 +1167,10 @@ class ExperimentJobManager:
                 str(learning_rate),
                 "--seed",
                 str(seed),
+                "--gpu-index",
+                str(gpu_index),
+                "--vram-limit-mib",
+                str(vram_limit_mib),
             ]
             safe = {
                 "voice_name": voice_name,
@@ -1169,6 +1183,8 @@ class ExperimentJobManager:
                 "num_workers": num_workers,
                 "learning_rate": learning_rate,
                 "seed": seed,
+                "gpu_index": gpu_index,
+                "vram_limit_mib": vram_limit_mib,
                 "model_repository": "Aratako/Irodori-TTS-v4-Small",
             }
             return command, output, safe
@@ -1200,6 +1216,16 @@ class ExperimentJobManager:
             duration_scale = _number(
                 options.get("duration_scale", 1), "duration_scale", 0.5, 2
             )
+            gpu_index = _number(
+                options.get("gpu_index", 0), "gpu_index", 0, 31, integer=True
+            )
+            vram_limit_mib = _number(
+                options.get("vram_limit_mib", 0),
+                "vram_limit_mib",
+                0,
+                262144,
+                integer=True,
+            )
             output = self.output_root / job_id
             output.mkdir(parents=True, exist_ok=False)
             command = [
@@ -1226,6 +1252,10 @@ class ExperimentJobManager:
                 str(speaker_guidance),
                 "--duration-scale",
                 str(duration_scale),
+                "--gpu-index",
+                str(gpu_index),
+                "--vram-limit-mib",
+                str(vram_limit_mib),
             ]
             safe = {
                 "embedding": embedding,
@@ -1236,6 +1266,8 @@ class ExperimentJobManager:
                 "caption_guidance": caption_guidance,
                 "speaker_guidance": speaker_guidance,
                 "duration_scale": duration_scale,
+                "gpu_index": gpu_index,
+                "vram_limit_mib": vram_limit_mib,
                 "model_repository": "Aratako/Irodori-TTS-v4-Small",
             }
             return command, output, safe

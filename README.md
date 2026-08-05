@@ -28,7 +28,7 @@ The first launch prepares everything under the ignored `runtime/` directory:
 
 No Visual Studio, CMake, CUDA Toolkit, system Python, or pre-existing `audio.cpp` checkout is required. An internet connection is required on the first run. It downloads several gigabytes and should be started with at least 10 GB of free disk space. Later launches validate and reuse the local environment without downloading it again.
 
-The launcher starts both services on loopback-only addresses, selects nearby free ports when the defaults are occupied, and opens the WebUI. Run `stop_webui.bat` to stop only the processes owned by the launcher. Logs are stored in `runtime/logs/`.
+The launcher starts the loopback-only WebUI and opens it. `audio.cpp` is started only after a model and compute device are selected in the TTS Model tab; changing those conditions replaces the previous server process. Run `stop_webui.bat` to stop only the processes owned by the launcher. Logs are stored in `runtime/logs/`.
 
 Analysis, profile handling, speech generation, and F0 correction run only on loopback-bound services on the user's PC. A browser Content Security Policy restricts API connections to the same local origin, and the bridge rejects non-loopback bind and upstream addresses. Reference images, profile values, input text, and generated audio are not uploaded. First setup and updates do contact upstream distribution services to download software and model files; project data is not included in those requests.
 
@@ -47,12 +47,12 @@ The pinned audio.cpp release does not publish a Linux prebuilt package. On the f
 - detects a compatible NVIDIA GPU and otherwise selects the optimized CPU backend
 - downloads the pinned audio.cpp source and builds with native CPU kernels and llamafile SGEMM
 - installs a pinned micromamba executable and a conda-forge GCC/G++ 13 toolchain with a glibc 2.17 compatibility sysroot under `runtime/toolchains/` when no compatible compiler is present
-- for NVIDIA inference, installs the tested CUDA Toolkit 12.4 dependency set under `runtime/toolchains/cuda124/` and builds only for the detected compute capability
+- for NVIDIA inference, installs the tested CUDA Toolkit 12.8 dependency set under `runtime/toolchains/cuda128/` and builds for every compatible detected compute capability
 - installs the same VoiceDesign model set used by the Windows launcher
 
-The CUDA path is supported on Linux x86_64 with compute capability 7.5 or newer. Driver 580.159.03 is validated with the pinned CUDA Toolkit 12.4 build. The `CUDA Version: 13.0` value reported by `nvidia-smi` describes driver capability; CharacterVoiceDesigner intentionally uses its tested project-local 12.4 toolkit. The launcher follows NVIDIA's [isolated Conda environment guidance](https://docs.nvidia.com/cuda/cuda-installation-guide-linux/#conda-installation) and never installs or replaces the NVIDIA driver or system CUDA. An RTX 3060 is compiled for `sm_86`. Keep at least 6 GiB of GPU memory free before inference; the launcher warns when less is available.
+The CUDA path is supported on Linux x86_64 with compute capability 7.5 or newer. Driver 580.173.02 is the current project baseline, paired with the pinned project-local CUDA Toolkit 12.8. The `CUDA Version: 13.0` value reported by `nvidia-smi` describes driver capability rather than the toolkit used to compile this application. CUDA 12.8 is required because it adds native `sm_120` compiler support for Blackwell GPUs; see NVIDIA's [CUDA 12.8 release notes](https://docs.nvidia.com/cuda/archive/12.8.0/cuda-toolkit-release-notes/index.html) and [GPU compute-capability table](https://developer.nvidia.com/cuda/gpus). The launcher follows NVIDIA's [isolated Conda environment guidance](https://docs.nvidia.com/cuda/cuda-installation-guide-linux/#conda-installation) and never installs or replaces the NVIDIA driver or system CUDA. A detected RTX 3060/RTX 5060 Ti pair is compiled for `sm_86;sm_120`, and either physical GPU can be selected independently in the WebUI. Keep at least 6 GiB of GPU memory free before inference; the launcher warns when less is available.
 
-The Linux launcher does not replace the system compiler and does not require `sudo` for its compiler or CUDA toolchains. Allow additional time for the initial native build and use at least 20 GB of free disk space for a CUDA setup. Later launches reuse the toolchains, build, models, ports, and validated process records. Run `./stop_webui.sh` to stop only launcher-owned processes. Use `./webui.sh --no-browser` on a headless machine; the local URL is printed to the terminal.
+The Linux launcher does not replace the system compiler and does not require `sudo` for its compiler or CUDA toolchains. Allow additional time for the initial native build and use at least 20 GB of free disk space for a CUDA setup. Later launches reuse the toolchains, build, models, runtime manifest, and validated WebUI process records. Run `./stop_webui.sh` to stop only launcher-owned processes. Use `./webui.sh --no-browser` on a headless machine; the local URL is printed to the terminal.
 
 Backend and performance overrides are environment variables:
 
@@ -80,7 +80,9 @@ the sample.
 
 ## Manual and advanced startup
 
-The current TTS adapter targets a local `audio.cpp` server and Japanese VoiceDesign inference path. The browser does not load native inference code or model weights. `designer_server.py` serves the independent WebUI and exposes a narrow same-origin bridge to the selected loopback audio.cpp port.
+The current TTS adapter targets a local `audio.cpp` server and Japanese VoiceDesign inference path. The browser does not load native inference code or model weights. `designer_server.py` serves the independent WebUI, owns one selected `audio.cpp` process, and exposes a narrow same-origin bridge to its loopback port. The process is created after model/device selection and is replaced when the model, CPU/GPU target, or VRAM policy changes.
+
+Normal generation can use CPU only or one explicitly selected physical NVIDIA GPU. The generation VRAM value is a monitored safety ceiling: `audio.cpp` is stopped if observed process VRAM exceeds it. It is not a CUDA allocator reservation and can briefly cross the threshold before the monitor reacts. Speaker Inversion training uses PyTorch's per-process allocator fraction instead, so its selected VRAM ceiling is applied before model and optimizer allocation.
 
 Normal TTS generation is deliberately fixed to **20 inference Steps and one
 candidate**. The returned WAV is analyzed locally for F0, waveform quality, and
@@ -112,7 +114,9 @@ The first **Prepare training environment** operation clones the official
 `Aratako/Irodori-TTS` repository at commit
 `d48dd92b943fa5dbcb88150eb974c25d8709df9b`, installs its locked `cu128` environment,
 and downloads v4-Small under ignored `runtime/speaker_inversion/`. It does not alter
-the system CUDA installation or NVIDIA driver. Training defaults to the official
+the system CUDA installation or NVIDIA driver. The TTS Model tab selects the physical
+training GPU and applies an optional PyTorch VRAM ceiling before any upstream model
+allocation. Training defaults to the official
 16-token, `0.01` learning-rate recipe with 3000 steps, while using batch size 1 as a
 conservative RTX 3060 baseline.
 
@@ -127,8 +131,9 @@ Setup is considered complete only after the isolated PyTorch reports a CUDA buil
 sees an NVIDIA device, and completes a small CUDA tensor allocation. If an older CPU
 PyTorch wheel remains in the environment, the same GUI setup operation reinstalls the
 locked `cu128` torch packages. The TTS Model tab reports the detected GPU, PyTorch
-version, and a repair reason when this preflight fails. The same check runs immediately
-before official training and generation, so a stale environment cannot start a long job.
+version, and a repair reason when this preflight fails. The same check runs against the
+selected physical GPU immediately before official training and generation, so a stale
+environment or hidden device cannot start a long job.
 
 Training audio and transcripts remain under the ignored local runtime and are never
 sent through the CharacterVoiceDesigner API to an external service. The upstream
@@ -168,7 +173,7 @@ not used by CharacterVoiceDesigner.
 
 Use `-Backend cuda` when a supported NVIDIA GPU and current driver are available. Model weights and the audio.cpp runtime are stored under ignored `runtime/` paths and are never included in project packages.
 
-The default Windows setup path downloads the official `balance` prebuilt package, so Visual Studio, CMake, and Ninja are not required. `-BuildFromSource` is available when a custom build is needed. CUDA prebuilts require a compatible NVIDIA GPU/driver but not the CUDA Toolkit. The Windows launcher retains its CPU baseline; the Linux launcher selects its isolated CUDA 12.4 build automatically when compatible hardware is available.
+The default Windows setup path downloads the official `balance` prebuilt package, so Visual Studio, CMake, and Ninja are not required. `-BuildFromSource` is available when a custom build is needed. CUDA prebuilts require a compatible NVIDIA GPU/driver but not the CUDA Toolkit. The Windows launcher retains its CPU baseline; the Linux launcher selects its isolated CUDA 12.8 build automatically when compatible hardware is available.
 
 The implementation roadmap is tracked in `IMPLEMENTATION_PLAN.md`.
 Literature and dataset gaps are tracked in `EVIDENCE_GAPS.md`.
