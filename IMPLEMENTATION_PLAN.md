@@ -98,6 +98,12 @@ test another TTS backend without changing the physical and performance model.
 
 ### Work Package 0: v4 Adapter And Capability Baseline
 
+Implementation status (2026-08-06): the versioned capability registry, official v4
+caption-only/Speaker-Inversion normal generation path, GUI model selection, exact output
+provenance, and backend-neutral matched-condition hash are implemented. Multi-WAV
+reference selection and the automated conflict-matrix runner remain pending; equivalent
+A/B conditions can already be generated manually and grouped by the recorded hash.
+
 1. Add v4-Small as a separately versioned inference backend while retaining the current
    native audio.cpp backend until parity is demonstrated.
 2. Add a capability manifest for speaker reference, Speaker Inversion, caption, emoji,

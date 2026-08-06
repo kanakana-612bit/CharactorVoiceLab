@@ -159,6 +159,44 @@ class SpeakerInversionPipelineTest(unittest.TestCase):
         self.assertEqual(command[command.index("--vram-limit-mib") + 1], "0")
         self.assertTrue(any(path.suffix == ".wav" for path in output.iterdir()))
 
+    def test_render_supports_caption_only_without_speaker_reference(self):
+        output = self.root / "render"
+        captured = []
+
+        def fake_run(command, *, cwd):
+            captured.append(command)
+            wav_path = pathlib.Path(command[command.index("--output-wav") + 1])
+            wav_path.parent.mkdir(parents=True, exist_ok=True)
+            wav_path.write_bytes(b"RIFF\x04\x00\x00\x00WAVE")
+
+        args = argparse.Namespace(
+            project_root=self.root,
+            output=output,
+            embedding="",
+            text="test",
+            caption="neutral",
+            steps=20,
+            seed=1,
+            text_guidance=3.0,
+            caption_guidance=2.0,
+            speaker_guidance=5.0,
+            duration_scale=1.0,
+            gpu_index=1,
+            vram_limit_mib=12000,
+        )
+        with (
+            mock.patch.object(pipeline, "_run", side_effect=fake_run),
+            mock.patch.object(pipeline, "_probe_cuda_runtime", return_value={"ready": True}),
+        ):
+            pipeline.render(args)
+        command = captured[0]
+        self.assertIn("--no-ref", command)
+        self.assertNotIn("--ref-embed", command)
+        self.assertEqual(command[command.index("--gpu-index") + 1], "1")
+        summary = json.loads((output / "summary.json").read_text(encoding="utf-8"))
+        self.assertEqual(summary["speaker_condition_mode"], "none")
+        self.assertEqual(summary["upstream_commit"], pipeline.UPSTREAM_COMMIT)
+
     def test_environment_preflight_rejects_cpu_only_torch(self):
         diagnostics = {
             "ready": False,

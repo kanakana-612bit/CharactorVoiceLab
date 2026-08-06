@@ -13,6 +13,7 @@ from pathlib import Path
 from typing import Any, Mapping
 
 from generation_observation import inspect_pcm_wav, load_model_metadata
+from tts_backend_registry import backend_output_metadata
 
 
 OUTPUT_SCHEMA = "cvd_generated_output_0.1"
@@ -103,6 +104,14 @@ class GeneratedOutputStore:
                 "id": identity.get("id") if identity else None,
                 "name": identity.get("name") if identity else None,
                 "compiled": identity is not None,
+                "compiled_model_id": (
+                    (identity.get("model") or {}).get("id") if identity else None
+                ),
+                "selected_model_matches_compiled": (
+                    (identity.get("model") or {}).get("id") == request["model"]
+                    if identity
+                    else None
+                ),
                 "manifest_sha256": (
                     hashlib.sha256(
                         json.dumps(
@@ -118,6 +127,37 @@ class GeneratedOutputStore:
                 ),
                 "speaker_condition": dict(speaker_condition) if speaker_condition else None,
             }
+            local_model_metadata = load_model_metadata(
+                self.project_root, str(request["model"])
+            )
+            backend_metadata = backend_output_metadata(
+                self.project_root, str(request["model"])
+            )
+            backend_metadata["local_model"] = local_model_metadata
+            matched_conditions = {
+                "spoken_text": request["input"],
+                "language": request["language"],
+                "seed": seed,
+                "num_inference_steps": request["num_inference_steps"],
+                "caption": options.get("caption", ""),
+                "caption_guidance_scale": options.get("caption_guidance_scale"),
+                "speaker_guidance_scale": options.get("speaker_guidance_scale"),
+                "duration_scale": options.get("duration_scale"),
+                "trim_tail": options.get("trim_tail"),
+                "speaker_condition_sha256": (
+                    speaker_condition.get("sha256") if speaker_condition else None
+                ),
+                "postprocess": dict(postprocess) if postprocess else None,
+            }
+            matched_condition_sha256 = hashlib.sha256(
+                json.dumps(
+                    matched_conditions,
+                    ensure_ascii=False,
+                    sort_keys=True,
+                    separators=(",", ":"),
+                    allow_nan=False,
+                ).encode("utf-8")
+            ).hexdigest()
             metadata = {
                 "schema_version": OUTPUT_SCHEMA,
                 "output_id": f"{date_name}/{stem}",
@@ -132,7 +172,7 @@ class GeneratedOutputStore:
                     "speaking_rate": capture.get("speaking_rate"),
                     "f0_target_hz": capture.get("f0_target_hz"),
                 },
-                "model": load_model_metadata(self.project_root, str(request["model"])),
+                "model": backend_metadata,
                 "generation": {
                     "model": request["model"],
                     "language": request["language"],
@@ -142,11 +182,36 @@ class GeneratedOutputStore:
                     "generation_mode": capture.get("generation_mode", "standard_single"),
                     "cfg_scales": {
                         "caption": options.get("caption_guidance_scale"),
+                        "speaker": options.get("speaker_guidance_scale"),
                     },
                     "voice_quality_text": options.get("caption", ""),
                     "spoken_text": request["input"],
                     "duration_scale": options.get("duration_scale"),
                     "trim_tail": options.get("trim_tail"),
+                },
+                "backend_control_plan": {
+                    "matched_condition_sha256": matched_condition_sha256,
+                    "matched_conditions": matched_conditions,
+                    "runtime_kind": backend_metadata.get("runtime_kind"),
+                    "speaker_condition_mode": _header_value(
+                        upstream_headers, "X-CVD-Speaker-Condition-Mode"
+                    )
+                    or _header_value(
+                        upstream_headers, "X-AudioCpp-Speaker-Condition-Mode"
+                    )
+                    or ("speaker_inversion" if speaker_condition else "none"),
+                    "caption_enabled": bool(options.get("caption")),
+                    "emoji_in_text": any(
+                        ord(character) > 0xFFFF for character in str(request.get("input", ""))
+                    ),
+                    "reference_audio_count": 0,
+                    "speaker_inversion_embedding": (
+                        speaker_condition.get("file") if speaker_condition else None
+                    ),
+                    "watermark_state": _header_value(
+                        upstream_headers, "X-CVD-Watermark-State"
+                    )
+                    or backend_metadata.get("capabilities", {}).get("watermarking"),
                 },
                 "compute_runtime": {
                     "device_id": (capture.get("runtime") or {}).get("device_id"),
@@ -172,6 +237,12 @@ class GeneratedOutputStore:
                 },
                 "runtime_observation_id": observation_id,
                 "upstream_observation": {
+                    "backend_id": _header_value(upstream_headers, "X-CVD-Backend-ID")
+                    or request["model"],
+                    "backend_runtime": _header_value(
+                        upstream_headers, "X-CVD-Backend-Runtime"
+                    )
+                    or backend_metadata.get("runtime_kind"),
                     "predicted_duration_seconds": _header_value(
                         upstream_headers, "X-AudioCpp-Predicted-Duration-Seconds"
                     ),

@@ -81,6 +81,7 @@ const state = {
   ttsResultBlob: null,
   ttsResultUrl: null,
   audioCppModels: [],
+  ttsBackends: [],
   audioCppRuntimeCatalog: null,
   voiceIdentityResources: null,
   activeCompiledIdentityId: null,
@@ -416,6 +417,7 @@ const els = {
   audioCppRuntimeGuide: document.getElementById("audioCppRuntimeGuide"),
   ttsSeedInput: document.getElementById("ttsSeedInput"),
   ttsCaptionGuidanceInput: document.getElementById("ttsCaptionGuidanceInput"),
+  ttsBackendCapabilities: document.getElementById("ttsBackendCapabilities"),
   ttsF0CorrectionEnabled: document.getElementById("ttsF0CorrectionEnabled"),
   ttsF0CorrectionStrength: document.getElementById("ttsF0CorrectionStrength"),
   ttsF0CorrectionStrengthValue: document.getElementById("ttsF0CorrectionStrengthValue"),
@@ -5109,7 +5111,7 @@ function renderTtsRequestSummary(profile = buildVoiceControlProfile()) {
   const requestProfile = compiledRequestProfile(profile);
   const identity = state.activeCompiledIdentity;
   const request = voiceControlProfile.buildAudioCppRequest(requestProfile, {
-    model: identity?.model?.id || els.ttsModelSelect?.value,
+    model: els.ttsModelSelect?.value || identity?.model?.id,
     text: els.ttsDemoTextInput?.value,
     seed: num(els.ttsSeedInput, 20260719),
     num_inference_steps: STANDARD_TTS_INFERENCE_STEPS,
@@ -5119,7 +5121,14 @@ function renderTtsRequestSummary(profile = buildVoiceControlProfile()) {
   });
   const items = [
     ["MODEL", request.model],
+    ["RUNTIME", selectedTtsBackend()?.runtime_kind || "audio_cpp"],
     ["DEVICE", audioCppRuntimeSettings(true).device_id],
+    [
+      "SPEAKER",
+      isOfficialV4Selected()
+        ? (els.speakerInversionEmbeddingSelect?.value || "none")
+        : (identity?.speaker?.file || "none"),
+    ],
     ["VRAM LIMIT", audioCppRuntimeSettings(true).vram_limit_mib
       ? `${audioCppRuntimeSettings(true).vram_limit_mib} MiB`
       : "OFF"],
@@ -5153,6 +5162,66 @@ function audioCppModelIds(payload) {
     .map((item) => typeof item === "string" ? item : item?.id ?? item?.model ?? item?.name)
     .filter((id) => typeof id === "string" && id.trim())
     .map((id) => id.trim());
+}
+
+function selectedTtsBackend() {
+  const model = els.ttsModelSelect?.value || "irodori-vdes";
+  return state.ttsBackends.find((item) => item.id === model) || null;
+}
+
+function isOfficialV4Selected() {
+  return selectedTtsBackend()?.runtime_kind === "official_python";
+}
+
+function renderTtsBackendCapabilities() {
+  const backend = selectedTtsBackend();
+  if (!els.ttsBackendCapabilities || !backend) return;
+  const capabilities = backend.capabilities || {};
+  const parts = [
+    backend.runtime_kind === "official_python" ? "Official Python" : "audio.cpp",
+    capabilities.caption ? "Caption" : null,
+    capabilities.emoji_in_text ? "Emoji" : null,
+    capabilities.speaker_inversion ? "Speaker Inversion" : null,
+    capabilities.multiple_reference_audio
+      ? `Reference WAV x N / max ${capabilities.reference_duration_limit_seconds}s`
+      : null,
+  ].filter(Boolean);
+  els.ttsBackendCapabilities.textContent = parts.join(" / ");
+}
+
+function applyTtsBackendRuntimePolicy() {
+  const official = isOfficialV4Selected();
+  let officialGpuAvailable = false;
+  for (const select of [els.ttsRuntimeDeviceSelect, els.ttsDemoRuntimeDeviceSelect]) {
+    if (!select) continue;
+    for (const option of select.options) {
+      option.disabled = official && !String(option.value).startsWith("cuda:");
+    }
+    if (official && !String(select.value).startsWith("cuda:")) {
+      const gpu = Array.from(select.options).find((option) => !option.disabled);
+      if (gpu) select.value = gpu.value;
+    }
+    if (official && String(select.value).startsWith("cuda:")) officialGpuAvailable = true;
+  }
+  if (els.startAudioCppRuntimeBtn) {
+    els.startAudioCppRuntimeBtn.disabled = official;
+    els.startAudioCppRuntimeBtn.textContent = official
+      ? "生成時に公式runtimeを起動"
+      : "選択条件でaudio.cppを起動";
+  }
+  if (official) {
+    setAudioCppStatus(
+      officialGpuAvailable ? "ready" : "error",
+      officialGpuAvailable
+        ? "公式v4 / 生成時に起動"
+        : "公式v4 / CUDA GPUが必要です",
+    );
+  } else {
+    renderAudioCppRuntimeStatus(state.audioCppRuntimeCatalog?.status);
+  }
+  updateRuntimeLimitInput(els.ttsRuntimeVramLimit, els.ttsRuntimeDeviceSelect?.value);
+  updateRuntimeLimitInput(els.ttsDemoRuntimeVramLimit, els.ttsDemoRuntimeDeviceSelect?.value);
+  renderTtsBackendCapabilities();
 }
 
 function audioCppRuntimeSettings(useDemoControls = false) {
@@ -5292,6 +5361,7 @@ async function refreshAudioCppModels() {
     if (!response.ok) throw new Error(payload.error || payload.message || `HTTP ${response.status}`);
     const preserveRuntimeSelection = Boolean(state.audioCppRuntimeCatalog);
     state.audioCppRuntimeCatalog = payload;
+    state.ttsBackends = Array.isArray(payload.models) ? payload.models : [];
     const modelIds = audioCppModelIds(payload.models || []);
     state.audioCppModels = modelIds;
     const selected = els.ttsModelSelect?.value || "irodori-vdes";
@@ -5307,10 +5377,12 @@ async function refreshAudioCppModels() {
     }
     populateRuntimeDevices(payload, preserveRuntimeSelection);
     renderAudioCppRuntimeStatus(payload.status);
+    applyTtsBackendRuntimePolicy();
     renderTtsRequestSummary();
     return modelIds;
   } catch (error) {
     state.audioCppModels = [];
+    state.ttsBackends = [];
     setAudioCppStatus("error", `未接続: ${error.message}`);
     return [];
   } finally {
@@ -5325,6 +5397,21 @@ async function activateAudioCppRuntime(useDemoControls = false) {
   }
   const model = els.ttsModelSelect?.value || "irodori-vdes";
   const runtime = audioCppRuntimeSettings(useDemoControls);
+  if (isOfficialV4Selected()) {
+    if (!String(runtime.device_id).startsWith("cuda:")) {
+      throw new Error("Irodori v4-Small requires an NVIDIA GPU in the current adapter.");
+    }
+    const status = {
+      managed: true,
+      running: false,
+      model,
+      device_id: runtime.device_id,
+      vram_limit_mib: runtime.vram_limit_mib,
+      runtime_kind: "official_python",
+    };
+    setAudioCppStatus("ready", `公式v4 / 生成時起動 / ${runtime.device_id}`);
+    return status;
+  }
   setAudioCppStatus("pending", `起動中 / ${model} / ${runtime.device_id}`);
   if (els.startAudioCppRuntimeBtn) els.startAudioCppRuntimeBtn.disabled = true;
   try {
@@ -5367,7 +5454,7 @@ async function generateTtsDemo() {
   const profile = compiledRequestProfile(buildVoiceControlProfile());
   const identity = state.activeCompiledIdentity;
   const request = voiceControlProfile.buildAudioCppRequest(profile, {
-    model: identity?.model?.id || els.ttsModelSelect?.value,
+    model: els.ttsModelSelect?.value || identity?.model?.id,
     text,
     seed: num(els.ttsSeedInput, 20260719),
     num_inference_steps: STANDARD_TTS_INFERENCE_STEPS,
@@ -5375,7 +5462,13 @@ async function generateTtsDemo() {
     caption: identity?.style?.caption || activeTtsCaption(profile),
     ...ttsF0CorrectionSettings(),
   });
-  if (identity?.speaker?.file) {
+  request.options.speaker_guidance_scale = 5;
+  if (isOfficialV4Selected()) {
+    const embedding = els.speakerInversionEmbeddingSelect?.value || "";
+    if (embedding) {
+      request.backend_conditioning = { speaker_inversion_embedding: embedding };
+    }
+  } else if (identity?.speaker?.file && identity?.model?.id === request.model) {
     request.speaker_condition = { file: identity.speaker.file };
   }
   request.generation_mode = "standard_single";
@@ -6162,6 +6255,7 @@ async function startSpeakerInversionJob(tool, options = {}) {
 
 function installSpeakerInversionHandlers() {
   els.refreshSpeakerInversionBtn?.addEventListener("click", () => refreshSpeakerInversionWorkspace());
+  els.speakerInversionEmbeddingSelect?.addEventListener("change", renderTtsRequestSummary);
   els.setupSpeakerInversionBtn?.addEventListener("click", () => {
     startSpeakerInversionJob("speaker_inversion_setup").catch((error) =>
       setSpeakerInversionStatus(`環境を準備できません: ${error.message}`, true),
@@ -10803,7 +10897,10 @@ function init() {
     els.ttsF0CorrectionStrength,
   ].filter(Boolean)) {
     input.addEventListener("input", () => {
-      if (input === els.ttsModelSelect) markAudioCppRuntimeSelectionChanged();
+      if (input === els.ttsModelSelect) {
+        applyTtsBackendRuntimePolicy();
+        markAudioCppRuntimeSelectionChanged();
+      }
       renderVoiceDesignerDerivedViews();
       renderConstraints();
     });

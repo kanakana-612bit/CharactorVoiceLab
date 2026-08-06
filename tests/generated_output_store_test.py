@@ -77,6 +77,15 @@ class GeneratedOutputStoreTest(unittest.TestCase):
         self.assertEqual(metadata["generation"]["spoken_text"], "読み上げ文")
         self.assertEqual(metadata["identity"]["name"], "試験話者")
         self.assertEqual(metadata["compute_runtime"]["device_id"], "cuda:1")
+        self.assertEqual(metadata["model"]["runtime_kind"], "audio_cpp")
+        self.assertEqual(
+            metadata["model"]["runtime"]["release"],
+            "release-0.3-qwen3-tts",
+        )
+        self.assertRegex(
+            metadata["backend_control_plan"]["matched_condition_sha256"],
+            r"^[a-f0-9]{64}$",
+        )
         self.assertEqual(metadata["compute_runtime"]["vram_limit_mib"], 14336)
         self.assertTrue(metadata["privacy"]["stored_on_user_pc_only"])
 

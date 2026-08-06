@@ -387,6 +387,13 @@ select:focus {
   border-bottom: 1px solid var(--line);
 }
 
+.backend-capability-line {
+  min-height: 20px;
+  margin: -6px 0 12px;
+  color: var(--muted);
+  font-size: 0.78rem;
+}
+
 .status-dot {
   width: 9px;
   height: 9px;

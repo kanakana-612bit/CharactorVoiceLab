@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import http.client
 import json
 import os
@@ -16,7 +17,7 @@ import urllib.request
 from http import HTTPStatus
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from typing import Any
+from typing import Any, Mapping
 
 from audio_cpp_runtime import AudioCppRuntimeError, AudioCppRuntimeManager
 
@@ -46,6 +47,13 @@ from experiment_jobs import (
     MAX_UPLOAD_BYTES,
 )
 from generated_output_store import GeneratedOutputError, GeneratedOutputStore
+from official_v4_runtime import OfficialV4RuntimeError, render_official_v4
+from tts_backend_registry import (
+    OFFICIAL_V4_MODEL_ID,
+    backend_catalog,
+    backend_manifest,
+    is_official_v4,
+)
 from voice_identity import VoiceIdentityError, VoiceIdentityStore
 
 
@@ -307,19 +315,29 @@ class DesignerHandler(SimpleHTTPRequestHandler):
         if path == "/api/audio-cpp/runtime":
             manager = getattr(self.server, "audio_cpp_runtime", None)
             if not manager:
-                self._send_json(
-                    HTTPStatus.OK,
-                    {
+                native_catalog = {
                         "schema_version": "cvd_audio_cpp_runtime_catalog_0.1",
                         "managed": False,
                         "models": [],
                         "devices": [{"id": "external", "label": "External audio.cpp", "backend": "external"}],
                         "default_device": "external",
                         "status": {"managed": False, "running": True},
-                    },
-                )
+                    }
             else:
-                self._send_json(HTTPStatus.OK, manager.catalog())
+                native_catalog = manager.catalog()
+            self._send_json(HTTPStatus.OK, backend_catalog(native_catalog))
+            return
+        if path == "/api/tts/backends":
+            manager = getattr(self.server, "audio_cpp_runtime", None)
+            native_catalog = manager.catalog() if manager else {
+                "models": [],
+                "devices": [
+                    {"id": "external", "label": "External audio.cpp", "backend": "external"}
+                ],
+                "default_device": "external",
+                "status": {"managed": False, "running": True},
+            }
+            self._send_json(HTTPStatus.OK, backend_catalog(native_catalog))
             return
         if not self._static_path_allowed(path):
             self.send_error(HTTPStatus.NOT_FOUND)
@@ -515,6 +533,7 @@ class DesignerHandler(SimpleHTTPRequestHandler):
         runtime_options = request.pop("_cvd_runtime", None)
         observation_options = request.pop("_cvd_observation", None)
         speaker_condition = request.pop("_cvd_speaker_condition", None)
+        official_v4_embedding = request.pop("_cvd_official_v4_embedding", None)
         output_capture = request.pop("_cvd_output_capture", None)
         if output_capture and runtime_options:
             output_capture["runtime"] = dict(runtime_options)
@@ -547,20 +566,82 @@ class DesignerHandler(SimpleHTTPRequestHandler):
                 }
             )
         try:
-            self._proxy_json(
-                "/v1/audio/speech",
-                request,
-                postprocess,
-                observation,
-                speaker_condition,
-                output_capture,
-                output_identity,
-                runtime_options,
-            )
+            if is_official_v4(str(request.get("model") or "")):
+                self._perform_official_v4_request(
+                    request,
+                    runtime_options,
+                    official_v4_embedding,
+                    postprocess,
+                    observation,
+                    speaker_condition,
+                    output_capture,
+                    output_identity,
+                )
+            else:
+                self._proxy_json(
+                    "/v1/audio/speech",
+                    request,
+                    postprocess,
+                    observation,
+                    speaker_condition,
+                    output_capture,
+                    output_identity,
+                    runtime_options,
+                )
         except AudioCppRuntimeError as error:
             if observation:
                 observation.finalize_error("runtime", str(error), 0)
             self._send_json(HTTPStatus.INSUFFICIENT_STORAGE, {"error": str(error)})
+
+    def _perform_official_v4_request(
+        self,
+        request: dict[str, Any],
+        runtime_options: dict[str, Any] | None,
+        embedding: str | None,
+        postprocess: dict[str, Any] | None,
+        observation: ObservationCapture | None,
+        speaker_condition: dict[str, Any] | None,
+        output_capture: dict[str, Any] | None,
+        output_identity: dict[str, Any] | None,
+    ) -> None:
+        started = time.perf_counter()
+        try:
+            result = render_official_v4(
+                PROJECT_ROOT,
+                request,
+                runtime_options,
+                timeout_seconds=self.server.upstream_timeout_seconds,
+                embedding=embedding,
+            )
+            self._deliver_audio_result(
+                body=result.wav_bytes,
+                status=HTTPStatus.OK,
+                content_type="audio/wav",
+                upstream_seconds=time.perf_counter() - started,
+                upstream_headers=result.headers,
+                postprocess=postprocess,
+                observation=observation,
+                speaker_condition=speaker_condition,
+                output_capture=output_capture,
+                output_identity=output_identity,
+                generation_request=request,
+            )
+        except OfficialV4RuntimeError as error:
+            if observation:
+                observation.finalize_error(
+                    "official_v4_runtime",
+                    str(error),
+                    time.perf_counter() - started,
+                )
+            self._send_json(HTTPStatus.BAD_GATEWAY, {"error": str(error)})
+        except AudioPostprocessError as error:
+            if observation:
+                observation.finalize_error(
+                    "postprocess",
+                    str(error),
+                    time.perf_counter() - started,
+                )
+            self._send_json(HTTPStatus.UNPROCESSABLE_ENTITY, {"error": str(error)})
 
     def _static_path_allowed(self, raw_path: str) -> bool:
         path = urllib.parse.unquote(raw_path)
@@ -657,133 +738,22 @@ class DesignerHandler(SimpleHTTPRequestHandler):
         try:
             with urllib.request.urlopen(request, timeout=self.server.upstream_timeout_seconds) as response:
                 body = response.read(MAX_AUDIO_BYTES + 1)
-                upstream_body = body
                 upstream_seconds = time.perf_counter() - upstream_started
                 if len(body) > MAX_AUDIO_BYTES:
                     raise ValueError("audio.cpp response exceeded the local size limit.")
-                correction_metadata = None
-                postprocess_seconds = 0.0
-                if postprocess and response.headers.get_content_type() == "audio/wav":
-                    postprocess_started = time.perf_counter()
-                    body, correction_metadata = correct_wav_f0(
-                        body,
-                        target_hz=postprocess["target_hz"],
-                        strength=postprocess["strength"],
-                    )
-                    postprocess_seconds = time.perf_counter() - postprocess_started
-                observation_written = False
-                if observation:
-                    observation_written = observation.finalize_success(
-                        upstream_body=upstream_body,
-                        body=body,
-                        status=response.status,
-                        content_type=response.headers.get_content_type(),
-                        upstream_seconds=upstream_seconds,
-                        postprocess_seconds=postprocess_seconds,
-                        correction_metadata=correction_metadata,
-                        upstream_headers=response.headers,
-                        f0_analyzer=analyze_wav_f0,
-                    )
-                archived_output = None
-                if output_capture and response.headers.get_content_type() == "audio/wav":
-                    identity_id = output_capture.get("identity_id")
-                    try:
-                        evaluation = self.server.voice_identity_store.evaluate(
-                            body,
-                            identity_id,
-                        )
-                    except VoiceIdentityError as error:
-                        evaluation = {
-                            "schema_version": "cvd_identity_warning_evaluation_0.1",
-                            "status": "unavailable",
-                            "warnings": [f"evaluation_unavailable: {error}"],
-                            "identity_id": identity_id,
-                            "identity_name": output_identity.get("name") if output_identity else None,
-                        }
-                    try:
-                        archived_output = self.server.generated_output_store.archive(
-                            wav_bytes=body,
-                            request=generation_request or {},
-                            capture=output_capture,
-                            postprocess=postprocess,
-                            correction_metadata=correction_metadata,
-                            identity=output_identity,
-                            evaluation=evaluation,
-                            speaker_condition=speaker_condition,
-                            observation_id=observation.id if observation_written else None,
-                            upstream_seconds=upstream_seconds,
-                            postprocess_seconds=postprocess_seconds,
-                            upstream_headers=response.headers,
-                        )
-                    except (OSError, ValueError, TypeError) as error:
-                        self.log_error("Generated output archive failed: %s", error)
-                self.send_response(response.status)
-                self.send_header("Content-Type", response.headers.get_content_type())
-                self.send_header("Content-Length", str(len(body)))
-                self.send_header("Cache-Control", "no-store")
-                if observation_written:
-                    self.send_header("X-CVD-Observation-ID", observation.id)
-                if archived_output:
-                    self.send_header("X-CVD-Output-Archive-Status", "saved")
-                    self.send_header(
-                        "X-CVD-Output-ID",
-                        urllib.parse.quote(archived_output["id"], safe="/._-"),
-                    )
-                    self.send_header(
-                        "X-CVD-Output-Path",
-                        urllib.parse.quote(archived_output["relative_wav"], safe="/._-"),
-                    )
-                elif output_capture:
-                    self.send_header("X-CVD-Output-Archive-Status", "failed")
-                if speaker_condition:
-                    self.send_header(
-                        "X-CVD-Speaker-Condition-SHA256",
-                        speaker_condition["sha256"],
-                    )
-                    self.send_header(
-                        "X-CVD-Speaker-Artifact-SHA256",
-                        speaker_condition["sha256"],
-                    )
-                    self.send_header(
-                        "X-CVD-Speaker-Condition-Shape",
-                        "x".join(str(value) for value in speaker_condition["shape"]),
-                    )
-                    native_state_sha = response.headers.get(
-                        "X-AudioCpp-Speaker-Condition-SHA256"
-                    )
-                    if native_state_sha and re.fullmatch(
-                        r"[a-fA-F0-9]{64}", native_state_sha
-                    ):
-                        self.send_header(
-                            "X-CVD-Speaker-State-SHA256",
-                            native_state_sha.lower(),
-                        )
-                    native_shape = response.headers.get(
-                        "X-AudioCpp-Speaker-Condition-Shape"
-                    )
-                    if native_shape and re.fullmatch(
-                        r"[1-9][0-9]*x[1-9][0-9]*", native_shape
-                    ):
-                        self.send_header(
-                            "X-CVD-Speaker-State-Shape",
-                            native_shape,
-                        )
-                    native_mode = response.headers.get(
-                        "X-AudioCpp-Speaker-Condition-Mode"
-                    )
-                    if native_mode in {"none", "reference_audio", "speaker_inversion"}:
-                        self.send_header(
-                            "X-CVD-Speaker-Condition-Mode",
-                            native_mode,
-                        )
-                if correction_metadata:
-                    self.send_header("X-CVD-F0-Measured-Hz", str(correction_metadata["measured_hz"]))
-                    self.send_header("X-CVD-F0-Target-Hz", str(correction_metadata["target_hz"]))
-                    self.send_header("X-CVD-F0-Output-Hz", str(correction_metadata["output_hz"]))
-                    self.send_header("X-CVD-F0-Shift-Semitones", str(correction_metadata["applied_semitones"]))
-                    self.send_header("X-CVD-F0-Method", str(correction_metadata["method"]))
-                self.end_headers()
-                self.wfile.write(body)
+                self._deliver_audio_result(
+                    body=body,
+                    status=response.status,
+                    content_type=response.headers.get_content_type(),
+                    upstream_seconds=upstream_seconds,
+                    upstream_headers=response.headers,
+                    postprocess=postprocess,
+                    observation=observation,
+                    speaker_condition=speaker_condition,
+                    output_capture=output_capture,
+                    output_identity=output_identity,
+                    generation_request=generation_request,
+                )
         except urllib.error.HTTPError as error:
             if observation:
                 observation.finalize_error(
@@ -839,6 +809,125 @@ class DesignerHandler(SimpleHTTPRequestHandler):
                 HTTPStatus.BAD_GATEWAY,
                 {"error": f"audio.cpp is unavailable at {self.server.audio_cpp_base_url}: {reason}"},
             )
+
+    def _deliver_audio_result(
+        self,
+        *,
+        body: bytes,
+        status: HTTPStatus | int,
+        content_type: str,
+        upstream_seconds: float,
+        upstream_headers: Mapping[str, str],
+        postprocess: dict[str, Any] | None,
+        observation: ObservationCapture | None,
+        speaker_condition: dict[str, Any] | None,
+        output_capture: dict[str, Any] | None,
+        output_identity: dict[str, Any] | None,
+        generation_request: dict[str, Any] | None,
+    ) -> None:
+        upstream_body = body
+        correction_metadata = None
+        postprocess_seconds = 0.0
+        if postprocess and content_type == "audio/wav":
+            postprocess_started = time.perf_counter()
+            body, correction_metadata = correct_wav_f0(
+                body,
+                target_hz=postprocess["target_hz"],
+                strength=postprocess["strength"],
+            )
+            postprocess_seconds = time.perf_counter() - postprocess_started
+        observation_written = False
+        if observation:
+            observation_written = observation.finalize_success(
+                upstream_body=upstream_body,
+                body=body,
+                status=int(status),
+                content_type=content_type,
+                upstream_seconds=upstream_seconds,
+                postprocess_seconds=postprocess_seconds,
+                correction_metadata=correction_metadata,
+                upstream_headers=upstream_headers,
+                f0_analyzer=analyze_wav_f0,
+            )
+        archived_output = None
+        if output_capture and content_type == "audio/wav":
+            identity_id = output_capture.get("identity_id")
+            try:
+                evaluation = self.server.voice_identity_store.evaluate(body, identity_id)
+            except VoiceIdentityError as error:
+                evaluation = {
+                    "schema_version": "cvd_identity_warning_evaluation_0.1",
+                    "status": "unavailable",
+                    "warnings": [f"evaluation_unavailable: {error}"],
+                    "identity_id": identity_id,
+                    "identity_name": output_identity.get("name") if output_identity else None,
+                }
+            try:
+                archived_output = self.server.generated_output_store.archive(
+                    wav_bytes=body,
+                    request=generation_request or {},
+                    capture=output_capture,
+                    postprocess=postprocess,
+                    correction_metadata=correction_metadata,
+                    identity=output_identity,
+                    evaluation=evaluation,
+                    speaker_condition=speaker_condition,
+                    observation_id=observation.id if observation_written else None,
+                    upstream_seconds=upstream_seconds,
+                    postprocess_seconds=postprocess_seconds,
+                    upstream_headers=upstream_headers,
+                )
+            except (OSError, ValueError, TypeError) as error:
+                self.log_error("Generated output archive failed: %s", error)
+        self.send_response(int(status))
+        self.send_header("Content-Type", content_type)
+        self.send_header("Content-Length", str(len(body)))
+        self.send_header("Cache-Control", "no-store")
+        if observation_written:
+            self.send_header("X-CVD-Observation-ID", observation.id)
+        if archived_output:
+            self.send_header("X-CVD-Output-Archive-Status", "saved")
+            self.send_header(
+                "X-CVD-Output-ID",
+                urllib.parse.quote(archived_output["id"], safe="/._-"),
+            )
+            self.send_header(
+                "X-CVD-Output-Path",
+                urllib.parse.quote(archived_output["relative_wav"], safe="/._-"),
+            )
+        elif output_capture:
+            self.send_header("X-CVD-Output-Archive-Status", "failed")
+        if speaker_condition:
+            self.send_header("X-CVD-Speaker-Condition-SHA256", speaker_condition["sha256"])
+            self.send_header("X-CVD-Speaker-Artifact-SHA256", speaker_condition["sha256"])
+            if speaker_condition.get("shape"):
+                self.send_header(
+                    "X-CVD-Speaker-Condition-Shape",
+                    "x".join(str(value) for value in speaker_condition["shape"]),
+                )
+            native_state_sha = upstream_headers.get("X-AudioCpp-Speaker-Condition-SHA256")
+            if native_state_sha and re.fullmatch(r"[a-fA-F0-9]{64}", native_state_sha):
+                self.send_header("X-CVD-Speaker-State-SHA256", native_state_sha.lower())
+            native_shape = upstream_headers.get("X-AudioCpp-Speaker-Condition-Shape")
+            if native_shape and re.fullmatch(r"[1-9][0-9]*x[1-9][0-9]*", native_shape):
+                self.send_header("X-CVD-Speaker-State-Shape", native_shape)
+        condition_mode = upstream_headers.get("X-CVD-Speaker-Condition-Mode") or upstream_headers.get(
+            "X-AudioCpp-Speaker-Condition-Mode"
+        )
+        if condition_mode in {"none", "reference_audio", "speaker_inversion"}:
+            self.send_header("X-CVD-Speaker-Condition-Mode", condition_mode)
+        for name in ("X-CVD-Backend-ID", "X-CVD-Backend-Runtime", "X-CVD-Watermark-State"):
+            value = upstream_headers.get(name)
+            if value:
+                self.send_header(name, value)
+        if correction_metadata:
+            self.send_header("X-CVD-F0-Measured-Hz", str(correction_metadata["measured_hz"]))
+            self.send_header("X-CVD-F0-Target-Hz", str(correction_metadata["target_hz"]))
+            self.send_header("X-CVD-F0-Output-Hz", str(correction_metadata["output_hz"]))
+            self.send_header("X-CVD-F0-Shift-Semitones", str(correction_metadata["applied_semitones"]))
+            self.send_header("X-CVD-F0-Method", str(correction_metadata["method"]))
+        self.end_headers()
+        self.wfile.write(body)
 
     def _send_json(self, status: HTTPStatus | int, payload: dict[str, Any]) -> None:
         body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
@@ -935,6 +1024,45 @@ def resolve_speaker_condition(
     }
 
 
+def resolve_official_v4_embedding(
+    project_root: Path,
+    value: Any,
+) -> tuple[str, dict[str, Any]] | None:
+    if value is None:
+        return None
+    if not isinstance(value, dict):
+        raise ValueError("backend_conditioning must be an object.")
+    name = value.get("speaker_inversion_embedding")
+    if name in (None, ""):
+        return None
+    if not isinstance(name, str) or not SPEAKER_CONDITION_NAME_PATTERN.fullmatch(name):
+        raise ValueError("backend_conditioning.speaker_inversion_embedding is invalid.")
+    root = (project_root / "runtime" / "speaker_inversion" / "embeddings").resolve()
+    path = (root / name).resolve()
+    if path.parent != root or not path.is_file():
+        raise ValueError("Managed v4 Speaker Inversion embedding was not found.")
+    sidecar_path = path.with_suffix(".json")
+    sidecar: dict[str, Any] = {}
+    if sidecar_path.is_file():
+        try:
+            candidate = json.loads(sidecar_path.read_text(encoding="utf-8"))
+            if isinstance(candidate, dict):
+                sidecar = candidate
+        except (OSError, json.JSONDecodeError):
+            pass
+    model = sidecar.get("model") or {}
+    if model and model.get("repository") != "Aratako/Irodori-TTS-v4-Small":
+        raise ValueError("The Speaker Inversion embedding is not bound to v4-Small.")
+    tokens = (sidecar.get("embedding") or {}).get("tokens")
+    shape = [int(tokens), 768] if isinstance(tokens, int) and tokens > 0 else None
+    return name, {
+        "file": name,
+        "sha256": hashlib.sha256(path.read_bytes()).hexdigest(),
+        "shape": shape,
+        "model_binding_status": "official_v4_same_checkpoint",
+    }
+
+
 def validate_speech_request(payload: dict[str, Any]) -> dict[str, Any]:
     model = payload.get("model")
     text = payload.get("input")
@@ -942,6 +1070,10 @@ def validate_speech_request(payload: dict[str, Any]) -> dict[str, Any]:
     generation_mode = payload.get("generation_mode", "experimental")
     if not isinstance(model, str) or not MODEL_ID_PATTERN.fullmatch(model):
         raise ValueError("model must be a configured audio.cpp model id.")
+    try:
+        backend_manifest(model)
+    except KeyError as error:
+        raise ValueError("model must be a configured TTS backend id.") from error
     if not isinstance(text, str) or not text.strip() or len(text) > 5000:
         raise ValueError("input must contain 1 to 5000 characters.")
     if not isinstance(language, str) or not LANGUAGE_PATTERN.fullmatch(language):
@@ -987,18 +1119,38 @@ def validate_speech_request(payload: dict[str, Any]) -> dict[str, Any]:
         "caption_guidance_scale": bounded_number(
             raw_options.get("caption_guidance_scale", 2), "options.caption_guidance_scale", 0.5, 10
         ),
+        "speaker_guidance_scale": bounded_number(
+            raw_options.get("speaker_guidance_scale", 5), "options.speaker_guidance_scale", 0.5, 12
+        ),
         "trim_tail": trim_tail,
     }
-    speaker_condition = resolve_speaker_condition(
-        PROJECT_ROOT,
-        model,
-        payload.get("speaker_condition"),
-    )
-    if speaker_condition is not None:
-        speaker_path, speaker_metadata = speaker_condition
-        request["options"]["no_ref"] = False
-        request["options"]["speaker_embedding_path"] = str(speaker_path)
-        request["_cvd_speaker_condition"] = speaker_metadata
+    if model == OFFICIAL_V4_MODEL_ID:
+        if payload.get("speaker_condition") is not None:
+            raise ValueError(
+                "v4-Small uses backend_conditioning, not the legacy audio.cpp speaker condition."
+            )
+        official_embedding = resolve_official_v4_embedding(
+            PROJECT_ROOT,
+            payload.get("backend_conditioning"),
+        )
+        if official_embedding is not None:
+            embedding_name, speaker_metadata = official_embedding
+            request["options"]["no_ref"] = False
+            request["_cvd_official_v4_embedding"] = embedding_name
+            request["_cvd_speaker_condition"] = speaker_metadata
+        else:
+            request["options"]["no_ref"] = True
+    else:
+        speaker_condition = resolve_speaker_condition(
+            PROJECT_ROOT,
+            model,
+            payload.get("speaker_condition"),
+        )
+        if speaker_condition is not None:
+            speaker_path, speaker_metadata = speaker_condition
+            request["options"]["no_ref"] = False
+            request["options"]["speaker_embedding_path"] = str(speaker_path)
+            request["_cvd_speaker_condition"] = speaker_metadata
     raw_postprocess = payload.get("postprocess", {})
     if not isinstance(raw_postprocess, dict):
         raise ValueError("postprocess must be an object.")

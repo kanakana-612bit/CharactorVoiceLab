@@ -18,6 +18,7 @@ from unittest import mock
 
 import torch
 from safetensors.torch import save_file
+from official_v4_runtime import OfficialV4Result
 
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
@@ -86,6 +87,43 @@ def make_speaker_condition_project() -> tuple[pathlib.Path, pathlib.Path]:
 
 
 class SpeechRequestValidationTest(unittest.TestCase):
+    def test_official_v4_embedding_uses_separate_condition_contract(self):
+        project = ROOT / "tests" / f"_official_v4_{uuid.uuid4().hex}"
+        embedding_root = project / "runtime" / "speaker_inversion" / "embeddings"
+        embedding_root.mkdir(parents=True)
+        embedding = embedding_root / "sample.speaker.safetensors"
+        embedding.write_bytes(b"official-v4-fixture")
+        embedding.with_suffix(".json").write_text(
+            json.dumps(
+                {
+                    "model": {"repository": "Aratako/Irodori-TTS-v4-Small"},
+                    "embedding": {"tokens": 16},
+                }
+            ),
+            encoding="utf-8",
+        )
+        self.addCleanup(shutil.rmtree, project, True)
+        with mock.patch.object(MODULE, "PROJECT_ROOT", project):
+            request = MODULE.validate_speech_request(
+                {
+                    "model": "irodori-v4-small",
+                    "input": "test",
+                    "backend_conditioning": {
+                        "speaker_inversion_embedding": embedding.name
+                    },
+                }
+            )
+        self.assertEqual(request["_cvd_official_v4_embedding"], embedding.name)
+        self.assertEqual(request["_cvd_speaker_condition"]["shape"], [16, 768])
+        self.assertFalse(request["options"]["no_ref"])
+        self.assertNotIn("speaker_embedding_path", request["options"])
+
+    def test_official_v4_without_embedding_is_explicitly_no_reference(self):
+        request = MODULE.validate_speech_request(
+            {"model": "irodori-v4-small", "input": "test"}
+        )
+        self.assertTrue(request["options"]["no_ref"])
+
     def test_valid_irodori_request_is_narrowed(self):
         request = MODULE.validate_speech_request(
             {
@@ -599,6 +637,44 @@ class LocalProxyIntegrationTest(unittest.TestCase):
             content_type = response.headers.get_content_type()
         self.assertEqual(content_type, "audio/wav")
         self.assertTrue(audio.startswith(b"RIFF"))
+
+    def test_backend_catalog_and_official_v4_generation_are_available(self):
+        with urllib.request.urlopen(self.base_url + "/api/tts/backends") as response:
+            catalog = json.load(response)
+        models = {item["id"]: item for item in catalog["models"]}
+        self.assertIn("irodori-v4-small", models)
+        self.assertEqual(models["irodori-v4-small"]["runtime_kind"], "official_python")
+
+        request = urllib.request.Request(
+            self.base_url + "/api/audio-cpp/speech",
+            data=json.dumps(
+                {
+                    "model": "irodori-v4-small",
+                    "input": "official v4 test",
+                    "runtime": {"device_id": "cuda:0", "vram_limit_mib": 8000},
+                    "options": {"caption": "neutral", "caption_guidance_scale": 2},
+                }
+            ).encode("utf-8"),
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        result = OfficialV4Result(
+            wav_bytes=sine_wav(),
+            headers={
+                "Content-Type": "audio/wav",
+                "X-CVD-Backend-ID": "irodori-v4-small",
+                "X-CVD-Backend-Runtime": "official_python",
+                "X-CVD-Speaker-Condition-Mode": "none",
+            },
+            log="test",
+        )
+        with mock.patch.object(MODULE, "render_official_v4", return_value=result) as render:
+            with urllib.request.urlopen(request) as response:
+                audio = response.read()
+                self.assertEqual(response.headers["X-CVD-Backend-Runtime"], "official_python")
+                self.assertEqual(response.headers["X-CVD-Speaker-Condition-Mode"], "none")
+        self.assertTrue(audio.startswith(b"RIFF"))
+        self.assertEqual(render.call_args.kwargs["embedding"], None)
 
     def test_output_demo_is_archived_with_generation_metadata(self):
         payload = {

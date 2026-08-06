@@ -474,6 +474,109 @@ def generate(args: argparse.Namespace) -> None:
     print("[progress 1/1] Generation complete", flush=True)
 
 
+def render(args: argparse.Namespace) -> None:
+    """Render v4-Small with either no speaker reference or a managed embedding."""
+    project_root = args.project_root.resolve()
+    gpu_index = int(getattr(args, "gpu_index", 0))
+    vram_limit_mib = int(getattr(args, "vram_limit_mib", 0))
+    paths, environment = _load_environment(project_root, gpu_index)
+    embedding: Path | None = None
+    if args.embedding:
+        embedding_root = paths["embeddings"].resolve()
+        embedding = (embedding_root / args.embedding).resolve()
+        try:
+            embedding.relative_to(embedding_root)
+        except ValueError as error:
+            raise PipelineError("Speaker Inversion embedding path is invalid.") from error
+        if not embedding.is_file() or not embedding.name.endswith(".speaker.safetensors"):
+            raise PipelineError("Managed Speaker Inversion embedding was not found.")
+
+    output = args.output.resolve()
+    output.mkdir(parents=True, exist_ok=True)
+    wav = output / "official-v4-render.wav"
+    inference_arguments = [
+        "--checkpoint",
+        str(paths["model"]),
+        "--text",
+        args.text,
+        "--output-wav",
+        str(wav),
+        "--model-device",
+        "cuda",
+        "--codec-device",
+        "cuda",
+        "--model-precision",
+        "bf16",
+        "--codec-precision",
+        "fp32",
+        "--num-steps",
+        str(args.steps),
+        "--num-candidates",
+        "1",
+        "--seed",
+        str(args.seed),
+        "--cfg-scale-text",
+        str(args.text_guidance),
+        "--cfg-scale-caption",
+        str(args.caption_guidance),
+        "--cfg-scale-speaker",
+        str(args.speaker_guidance),
+        "--duration-scale",
+        str(args.duration_scale),
+        "--trim-tail",
+    ]
+    if embedding is None:
+        inference_arguments.append("--no-ref")
+    else:
+        inference_arguments.extend(["--ref-embed", str(embedding)])
+    if args.caption:
+        inference_arguments.extend(["--caption", args.caption])
+
+    print("[progress 0/1] Rendering with official Irodori-TTS v4-Small", flush=True)
+    _run(
+        _compute_command(
+            paths,
+            paths["source"] / "infer.py",
+            inference_arguments,
+            gpu_index=gpu_index,
+            vram_limit_mib=vram_limit_mib,
+        ),
+        cwd=paths["source"],
+    )
+    if not wav.is_file():
+        raise PipelineError("Upstream inference did not produce a WAV file.")
+    _write_json(
+        output / "summary.json",
+        {
+            "schema_version": "cvd_official_v4_render_result_0.1",
+            "model_repository": MODEL_REPOSITORY,
+            "model_checkpoint_sha256": environment.get("model_sha256"),
+            "upstream_repository": UPSTREAM_REPOSITORY,
+            "upstream_commit": UPSTREAM_COMMIT,
+            "tokenizer": "sbintuitions/modernbert-ja-310m",
+            "codec": "Aratako/Semantic-DACVAE-Japanese-32dim",
+            "speaker_condition_mode": "speaker_inversion" if embedding else "none",
+            "speaker_embedding": embedding.name if embedding else None,
+            "steps": args.steps,
+            "seed": args.seed,
+            "cfg_scales": {
+                "text": args.text_guidance,
+                "caption": args.caption_guidance,
+                "speaker": args.speaker_guidance,
+            },
+            "caption_enabled": bool(args.caption),
+            "emoji_in_text_supported": True,
+            "duration_scale": args.duration_scale,
+            "output_wav": wav.name,
+            "gpu_index": gpu_index,
+            "vram_limit_mib": vram_limit_mib,
+            "watermark_state": "not_declared_by_pinned_inference_cli",
+            "environment": environment,
+        },
+    )
+    print("[progress 1/1] Official v4 rendering complete", flush=True)
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
     subparsers = parser.add_subparsers(dest="command", required=True)
@@ -507,6 +610,21 @@ def build_parser() -> argparse.ArgumentParser:
     generate_parser.add_argument("--gpu-index", type=int, default=0)
     generate_parser.add_argument("--vram-limit-mib", type=int, default=0)
     generate_parser.set_defaults(handler=generate)
+    render_parser = subparsers.add_parser("render")
+    render_parser.add_argument("--project-root", type=Path, required=True)
+    render_parser.add_argument("--output", type=Path, required=True)
+    render_parser.add_argument("--embedding", default="")
+    render_parser.add_argument("--text", required=True)
+    render_parser.add_argument("--caption", default="")
+    render_parser.add_argument("--steps", type=int, default=20)
+    render_parser.add_argument("--seed", type=int, default=20260719)
+    render_parser.add_argument("--text-guidance", type=float, default=3.0)
+    render_parser.add_argument("--caption-guidance", type=float, default=2.0)
+    render_parser.add_argument("--speaker-guidance", type=float, default=5.0)
+    render_parser.add_argument("--duration-scale", type=float, default=1.0)
+    render_parser.add_argument("--gpu-index", type=int, default=0)
+    render_parser.add_argument("--vram-limit-mib", type=int, default=0)
+    render_parser.set_defaults(handler=render)
     return parser
 
 

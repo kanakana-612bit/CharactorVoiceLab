@@ -80,9 +80,13 @@ the sample.
 
 ## Manual and advanced startup
 
-The current TTS adapter targets a local `audio.cpp` server and Japanese VoiceDesign inference path. The browser does not load native inference code or model weights. `designer_server.py` serves the independent WebUI, owns one selected `audio.cpp` process, and exposes a narrow same-origin bridge to its loopback port. The process is created after model/device selection and is replaced when the model, CPU/GPU target, or VRAM policy changes.
+The TTS adapter exposes two separately versioned local backends. The established `irodori-vdes` path uses the managed `audio.cpp` server and Irodori v3 VoiceDesign. The experimental `irodori-v4-small` path uses the pinned official Irodori-TTS Python runtime prepared by the Speaker Inversion environment. The browser does not load native inference code or model weights. `designer_server.py` validates both request forms and keeps them on the local machine.
 
-Normal generation can use CPU only or one explicitly selected physical NVIDIA GPU. The generation VRAM value is a monitored safety ceiling: `audio.cpp` is stopped if observed process VRAM exceeds it. It is not a CUDA allocator reservation and can briefly cross the threshold before the monitor reacts. Speaker Inversion training uses PyTorch's per-process allocator fraction instead, so its selected VRAM ceiling is applied before model and optimizer allocation.
+The model selector shows each backend's capability contract. v4-Small supports text, caption, documented emoji tokens, no-reference generation, and same-checkpoint Speaker Inversion embeddings. The first normal-output integration does not yet expose multi-WAV reference conditioning, although the pinned upstream CLI supports a combined reference duration of up to 120 seconds. Caption and emoji effects are learned conditions, not direct physical controls.
+
+Normal v3 generation can use CPU only or one explicitly selected physical NVIDIA GPU. The generation VRAM value is a monitored safety ceiling: `audio.cpp` is stopped if observed process VRAM exceeds it. It is not a CUDA allocator reservation and can briefly cross the threshold before the monitor reacts. Official v4 generation and Speaker Inversion training currently require CUDA and use PyTorch's per-process allocator fraction, so their selected VRAM ceiling is applied before model or optimizer allocation.
+
+Every archived output records the backend implementation, source/model identifiers, resolved checkpoint hash when locally available, tokenizer, codec, condition modes, CFG values, watermark declaration state, and a backend-neutral matched-condition hash. The hash allows v3/v4 A/B outputs to be grouped without treating the models as physically equivalent.
 
 Normal TTS generation is deliberately fixed to **20 inference Steps and one
 candidate**. The returned WAV is analyzed locally for F0, waveform quality, and
