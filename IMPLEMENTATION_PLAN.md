@@ -15,6 +15,287 @@ Current implementation order:
 
 The first adapter uses deterministic Japanese caption generation, fixed-seed reproducibility, duration scaling, and explicit disclosure that caption conditioning is approximate. Direct F0, breathiness, and spectral controls may be added only when a selected TTS backend exposes stable inference-time controls for them.
 
+## 2026-08-06 Integrated Performance-Control Roadmap
+
+This roadmap separates character identity, reachable performance, time-varying state,
+and backend-specific conditioning. A learned TTS backend is the final renderer, not a
+causal simulator of anatomy or physiology.
+
+### Terminology And Modeling Boundaries
+
+- `MorphologicalPlausibilityRange` describes the range of anatomical baseline values
+  compatible with the visible character design. It does not describe motion during
+  speech. If `ConstraintRanges` remains in the paper, it should be treated as an umbrella
+  concept rather than restoring the deprecated runtime `constraint_range` alias.
+- `PerformanceControlRange` describes the dynamic interval reachable from the selected
+  baseline during performance.
+- `GestureExecution` describes how much of the available performance range is used for
+  the current utterance.
+- `MotorControlMaturity` describes target-arrival precision and temporal stability.
+- `PhonologicalContrastMaturity` describes how distinctly language-specific phonological
+  targets are maintained.
+- Primary language may select phonological targets, coarticulation, timing, and habitual
+  motor strategies. It must not select anatomical or population priors.
+- Psychological and involuntary-response controls are synthetic performance-design
+  variables. They are not diagnostic models and must not be presented as predicting a
+  real person's medical or psychological response.
+- The training method is `Speaker Inversion`. `Speaker Intervention` is treated as a
+  drafting typo; `intervention` is reserved for inference-time control injection.
+
+### Irodori-TTS v4-Small Capability Review
+
+The pinned official v4-Small release materially improves the available adapter surface:
+
+- text, reference speech, descriptive caption, and emoji-conditioned expression are
+  supported in one model;
+- speaker and caption conditions are enabled together, so identity and performance style
+  no longer require separate model families;
+- text and caption share a pretrained Japanese ModernBERT encoder but use separate learned
+  projectors;
+- reference conditioning accepts one or more clips with up to 120 seconds combined;
+- the official Speaker Inversion configuration keeps speaker and caption conditioning
+  enabled and learns 16 speaker tokens against the exact v4-Small checkpoint;
+- the published emoji vocabulary includes breath, sigh, gasp, pause, cough, sniff,
+  swallow, throat clearing, effort, muffling, and several emotional delivery cues.
+
+The 120-second value is a combined reference-conditioning limit, not a claim that every
+Speaker Inversion dataset should contain exactly 120 seconds. The official benchmark
+reports most long-reference similarity improvement by approximately 30 seconds, while
+60- and 120-second conditions provide smaller additional gains. The first application
+benchmark should therefore compare 30, 60, and 120 seconds rather than defaulting to the
+largest input.
+
+The release does not expose interpretable scalar controls for breathiness, nasality,
+effort, emotion, or articulator position. Emoji are text tokens and captions are learned
+conditions; neither is evidence that a physical evaluator or a disentangled internal
+variable exists. The official model card also reports condition conflicts, variable
+emoji effects, prompt-adherence limits, and lower short-reference similarity than v3.
+CharacterVoiceDesigner must measure these behaviors instead of assuming a direct physical
+mapping.
+
+Primary upstream references:
+
+- <https://huggingface.co/Aratako/Irodori-TTS-v4-Small>
+- <https://huggingface.co/Aratako/Irodori-TTS-v4-Small/blob/main/EMOJI_ANNOTATIONS.md>
+- <https://github.com/Aratako/Irodori-TTS/commit/d48dd92b943fa5dbcb88150eb974c25d8709df9b>
+
+### Backend-Neutral Runtime Contract
+
+The implementation should compile all user-facing controls into five separate records:
+
+1. `IdentityBaseline`: static morphology-derived estimates and explicit design overrides.
+2. `PerformanceEnvelope`: per-parameter `PerformanceControlRange`, rate limits, and
+   coupling constraints.
+3. `PerformanceTimeline`: intentional targets over time, including articulation,
+   respiration, prosody, and facial-expression load.
+4. `AutonomicAndEventTimeline`: lagged psychological response plus discrete breath,
+   interruption, swallow, cough, or other non-verbal events.
+5. `BackendControlPlan`: model/version-specific reference speech, Speaker Inversion,
+   caption, emoji, segmentation, and postprocessing instructions.
+
+Only item 5 is allowed to contain Irodori-specific tokens. This preserves the ability to
+test another TTS backend without changing the physical and performance model.
+
+### Work Package 0: v4 Adapter And Capability Baseline
+
+1. Add v4-Small as a separately versioned inference backend while retaining the current
+   native audio.cpp backend until parity is demonstrated.
+2. Add a capability manifest for speaker reference, Speaker Inversion, caption, emoji,
+   duration prediction, reference-duration limit, watermarking, and observable tensors.
+3. Record exact model, tokenizer, codec, source commit, inference options, and watermark
+   state in every output metadata file.
+4. Run matched v3/current-native versus official-v4 tests across fixed text, seed,
+   reference, and caption conditions.
+5. Add a conflict matrix: identity caption versus reference identity, neutral versus
+   expressive caption, emoji on/off, and short versus long reference.
+
+Acceptance gate: v4 can generate from the GUI, every active condition is visible in the
+request summary and metadata, and changing one condition produces an attributable A/B
+record without silently changing the others.
+
+### Work Package 1: Acoustic Observation Expansion
+
+Extend the current evaluator before adding automatic selection or physiological claims:
+
+- pitch: voiced F0 median, 5th/95th percentiles, range, slope, and frame-to-frame change;
+- delivery: syllable or mora rate, pause positions, pause duration, energy envelope, and
+  phrase-final lengthening;
+- breathiness/source: CPP, HNR, spectral tilt, H1-H2/H1-A3 where measurement quality is
+  sufficient, and unvoiced-to-voiced energy ratio;
+- effort/pressed-quality proxies: CPP, spectral slope, alpha ratio, F0/energy covariance,
+  and onset/offset sharpness;
+- nasality proxies: low-frequency nasal-formant energy, candidate anti-formant regions,
+  and spectral-distance measures, explicitly labeled as mono-audio engineering proxies;
+- non-verbal events: onset, duration, peak level, voiced ratio, and event-to-speech
+  boundary continuity.
+
+Nasalance cannot be recovered reliably from a normal mono WAV without separated oral and
+nasal measurements. Abdominal pressure, laryngeal tension, and tissue vibration likewise
+must remain input-side design variables rather than quantities claimed to be measured
+directly from output audio.
+
+Acceptance gate: repeated same-condition generations establish within-condition variance,
+metric extraction failures are explicit, and no provisional threshold is promoted to an
+automatic pass/fail rule.
+
+### Work Package 2: Speaker Inversion Material Compiler
+
+Build a local-only guided workflow for synthetic speaker-reference construction:
+
+1. Generate physical-preview anchors for vowels, source quality, breath noise, and
+   resonance. These anchors describe the target but are not assumed to be natural TTS
+   training samples by themselves.
+2. Generate many approximately three-second v4 candidates across seeds using a fixed,
+   phonetically balanced neutral text set.
+3. Benchmark low-cost screening modes against final-quality output. The previous
+   early-Step experiment showed late changes, so no low-Step shortlist is adopted unless
+   v4-Small demonstrates reliable ranking correlation and real elapsed-time savings.
+4. Reject only objective technical failures, then rank the remaining candidates with a
+   multi-objective distance to the physical target: F0, spectral/source proxies,
+   articulation, timing, noise, and clipping. F0 alone is insufficient.
+5. Present a diverse top-K set for listening selection instead of automatically choosing
+   one numerically nearest sample.
+6. Generate held-out sentences from each selected candidate condition and require the
+   user to confirm identity stability across text.
+7. Assemble multiple short clean clips and compare 30-, 60-, and 120-second reference
+   sets before training Speaker Inversion.
+8. Store the generation provenance, selected/rejected reasons, transcripts, hashes, and
+   consent/synthetic-origin declaration with the training manifest.
+
+Acceptance gate: a compiled synthetic dataset is reproducible from its manifest, no real
+person recording is required, and held-out text evaluation is completed before the
+resulting Speaker Inversion artifact is marked usable.
+
+### Work Package 3: Static Range And Language-Motor Model
+
+1. Add explicit `MorphologicalPlausibilityRange` values around the static anatomical
+   baseline without changing the existing statistical edit range or
+   `PerformanceControlRange` semantics.
+2. Derive visible-motion limits for jaw opening, lip spreading/rounding, facial tension,
+   and neck/torso excursion. Illustration sources may use a separate exaggeration factor,
+   but it must remain an explicit design override.
+3. Map primary language to phoneme targets, coarticulation rules, rhythm, and habitual
+   gesture timing only.
+4. Add language-neutral respiratory and laryngeal capacity limits, then apply
+   language-specific motor targets inside those limits.
+5. Keep image-derived, population-prior, language-derived, and user-authored contributions
+   separately inspectable in exported evidence records.
+
+Acceptance gate: changing language changes target trajectories but never silently changes
+anatomical dimensions, age, sex reference class, or morphology population.
+
+### Work Package 4: Time-Varying Performance And Psychology
+
+Implement a small deterministic state solver rather than direct prompt generation:
+
+- `MotorTarget(t)`: intended articulatory, prosodic, and respiratory target;
+- `MotorState(t)`: rate-limited and range-limited realized movement;
+- `RespiratoryState(t)`: estimated lung-volume fraction, airflow demand, pressure demand,
+  breath availability, and recovery;
+- `AutonomicState(t)`: user-authored arousal, valence, startle/load, and recovery with
+  attack/release time constants;
+- `ExternalLoad(t)`: torso restriction/support, facial restriction, and other explicit
+  performance constraints;
+- `EventState(t)`: discrete or sustained involuntary-performance events.
+
+Psychological inputs may modulate target range, execution noise, F0 range, respiratory
+rate/depth, onset timing, and effort. They must not deterministically map a named emotion
+or stimulus to a universal biological response. Proposed rules such as “nasopharyngeal
+tension causes voicing” or “interruption normally becomes a moraic nasal ending” remain
+testable hypotheses, not defaults.
+
+Acceptance gate: the same initial state and event track produce the same control timeline;
+all saturation, lag, recovery, and conflict-resolution decisions are exported.
+
+### Work Package 5: Parallel Timeline UI
+
+Add a timeline editor parallel to the reading-text axis with these lanes:
+
+- phrase and breath points;
+- respiratory effort/available breath;
+- pitch range and energy intent;
+- articulation execution and target precision;
+- autonomic arousal/load;
+- facial/oral restriction;
+- non-verbal event markers;
+- backend caption/emoji preview generated from the neutral control plan.
+
+The primary UI edits physical/performance values, not raw prompt strings. An advanced
+view may show and override the compiled caption and emoji tokens. Segment boundaries must
+snap to text spans, mora/phoneme timing when available, or explicit absolute time.
+
+Acceptance gate: a user can place a breath point and a time-varying factor without editing
+the spoken text, preview the compiled backend plan, and save/reload it without loss.
+
+### Work Package 6: v4 Intervention Adapter
+
+1. Build a deterministic lexicon from backend-neutral states to conservative caption
+   fragments and documented emoji controls.
+2. Keep identity descriptors out of performance captions when reference audio or Speaker
+   Inversion already fixes identity, reducing official condition-conflict risk.
+3. Use segment-level captions/emojis only where the runtime supports them. Otherwise split
+   at safe linguistic boundaries and record cross-segment continuity risk.
+4. Instrument the official Python runtime to observe available text/caption embedding
+   shapes, masks, norms, hashes, duration output, and selected denoising snapshots.
+5. Use controlled ablation and sensitivity tests to determine whether a requested physical
+   direction is monotonic, context dependent, ineffective, or contradictory.
+
+Observation does not imply interpretability. Raw hidden states should remain local and
+optional; normal inference must be byte-identical when observation is disabled.
+
+Acceptance gate: every generated caption/emoji can be traced to a source control and each
+mapping has an empirical effect report rather than an assumed physiological meaning.
+
+### Work Package 7: Non-Verbal And Involuntary Event Layer
+
+Evaluate three rendering paths per event:
+
+1. native v4 emoji/text intervention for events represented in the official vocabulary;
+2. procedural physical audio for controllable inhalation, airflow, interruption, or
+   closure transitions;
+3. separately generated event audio with boundary-aware alignment and conservative
+   postprocessing when the first two paths are inadequate.
+
+Initial event set: inhale/gasp, sigh, cough/throat clear, swallow, sniff, voiced or unvoiced
+interruption, effort onset, muffled articulation, and facial-tension articulation shift.
+Each event needs onset, duration, intensity, recovery, overlap policy, and fallback path.
+
+Acceptance gate: event timing does not require modifying the spoken transcript, boundaries
+do not create clipping or unintended silence, and unsupported events fail visibly instead
+of being replaced with an unrelated emoji.
+
+### Work Package 8: Integrated Speech-Motor Validation
+
+1. Compile text into phonological targets and tentative timing.
+2. Solve intentional motion, respiratory support, psychological response, external load,
+   and events on one timeline.
+3. Compile the result through each backend adapter.
+4. Generate, observe, and compare output against the requested timeline.
+5. Report controllability separately from naturalness, speaker identity, intelligibility,
+   and physical plausibility.
+
+The first validation corpus should contain neutral, expressive, breath-constrained,
+interrupted, and non-verbal-event cases across short and paragraph-length Japanese text.
+Automatic correction or regeneration remains disabled until repeated held-out experiments
+show that a metric predicts the requested perceptual direction.
+
+### Learned-TTS Output Limitations
+
+- speaker identity, style, linguistic context, prosody, and recording characteristics are
+  entangled in learned conditioning spaces;
+- identical physical controls cannot be assumed to produce identical acoustic effects
+  across text, seed, model version, or reference material;
+- global caption/reference controls do not guarantee local timing or monotonic response;
+- model-generated non-verbal events are probabilistic and may alter adjacent words;
+- reference audio may carry unwanted prosody, noise, room response, or lexical leakage;
+- postprocessing can correct selected observables such as median F0 but can degrade
+  breath noise, transients, phase continuity, and speaker cues;
+- backend upgrades can invalidate embeddings and calibrated mappings;
+- a natural output is not evidence that the inferred anatomy or physiology is correct.
+
+These limits require versioned adapters, local provenance, held-out-text evaluation, and
+clear separation between physical-design intent and measured acoustic outcome.
+
 ## 2026-07-30 Conditioning Observation Milestone
 
 Implemented:
