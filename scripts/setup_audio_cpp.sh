@@ -98,6 +98,7 @@ MICROMAMBA_ROOT="$RUNTIME_ROOT/bootstrap/micromamba"
 MICROMAMBA_BIN="$MICROMAMBA_ROOT/micromamba"
 MAMBA_CACHE_ROOT="$RUNTIME_ROOT/micromamba-root"
 TOOLCHAIN_ROOT="$RUNTIME_ROOT/toolchains/gcc13"
+LOCAL_SYSROOT_GLIBC_VERSION="2.28"
 PYWORLD_REQUIREMENT="pyworld==0.3.5"
 SETUPTOOLS_REQUIREMENT="setuptools<81"
 MIN_BUILD_FREE_DISK_GIB="${CVD_MIN_BUILD_FREE_DISK_GIB:-8}"
@@ -231,6 +232,17 @@ compiler_major() {
   "$1" -dumpfullversion -dumpversion 2>/dev/null | awk -F. 'NR == 1 { print $1 }'
 }
 
+local_sysroot_supports_cuda() {
+  local sysroot_root libc_path libm_path
+  sysroot_root="$TOOLCHAIN_ROOT/x86_64-conda-linux-gnu/sysroot"
+  [[ -d "$sysroot_root" ]] || return 1
+  libc_path="$(find "$sysroot_root" \( -type f -o -type l \) -name 'libc.so.6' -print -quit 2>/dev/null || true)"
+  libm_path="$(find "$sysroot_root" \( -type f -o -type l \) -name 'libm.so.6' -print -quit 2>/dev/null || true)"
+  [[ -n "$libc_path" && -n "$libm_path" ]] || return 1
+  grep -aFq -- 'GLIBC_2.18' "$libc_path" &&
+    grep -aFq -- 'GLIBC_2.27' "$libm_path"
+}
+
 select_system_compiler() {
   local candidate major suffix cc_candidate
   for candidate in g++-15 g++-14 g++-13 g++; do
@@ -256,6 +268,9 @@ select_local_compiler() {
   [[ -x "$cc_candidate" && -x "$cxx_candidate" ]] || return 1
   major="$(compiler_major "$cxx_candidate")"
   [[ "$major" =~ ^[0-9]+$ ]] && ((major >= 13)) || return 1
+  if [[ "$BACKEND" == "cuda" ]] && ! local_sysroot_supports_cuda; then
+    return 1
+  fi
   CVD_CC="$cc_candidate"
   CVD_CXX="$cxx_candidate"
   CVD_TOOLCHAIN_ROOT="$TOOLCHAIN_ROOT"
@@ -309,7 +324,7 @@ ensure_micromamba() {
 }
 
 install_local_compiler() {
-  local architecture platform_suffix compiler_suffix
+  local architecture platform_suffix compiler_suffix action="create"
   architecture="$(uname -m)"
   case "$architecture" in
     x86_64)
@@ -327,15 +342,18 @@ install_local_compiler() {
   esac
 
   ensure_micromamba
-  echo "Installing a project-local GCC 13 toolchain; the system compiler will not be changed..."
-  MAMBA_ROOT_PREFIX="$MAMBA_CACHE_ROOT" "$MICROMAMBA_BIN" create \
+  if [[ -d "$TOOLCHAIN_ROOT/conda-meta" ]]; then
+    action="install"
+  fi
+  echo "Installing or repairing project-local GCC 13 with glibc ${LOCAL_SYSROOT_GLIBC_VERSION}; the system compiler will not be changed..."
+  MAMBA_ROOT_PREFIX="$MAMBA_CACHE_ROOT" "$MICROMAMBA_BIN" "$action" \
     --yes \
     --prefix "$TOOLCHAIN_ROOT" \
     --override-channels \
     --channel conda-forge \
     "gcc_linux-$compiler_suffix=13" \
     "gxx_linux-$compiler_suffix=13" \
-    "sysroot_linux-$platform_suffix=2.17"
+    "sysroot_linux-$platform_suffix=${LOCAL_SYSROOT_GLIBC_VERSION}"
 }
 
 cuda_toolkit_ready() {
@@ -394,6 +412,14 @@ if [[ "$NEEDS_BUILD" -eq 1 ]]; then
       echo "The project-local GCC 13 toolchain could not be prepared." >&2
       exit 1
     fi
+  fi
+  if [[ "$BACKEND" == "cuda" && -n "$CVD_TOOLCHAIN_ROOT" ]]; then
+    if ! local_sysroot_supports_cuda; then
+      echo "The project-local compiler sysroot is too old for CUDA ${CUDA_VERSION}." >&2
+      echo "Expected GLIBC_2.18 in libc and GLIBC_2.27 in libm under $CVD_TOOLCHAIN_ROOT." >&2
+      exit 1
+    fi
+    echo "[diagnostic] local GCC sysroot satisfies CUDA ${CUDA_VERSION} GLIBC symbol requirements."
   fi
 
   if ! command -v tar >/dev/null 2>&1; then

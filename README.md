@@ -46,7 +46,7 @@ The pinned audio.cpp release does not publish a Linux prebuilt package. On the f
 - prepares project-local Python 3.12, CMake, Ninja, and the audio post-processing dependencies
 - detects a compatible NVIDIA GPU and otherwise selects the optimized CPU backend
 - downloads the pinned audio.cpp source and builds with native CPU kernels and llamafile SGEMM
-- installs a pinned micromamba executable and a conda-forge GCC/G++ 13 toolchain with a glibc 2.17 compatibility sysroot under `runtime/toolchains/` when no compatible compiler is present
+- installs a pinned micromamba executable and a conda-forge GCC/G++ 13 toolchain with a glibc 2.28 compatibility sysroot under `runtime/toolchains/` when no compatible compiler is present; an older project-local 2.17 sysroot is repaired automatically because CUDA 12.8 libraries require newer GLIBC symbols at link time
 - for NVIDIA inference, installs the tested CUDA Toolkit 12.8 dependency set under `runtime/toolchains/cuda128/` and builds for every compatible detected compute capability
 - installs the same VoiceDesign model set used by the Windows launcher
 

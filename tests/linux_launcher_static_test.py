@@ -62,6 +62,20 @@ class LinuxLauncherStaticTest(unittest.TestCase):
             setup.index("bash ./scripts/build_linux.sh"),
         )
 
+    def test_cuda_build_repairs_incompatible_conda_sysroot(self):
+        setup = (ROOT / "scripts" / "setup_audio_cpp.sh").read_text(encoding="utf-8")
+        self.assertIn('LOCAL_SYSROOT_GLIBC_VERSION="2.28"', setup)
+        self.assertIn('"sysroot_linux-$platform_suffix=${LOCAL_SYSROOT_GLIBC_VERSION}"', setup)
+        self.assertNotIn('"sysroot_linux-$platform_suffix=2.17"', setup)
+        self.assertIn('action="install"', setup)
+        self.assertIn("local_sysroot_supports_cuda", setup)
+        self.assertIn("'GLIBC_2.18'", setup)
+        self.assertIn("'GLIBC_2.27'", setup)
+        self.assertLess(
+            setup.index("local_sysroot_supports_cuda"),
+            setup.index("bash ./scripts/build_linux.sh"),
+        )
+
 
 if __name__ == "__main__":
     unittest.main()
