@@ -19,7 +19,7 @@ from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any, Mapping
 
-from audio_cpp_runtime import AudioCppRuntimeError, AudioCppRuntimeManager
+from audio_cpp_runtime import AudioCppRuntimeError
 
 from audio_postprocess import (
     AudioPostprocessError,
@@ -54,6 +54,7 @@ from tts_backend_registry import (
     backend_manifest,
     is_official_v4,
 )
+from tts_runtime_manager import TtsRuntimeError, TtsRuntimeManager
 from voice_identity import VoiceIdentityError, VoiceIdentityStore
 
 
@@ -86,7 +87,7 @@ SPEAKER_CONDITION_ROOT = PROJECT_ROOT / "runtime" / "speaker_conditions"
 
 class DesignerServer(ThreadingHTTPServer):
     audio_cpp_base_url: str
-    audio_cpp_runtime: AudioCppRuntimeManager | None
+    audio_cpp_runtime: TtsRuntimeManager | None
     upstream_timeout_seconds: float
     observation_store: ObservationStore
     experiment_manager: ExperimentJobManager
@@ -371,7 +372,7 @@ class DesignerHandler(SimpleHTTPRequestHandler):
                     runtime.get("vram_limit_mib", 0),
                 )
                 self._send_json(HTTPStatus.OK, status)
-            except (AudioCppRuntimeError, ValueError) as error:
+            except (AudioCppRuntimeError, TtsRuntimeError, ValueError) as error:
                 self._send_json(HTTPStatus.BAD_REQUEST, {"error": str(error)})
             return
         if path == "/api/audio-cpp/stop":
@@ -600,7 +601,7 @@ class DesignerHandler(SimpleHTTPRequestHandler):
                     output_identity,
                     runtime_options,
                 )
-        except AudioCppRuntimeError as error:
+        except (AudioCppRuntimeError, TtsRuntimeError) as error:
             if observation:
                 observation.finalize_error("runtime", str(error), 0)
             self._send_json(HTTPStatus.INSUFFICIENT_STORAGE, {"error": str(error)})
@@ -618,13 +619,22 @@ class DesignerHandler(SimpleHTTPRequestHandler):
     ) -> None:
         started = time.perf_counter()
         try:
-            result = render_official_v4(
-                PROJECT_ROOT,
-                request,
-                runtime_options,
-                timeout_seconds=self.server.upstream_timeout_seconds,
-                embedding=embedding,
-            )
+            manager = getattr(self.server, "audio_cpp_runtime", None)
+            if manager and hasattr(manager, "render_official_v4"):
+                result = manager.render_official_v4(
+                    request,
+                    runtime_options,
+                    embedding,
+                    timeout_seconds=self.server.upstream_timeout_seconds,
+                )
+            else:
+                result = render_official_v4(
+                    PROJECT_ROOT,
+                    request,
+                    runtime_options,
+                    timeout_seconds=self.server.upstream_timeout_seconds,
+                    embedding=embedding,
+                )
             result_headers = dict(result.headers)
             if speaker_condition:
                 result_headers["X-CVD-Speaker-Artifact-SHA256"] = speaker_condition[
@@ -647,7 +657,7 @@ class DesignerHandler(SimpleHTTPRequestHandler):
                 output_identity=output_identity,
                 generation_request=request,
             )
-        except OfficialV4RuntimeError as error:
+        except (OfficialV4RuntimeError, TtsRuntimeError) as error:
             if observation:
                 observation.finalize_error(
                     "official_v4_runtime",
@@ -1300,7 +1310,7 @@ def main() -> None:
     server = DesignerServer((bind_host, args.port), DesignerHandler)
     server.audio_cpp_base_url = normalize_upstream_url(args.audio_cpp_url)
     server.audio_cpp_runtime = (
-        AudioCppRuntimeManager(PROJECT_ROOT, args.audio_cpp_runtime_config)
+        TtsRuntimeManager(PROJECT_ROOT, args.audio_cpp_runtime_config)
         if args.audio_cpp_runtime_config
         else None
     )

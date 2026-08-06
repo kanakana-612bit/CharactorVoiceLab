@@ -5204,16 +5204,16 @@ function applyTtsBackendRuntimePolicy() {
     if (official && String(select.value).startsWith("cuda:")) officialGpuAvailable = true;
   }
   if (els.startAudioCppRuntimeBtn) {
-    els.startAudioCppRuntimeBtn.disabled = official;
+    els.startAudioCppRuntimeBtn.disabled = official && !officialGpuAvailable;
     els.startAudioCppRuntimeBtn.textContent = official
-      ? "生成時に公式runtimeを起動"
+      ? "公式V4ランタイムを起動・切替"
       : "選択条件でaudio.cppを起動";
   }
   if (official) {
     setAudioCppStatus(
       officialGpuAvailable ? "ready" : "error",
       officialGpuAvailable
-        ? "公式v4 / 生成時に起動"
+        ? "公式v4 / 選択時に常駐起動"
         : "公式v4 / CUDA GPUが必要です",
     );
   } else {
@@ -5339,7 +5339,9 @@ function renderAudioCppRuntimeStatus(status = state.audioCppRuntimeCatalog?.stat
     const limit = status.vram_limit_mib ? ` / 上限 ${status.vram_limit_mib} MiB` : " / 上限なし";
     setAudioCppStatus("ready", `起動済み / ${status.model} / ${status.device_label || status.device_id}${limit}`);
     if (els.audioCppRuntimeGuide) {
-      els.audioCppRuntimeGuide.textContent = "モデルまたはデバイスを変更すると、現在のaudio.cppを停止して新しい条件で起動します。";
+      els.audioCppRuntimeGuide.textContent = status.runtime_kind === "official_python_resident"
+        ? "公式V4ランタイムは常駐中です。モデルを切り替えると停止して、選択先ランタイムを起動します。"
+        : "モデルまたはデバイスを変更すると、現在のaudio.cppを停止して新しい条件で起動します。";
     }
   } else {
     setAudioCppStatus("pending", "停止中 / モデル選択後に起動");
@@ -5397,22 +5399,10 @@ async function activateAudioCppRuntime(useDemoControls = false) {
   }
   const model = els.ttsModelSelect?.value || "irodori-vdes";
   const runtime = audioCppRuntimeSettings(useDemoControls);
-  if (isOfficialV4Selected()) {
-    if (!String(runtime.device_id).startsWith("cuda:")) {
-      throw new Error("Irodori v4-Small requires an NVIDIA GPU in the current adapter.");
-    }
-    const status = {
-      managed: true,
-      running: false,
-      model,
-      device_id: runtime.device_id,
-      vram_limit_mib: runtime.vram_limit_mib,
-      runtime_kind: "official_python",
-    };
-    setAudioCppStatus("ready", `公式v4 / 生成時起動 / ${runtime.device_id}`);
-    return status;
+  if (isOfficialV4Selected() && !String(runtime.device_id).startsWith("cuda:")) {
+    throw new Error("Irodori v4-Small requires an NVIDIA GPU in the current adapter.");
   }
-  setAudioCppStatus("pending", `起動中 / ${model} / ${runtime.device_id}`);
+  setAudioCppStatus("pending", `ランタイム切替中 / ${model} / ${runtime.device_id}`);
   if (els.startAudioCppRuntimeBtn) els.startAudioCppRuntimeBtn.disabled = true;
   try {
     const response = await fetch("/api/audio-cpp/activate", {
@@ -10900,6 +10890,9 @@ function init() {
       if (input === els.ttsModelSelect) {
         applyTtsBackendRuntimePolicy();
         markAudioCppRuntimeSelectionChanged();
+        activateAudioCppRuntime(false).catch((error) => {
+          setAudioCppStatus("error", `ランタイム切替失敗: ${error.message}`);
+        });
       }
       renderVoiceDesignerDerivedViews();
       renderConstraints();

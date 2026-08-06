@@ -170,6 +170,13 @@ stop_project_orphans() {
       stop_discovered_process "orphaned audio.cpp" "$pid"
     fi
   done
+  for proc in /proc/[0-9]*; do
+    pid="${proc##*/}"
+    if process_has_exact_arg "$pid" "$PROJECT_ROOT/official_v4_worker.py"; then
+      stop_discovered_process \
+        "orphaned official v4 worker" "$pid" "$PROJECT_ROOT/official_v4_worker.py"
+    fi
+  done
 }
 
 stop_recorded_process \

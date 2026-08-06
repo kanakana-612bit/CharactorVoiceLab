@@ -80,7 +80,7 @@ the sample.
 
 ## Manual and advanced startup
 
-The TTS adapter exposes two separately versioned local backends. The established `irodori-vdes` path uses the managed `audio.cpp` server and Irodori v3 VoiceDesign. The experimental `irodori-v4-small` path uses the pinned official Irodori-TTS Python runtime prepared by the Speaker Inversion environment. The browser does not load native inference code or model weights. `designer_server.py` validates both request forms and keeps them on the local machine.
+The TTS adapter exposes two separately versioned local backends. The established `irodori-vdes` path uses the managed `audio.cpp` server and Irodori v3 VoiceDesign. The experimental `irodori-v4-small` path uses a resident worker built on the pinned official Irodori-TTS Python runtime prepared by the Speaker Inversion environment. Selecting a backend stops the other managed runtime before loading the selected model; repeated v4 generation reuses the already loaded model. The browser does not load native inference code or model weights. `designer_server.py` validates both request forms and keeps them on the local machine.
 
 The model selector shows each backend's capability contract. v4-Small supports text, caption, documented emoji tokens, no-reference generation, and same-checkpoint Speaker Inversion embeddings. The first normal-output integration does not yet expose multi-WAV reference conditioning, although the pinned upstream CLI supports a combined reference duration of up to 120 seconds. Caption and emoji effects are learned conditions, not direct physical controls.
 

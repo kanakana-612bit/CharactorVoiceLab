@@ -285,6 +285,9 @@ DESIGNER_REVISION="$(
   "$PYTHON_BIN" - \
     "$PROJECT_ROOT/designer_server.py" \
     "$PROJECT_ROOT/audio_cpp_runtime.py" \
+    "$PROJECT_ROOT/tts_runtime_manager.py" \
+    "$PROJECT_ROOT/official_v4_resident.py" \
+    "$PROJECT_ROOT/official_v4_worker.py" \
     "$PROJECT_ROOT/audio_postprocess.py" \
     "$AUDIO_RUNTIME_CONFIG" <<'PY'
 from hashlib import sha256
@@ -423,6 +426,16 @@ stop_orphaned_services() {
       [[ -n "$ticks" && -n "$executable" ]] || continue
       echo "[4/4] Stopping orphaned audio.cpp process $pid..."
       stop_verified_process "$pid" "$ticks" "$executable" "$executable"
+    fi
+  done
+  for proc in /proc/[0-9]*; do
+    pid="${proc##*/}"
+    if process_has_exact_arg "$pid" "$PROJECT_ROOT/official_v4_worker.py"; then
+      ticks="$(process_start_ticks "$pid" 2>/dev/null || true)"
+      executable="$(readlink -f -- "/proc/$pid/exe" 2>/dev/null || true)"
+      [[ -n "$ticks" && -n "$executable" ]] || continue
+      echo "[4/4] Stopping orphaned official v4 worker process $pid..."
+      stop_verified_process "$pid" "$ticks" "$executable" "$PROJECT_ROOT/official_v4_worker.py"
     fi
   done
 }

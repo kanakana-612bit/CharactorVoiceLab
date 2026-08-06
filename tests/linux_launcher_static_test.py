@@ -41,6 +41,7 @@ class LinuxLauncherStaticTest(unittest.TestCase):
         self.assertIn("process_has_exact_arg", stop)
         self.assertIn('"$PROJECT_ROOT/designer_server.py"', stop)
         self.assertIn("process_is_project_audio_cpp", stop)
+        self.assertIn('"$PROJECT_ROOT/official_v4_worker.py"', stop)
         self.assertIn("stop_project_orphans", stop)
 
     def test_linux_start_stops_orphan_before_selecting_a_port(self):
@@ -52,6 +53,14 @@ class LinuxLauncherStaticTest(unittest.TestCase):
         )
         self.assertIn('"$PROJECT_ROOT/designer_server.py"', launcher)
         self.assertIn("process_is_project_audio_cpp", launcher)
+        self.assertIn('"$PROJECT_ROOT/official_v4_worker.py"', launcher)
+
+    def test_designer_revision_tracks_resident_runtime_modules(self):
+        launcher = (ROOT / "scripts" / "bootstrap_webui.sh").read_text(encoding="utf-8")
+        revision = launcher.split('DESIGNER_REVISION="$(', 1)[1].split('\n)"', 1)[0]
+        self.assertIn('"$PROJECT_ROOT/tts_runtime_manager.py"', revision)
+        self.assertIn('"$PROJECT_ROOT/official_v4_resident.py"', revision)
+        self.assertIn('"$PROJECT_ROOT/official_v4_worker.py"', revision)
 
     def test_feature_rebuild_cleans_stale_cmake_artifacts(self):
         setup = (ROOT / "scripts" / "setup_audio_cpp.sh").read_text(encoding="utf-8")
