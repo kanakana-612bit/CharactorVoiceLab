@@ -340,28 +340,91 @@ process_start_ticks() {
   awk '{print $22}' "/proc/$pid/stat"
 }
 
+process_has_exact_arg() {
+  local pid="$1"
+  local expected="$2"
+  local argument=""
+  [[ -n "$expected" && -r "/proc/$pid/cmdline" ]] || return 1
+  while IFS= read -r -d '' argument; do
+    [[ "$argument" == "$expected" ]] && return 0
+  done < "/proc/$pid/cmdline"
+  return 1
+}
+
+process_is_project_audio_cpp() {
+  local pid="$1"
+  local executable=""
+  [[ -r "/proc/$pid/cmdline" ]] || return 1
+  IFS= read -r -d '' executable < "/proc/$pid/cmdline" || true
+  [[ "$executable" == "$PROJECT_ROOT/runtime/"*"/bin/audiocpp_server" ]]
+}
+
 process_matches() {
   local pid="$1"
   local expected_ticks="$2"
   local expected_exe="$3"
+  local expected_arg="${4:-}"
+  local actual_exe=""
+  local expected_real=""
   [[ "$pid" =~ ^[0-9]+$ && -n "$expected_ticks" && -e "/proc/$pid/exe" ]] || return 1
   [[ "$(process_start_ticks "$pid")" == "$expected_ticks" ]] || return 1
-  [[ "$(readlink -f -- "/proc/$pid/exe")" == "$(readlink -f -- "$expected_exe")" ]]
+  actual_exe="$(readlink -f -- "/proc/$pid/exe")"
+  expected_real="$(readlink -f -- "$expected_exe" 2>/dev/null || true)"
+  if [[ -n "$expected_real" && "$actual_exe" == "$expected_real" ]]; then
+    return 0
+  fi
+  process_has_exact_arg "$pid" "$expected_arg"
 }
 
 stop_verified_process() {
   local pid="$1"
   local expected_ticks="$2"
   local expected_exe="$3"
-  process_matches "$pid" "$expected_ticks" "$expected_exe" || return 0
+  local expected_arg="${4:-}"
+  process_matches "$pid" "$expected_ticks" "$expected_exe" "$expected_arg" || return 0
   kill "$pid" 2>/dev/null || true
   local deadline=$((SECONDS + 10))
   while ((SECONDS < deadline)); do
-    process_matches "$pid" "$expected_ticks" "$expected_exe" || return 0
+    process_matches "$pid" "$expected_ticks" "$expected_exe" "$expected_arg" || return 0
     sleep 0.2
+  done
+  if process_matches "$pid" "$expected_ticks" "$expected_exe" "$expected_arg"; then
+    kill -KILL "$pid" 2>/dev/null || true
+  fi
+  local kill_deadline=$((SECONDS + 2))
+  while ((SECONDS < kill_deadline)); do
+    process_matches "$pid" "$expected_ticks" "$expected_exe" "$expected_arg" || return 0
+    sleep 0.1
   done
   echo "The previous CharacterVoiceDesigner process did not stop: PID $pid" >&2
   return 1
+}
+
+stop_orphaned_services() {
+  local proc=""
+  local pid=""
+  local ticks=""
+  local executable=""
+  for proc in /proc/[0-9]*; do
+    pid="${proc##*/}"
+    if process_has_exact_arg "$pid" "$PROJECT_ROOT/designer_server.py"; then
+      ticks="$(process_start_ticks "$pid" 2>/dev/null || true)"
+      executable="$(readlink -f -- "/proc/$pid/exe" 2>/dev/null || true)"
+      [[ -n "$ticks" && -n "$executable" ]] || continue
+      echo "[4/4] Stopping orphaned CharacterVoiceDesigner process $pid..."
+      stop_verified_process "$pid" "$ticks" "$executable" "$PROJECT_ROOT/designer_server.py"
+    fi
+  done
+  for proc in /proc/[0-9]*; do
+    pid="${proc##*/}"
+    if process_is_project_audio_cpp "$pid"; then
+      ticks="$(process_start_ticks "$pid" 2>/dev/null || true)"
+      executable="$(readlink -f -- "/proc/$pid/exe" 2>/dev/null || true)"
+      [[ -n "$ticks" && -n "$executable" ]] || continue
+      echo "[4/4] Stopping orphaned audio.cpp process $pid..."
+      stop_verified_process "$pid" "$ticks" "$executable" "$executable"
+    fi
+  done
 }
 
 wait_for_service() {
@@ -447,7 +510,7 @@ cleanup_failed_start() {
 trap cleanup_failed_start ERR
 
 if [[ -n "$PREVIOUS_AUDIO_EXE" ]]; then
-  stop_verified_process "$PREVIOUS_AUDIO_PID" "$PREVIOUS_AUDIO_TICKS" "$PREVIOUS_AUDIO_EXE"
+  stop_verified_process "$PREVIOUS_AUDIO_PID" "$PREVIOUS_AUDIO_TICKS" "$PREVIOUS_AUDIO_EXE" "$PREVIOUS_AUDIO_EXE"
 fi
 echo "[3/4] audio.cpp is installed and will start after model/device selection."
 
@@ -476,7 +539,10 @@ with urllib.request.urlopen(request, timeout=5):
     pass
 PY
   fi
-  stop_verified_process "$PREVIOUS_DESIGNER_PID" "$PREVIOUS_DESIGNER_TICKS" "$PYTHON_REAL"
+  stop_verified_process \
+    "$PREVIOUS_DESIGNER_PID" "$PREVIOUS_DESIGNER_TICKS" "$PYTHON_REAL" \
+    "$PROJECT_ROOT/designer_server.py"
+  stop_orphaned_services
   DESIGNER_PORT="$(find_free_port 8765)"
   DESIGNER_OUT_LOG="$LOG_ROOT/designer.stdout.log"
   DESIGNER_ERROR_LOG="$LOG_ROOT/designer.stderr.log"

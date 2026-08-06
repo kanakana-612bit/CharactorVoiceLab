@@ -36,6 +36,23 @@ class LinuxLauncherStaticTest(unittest.TestCase):
         self.assertIn('if ! bash "$SCRIPT_DIR/setup_audio_cpp.sh" "${SETUP_ARGS[@]}"; then', launcher)
         self.assertIn("audio.cpp setup failed", launcher)
 
+    def test_linux_stop_recovers_project_owned_orphans(self):
+        stop = (ROOT / "scripts" / "stop_webui.sh").read_text(encoding="utf-8")
+        self.assertIn("process_has_exact_arg", stop)
+        self.assertIn('"$PROJECT_ROOT/designer_server.py"', stop)
+        self.assertIn("process_is_project_audio_cpp", stop)
+        self.assertIn("stop_project_orphans", stop)
+
+    def test_linux_start_stops_orphan_before_selecting_a_port(self):
+        launcher = (ROOT / "scripts" / "bootstrap_webui.sh").read_text(encoding="utf-8")
+        self.assertIn("stop_orphaned_services", launcher)
+        self.assertLess(
+            launcher.index("stop_orphaned_services", launcher.index("stop_orphaned_services") + 1),
+            launcher.index('DESIGNER_PORT="$(find_free_port 8765)"'),
+        )
+        self.assertIn('"$PROJECT_ROOT/designer_server.py"', launcher)
+        self.assertIn("process_is_project_audio_cpp", launcher)
+
     def test_feature_rebuild_cleans_stale_cmake_artifacts(self):
         setup = (ROOT / "scripts" / "setup_audio_cpp.sh").read_text(encoding="utf-8")
         self.assertIn('[[ -f "$BUILD_ROOT/CMakeCache.txt" ]]', setup)
