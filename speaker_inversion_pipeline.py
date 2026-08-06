@@ -163,6 +163,7 @@ def _compute_command(
         str(vram_limit_mib),
         "--target",
         str(target),
+        "--",
         *arguments,
     ]
 

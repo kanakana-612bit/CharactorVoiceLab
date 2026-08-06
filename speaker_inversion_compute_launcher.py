@@ -10,6 +10,11 @@ import sys
 from pathlib import Path
 
 
+def forwarded_arguments(values: list[str]) -> list[str]:
+    """Remove argparse's explicit end-of-options marker before target dispatch."""
+    return values[1:] if values[:1] == ["--"] else list(values)
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--gpu-index", type=int, required=True)
@@ -55,7 +60,7 @@ def main() -> int:
             f"{properties.name} / VRAM limit disabled",
             flush=True,
         )
-    sys.argv = [str(target), *args.arguments]
+    sys.argv = [str(target), *forwarded_arguments(args.arguments)]
     runpy.run_path(str(target), run_name="__main__")
     return 0
 

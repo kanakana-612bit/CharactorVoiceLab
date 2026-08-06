@@ -24,6 +24,14 @@ class OfficialV4Result:
     log: str
 
 
+def _failure_detail(log: str, returncode: int) -> str:
+    lines = [line.strip() for line in log.splitlines() if line.strip()]
+    if not lines:
+        return f"exit status {returncode}"
+    relevant = lines[-16:]
+    return " | ".join(relevant)[-8000:]
+
+
 def _gpu_index(device_id: str | None) -> int:
     value = str(device_id or "")
     if not value.startswith("cuda:"):
@@ -102,7 +110,7 @@ def render_official_v4(
             raise OfficialV4RuntimeError(f"Official v4 runtime could not start: {error}") from error
         log = "\n".join(part for part in (completed.stdout, completed.stderr) if part).strip()
         if completed.returncode:
-            detail = log.splitlines()[-1] if log else f"exit status {completed.returncode}"
+            detail = _failure_detail(log, completed.returncode)
             raise OfficialV4RuntimeError(f"Official v4 generation failed: {detail}")
         summary_path = output / "summary.json"
         try:

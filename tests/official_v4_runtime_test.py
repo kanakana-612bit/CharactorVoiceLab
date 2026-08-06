@@ -4,13 +4,26 @@ import subprocess
 import unittest
 from unittest import mock
 
-from official_v4_runtime import OfficialV4RuntimeError, render_official_v4
+from official_v4_runtime import (
+    OfficialV4RuntimeError,
+    _failure_detail,
+    render_official_v4,
+)
 
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 
 
 class OfficialV4RuntimeTest(unittest.TestCase):
+    def test_failure_detail_keeps_argparse_diagnostic_instead_of_only_last_line(self):
+        detail = _failure_detail(
+            "usage: infer.py [-h]\ninfer.py: error: unrecognized arguments: --checkpoint\n"
+            "Speaker Inversion failed: Upstream command exited with status 2.",
+            2,
+        )
+        self.assertIn("unrecognized arguments: --checkpoint", detail)
+        self.assertIn("status 2", detail)
+
     def test_cpu_is_rejected_before_starting_upstream(self):
         with self.assertRaises(OfficialV4RuntimeError):
             render_official_v4(

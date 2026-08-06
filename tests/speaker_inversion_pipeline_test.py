@@ -154,6 +154,7 @@ class SpeakerInversionPipelineTest(unittest.TestCase):
             pipeline.generate(args)
         command = captured[0]
         self.assertEqual(command[command.index("--checkpoint") + 1], str(self.paths["model"]))
+        self.assertEqual(command[command.index("--target") + 2], "--")
         self.assertEqual(command[command.index("--ref-embed") + 1], str(embedding))
         self.assertEqual(command[command.index("--gpu-index") + 1], "0")
         self.assertEqual(command[command.index("--vram-limit-mib") + 1], "0")
@@ -191,6 +192,7 @@ class SpeakerInversionPipelineTest(unittest.TestCase):
             pipeline.render(args)
         command = captured[0]
         self.assertIn("--no-ref", command)
+        self.assertEqual(command[command.index("--target") + 2], "--")
         self.assertNotIn("--ref-embed", command)
         self.assertEqual(command[command.index("--gpu-index") + 1], "1")
         summary = json.loads((output / "summary.json").read_text(encoding="utf-8"))
