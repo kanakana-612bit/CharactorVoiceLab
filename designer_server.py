@@ -546,25 +546,37 @@ class DesignerHandler(SimpleHTTPRequestHandler):
             except VoiceIdentityError as error:
                 self._send_json(HTTPStatus.BAD_REQUEST, {"error": str(error)})
                 return
-        observation = (
-            self.server.observation_store.begin(request, postprocess, observation_options)
-            if observation_options
-            else None
-        )
-        if observation and speaker_condition:
-            observation.record["request"]["speaker_condition"] = dict(
-                speaker_condition
-            )
-            observation.record["internal_conditions"]["speaker_condition"].update(
-                {
-                    "requested": True,
-                    "input_sha256": speaker_condition["sha256"],
-                    "input_state_f32le_sha256": speaker_condition[
-                        "state_f32le_sha256"
-                    ],
-                    "input_shape": speaker_condition["shape"],
-                }
-            )
+        observation = None
+        if observation_options:
+            try:
+                observation = self.server.observation_store.begin(
+                    request, postprocess, observation_options
+                )
+                if speaker_condition:
+                    observation.record["request"]["speaker_condition"] = dict(
+                        speaker_condition
+                    )
+                    condition_record = {
+                        "requested": True,
+                        "input_sha256": speaker_condition["sha256"],
+                        "input_artifact_sha256": speaker_condition["sha256"],
+                        "input_shape": speaker_condition.get("shape"),
+                        "input_state_hash_available": False,
+                    }
+                    state_digest = speaker_condition.get("state_f32le_sha256")
+                    if isinstance(state_digest, str):
+                        condition_record.update(
+                            {
+                                "input_state_f32le_sha256": state_digest,
+                                "input_state_hash_available": True,
+                            }
+                        )
+                    observation.record["internal_conditions"]["speaker_condition"].update(
+                        condition_record
+                    )
+            except Exception as error:  # Observation must never interrupt synthesis.
+                self.log_error("Observation setup failed: %s", error)
+                observation = None
         try:
             if is_official_v4(str(request.get("model") or "")):
                 self._perform_official_v4_request(
@@ -613,12 +625,21 @@ class DesignerHandler(SimpleHTTPRequestHandler):
                 timeout_seconds=self.server.upstream_timeout_seconds,
                 embedding=embedding,
             )
+            result_headers = dict(result.headers)
+            if speaker_condition:
+                result_headers["X-CVD-Speaker-Artifact-SHA256"] = speaker_condition[
+                    "sha256"
+                ]
+                if speaker_condition.get("shape"):
+                    result_headers["X-CVD-Speaker-Condition-Shape"] = "x".join(
+                        str(value) for value in speaker_condition["shape"]
+                    )
             self._deliver_audio_result(
                 body=result.wav_bytes,
                 status=HTTPStatus.OK,
                 content_type="audio/wav",
                 upstream_seconds=time.perf_counter() - started,
-                upstream_headers=result.headers,
+                upstream_headers=result_headers,
                 postprocess=postprocess,
                 observation=observation,
                 speaker_condition=speaker_condition,
@@ -642,6 +663,16 @@ class DesignerHandler(SimpleHTTPRequestHandler):
                     time.perf_counter() - started,
                 )
             self._send_json(HTTPStatus.UNPROCESSABLE_ENTITY, {"error": str(error)})
+        except Exception as error:  # Preserve an HTTP diagnostic for unexpected adapter defects.
+            message = f"Unexpected official v4 adapter failure: {type(error).__name__}: {error}"
+            self.log_error("%s", message)
+            if observation:
+                observation.finalize_error(
+                    "official_v4_adapter",
+                    message,
+                    time.perf_counter() - started,
+                )
+            self._send_json(HTTPStatus.INTERNAL_SERVER_ERROR, {"error": message})
 
     def _static_path_allowed(self, raw_path: str) -> bool:
         path = urllib.parse.unquote(raw_path)

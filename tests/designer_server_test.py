@@ -676,6 +676,87 @@ class LocalProxyIntegrationTest(unittest.TestCase):
         self.assertTrue(audio.startswith(b"RIFF"))
         self.assertEqual(render.call_args.kwargs["embedding"], None)
 
+    def test_official_v4_embedding_observation_uses_artifact_hash(self):
+        project = ROOT / "tests" / f"_official_v4_observation_{uuid.uuid4().hex}"
+        embedding_root = project / "runtime" / "speaker_inversion" / "embeddings"
+        embedding_root.mkdir(parents=True)
+        embedding = embedding_root / "observed.speaker.safetensors"
+        embedding.write_bytes(b"official-v4-observation-fixture")
+        embedding.with_suffix(".json").write_text(
+            json.dumps(
+                {
+                    "model": {"repository": "Aratako/Irodori-TTS-v4-Small"},
+                    "embedding": {"tokens": 16},
+                }
+            ),
+            encoding="utf-8",
+        )
+        self.addCleanup(shutil.rmtree, project, True)
+        payload = {
+            "model": "irodori-v4-small",
+            "input": "official v4 observation test",
+            "runtime": {"device_id": "cuda:0", "vram_limit_mib": 8000},
+            "backend_conditioning": {
+                "speaker_inversion_embedding": embedding.name,
+            },
+            "observation": {
+                "enabled": True,
+                "analyze_f0": False,
+                "capture_internal_conditions": True,
+            },
+        }
+        request = urllib.request.Request(
+            self.base_url + "/api/audio-cpp/speech",
+            data=json.dumps(payload).encode("utf-8"),
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        result = OfficialV4Result(
+            wav_bytes=sine_wav(),
+            headers={
+                "Content-Type": "audio/wav",
+                "X-CVD-Backend-ID": "irodori-v4-small",
+                "X-CVD-Backend-Runtime": "official_python",
+                "X-CVD-Speaker-Condition-Mode": "speaker_inversion",
+            },
+            log="test",
+        )
+        with mock.patch.object(MODULE, "PROJECT_ROOT", project):
+            with mock.patch.object(MODULE, "render_official_v4", return_value=result):
+                with urllib.request.urlopen(request) as response:
+                    response.read()
+                    observation_id = response.headers["X-CVD-Observation-ID"]
+        record = self.designer.observation_store.read(observation_id)
+        speaker = record["internal_conditions"]["speaker_condition"]
+        artifact_sha = hashlib.sha256(embedding.read_bytes()).hexdigest()
+        self.assertFalse(speaker["input_state_hash_available"])
+        self.assertNotIn("input_state_f32le_sha256", speaker)
+        self.assertEqual(speaker["input_artifact_sha256"], artifact_sha)
+        self.assertEqual(speaker["artifact_sha256"], artifact_sha)
+        self.assertTrue(speaker["matches_input_artifact"])
+        self.assertEqual(speaker["mode"], "speaker_inversion")
+
+    def test_unexpected_official_v4_failure_returns_json(self):
+        request = urllib.request.Request(
+            self.base_url + "/api/audio-cpp/speech",
+            data=json.dumps(
+                {
+                    "model": "irodori-v4-small",
+                    "input": "unexpected adapter failure test",
+                    "runtime": {"device_id": "cuda:0", "vram_limit_mib": 8000},
+                }
+            ).encode("utf-8"),
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        with mock.patch.object(MODULE, "render_official_v4", side_effect=KeyError("fixture")):
+            with self.assertRaises(urllib.error.HTTPError) as raised:
+                urllib.request.urlopen(request)
+        self.assertEqual(raised.exception.code, 500)
+        payload = json.loads(raised.exception.read().decode("utf-8"))
+        self.assertIn("Unexpected official v4 adapter failure", payload["error"])
+        self.assertIn("KeyError", payload["error"])
+
     def test_output_demo_is_archived_with_generation_metadata(self):
         payload = {
             "model": "irodori-vdes",

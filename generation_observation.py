@@ -273,12 +273,31 @@ def merge_upstream_observation_headers(
         if isinstance(digest, str) and re.fullmatch(r"[a-fA-F0-9]{64}", digest):
             internal[field].update({"observed": True, "sha256": digest.lower(), "reason": None})
     speaker = internal["speaker_condition"]
-    speaker_shape = headers.get("X-AudioCpp-Speaker-Condition-Shape")
+    artifact_digest = headers.get("X-CVD-Speaker-Artifact-SHA256")
+    if isinstance(artifact_digest, str) and re.fullmatch(r"[a-fA-F0-9]{64}", artifact_digest):
+        speaker.update(
+            {
+                "observed": True,
+                "artifact_sha256": artifact_digest.lower(),
+                "reason": None,
+            }
+        )
+        expected_artifact_sha = speaker.get("input_artifact_sha256")
+        speaker["matches_input_artifact"] = (
+            artifact_digest.lower() == expected_artifact_sha
+            if isinstance(expected_artifact_sha, str)
+            else None
+        )
+    speaker_shape = headers.get("X-AudioCpp-Speaker-Condition-Shape") or headers.get(
+        "X-CVD-Speaker-Condition-Shape"
+    )
     if isinstance(speaker_shape, str) and re.fullmatch(
         r"[1-9][0-9]*x[1-9][0-9]*", speaker_shape
     ):
         speaker["shape"] = [int(value) for value in speaker_shape.split("x")]
-    speaker_mode = headers.get("X-AudioCpp-Speaker-Condition-Mode")
+    speaker_mode = headers.get("X-AudioCpp-Speaker-Condition-Mode") or headers.get(
+        "X-CVD-Speaker-Condition-Mode"
+    )
     if speaker_mode in {"none", "reference_audio", "speaker_inversion"}:
         speaker["mode"] = speaker_mode
     expected_state_sha = speaker.get("input_state_f32le_sha256")
