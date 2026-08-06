@@ -15,6 +15,16 @@ def forwarded_arguments(values: list[str]) -> list[str]:
     return values[1:] if values[:1] == ["--"] else list(values)
 
 
+def prepare_target_import_path(target: Path) -> Path:
+    """Match Python's script execution import path before dispatching with runpy."""
+    source = target.resolve().parent
+    source_text = str(source)
+    while source_text in sys.path:
+        sys.path.remove(source_text)
+    sys.path.insert(0, source_text)
+    return source
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--gpu-index", type=int, required=True)
@@ -60,6 +70,7 @@ def main() -> int:
             f"{properties.name} / VRAM limit disabled",
             flush=True,
         )
+    prepare_target_import_path(target)
     sys.argv = [str(target), *forwarded_arguments(args.arguments)]
     runpy.run_path(str(target), run_name="__main__")
     return 0
