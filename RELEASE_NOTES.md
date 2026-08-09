@@ -38,6 +38,10 @@
   tongue body reaches its vowel target, and velopharyngeal closure follows with
   a short lag, reducing persistent lateral/tap-like intervals without injecting
   a synthetic release burst.
+- Retained the tract-scaled classic 1.8 kHz synthetic alveolar F2 locus as a
+  lower design bound when the pooled vowel-conditioned locus equation falls
+  into the weak low/back-vowel transition region. The bound is labeled as a
+  synthetic-speech engineering prior rather than a biological norm.
 - Added a Birkholz/VocalTractLab methodology citation without importing VTL code,
   speaker geometries, area functions, recordings, or fitted coefficients.
 - Documented the reduced but remaining integer tube-count quantization and the current

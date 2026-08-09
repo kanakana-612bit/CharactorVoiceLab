@@ -8378,7 +8378,7 @@ function adaptCoronalNasalReleaseArea(
       ...areaFunction,
       acoustic_place_target_assist: {
         active: false,
-        schema_version: "coronal_nasal_release_target_0.2",
+        schema_version: "coronal_nasal_release_target_0.3",
         reason: "four_resonance_solution_unavailable",
       },
     };
@@ -8403,7 +8403,16 @@ function adaptCoronalNasalReleaseArea(
     ?? 1800;
   const locusSlope = 0.535;
   const locusInterceptHz = 848.21 * tractLengthScale;
-  const targetF2Hz = clamp(locusSlope * vowelTargetF2Hz + locusInterceptHz, 1350, 2450);
+  const regressionTargetF2Hz = locusSlope * vowelTargetF2Hz + locusInterceptHz;
+  // A low/back vowel can pull the pooled locus equation close to the labial
+  // transition region. Preserve the classic 1.8 kHz synthetic alveolar locus
+  // as a tract-length-scaled design floor, not as a biological population norm.
+  const syntheticAlveolarLocusFloorHz = 1800 * tractLengthScale;
+  const targetF2Hz = clamp(
+    Math.max(regressionTargetF2Hz, syntheticAlveolarLocusFloorHz),
+    1350,
+    2450
+  );
   const targets = initialResonances.map((peak) => peak.frequency_hz);
   targets[1] = targetF2Hz;
   const weights = [0.35, 5, 0.55, 0.25];
@@ -8427,6 +8436,8 @@ function adaptCoronalNasalReleaseArea(
     areas: initialAreas.map((area) => Number(area.toFixed(3))),
     target_f2_hz: Number(targetF2Hz.toFixed(2)),
     vowel_target_f2_hz: Number(vowelTargetF2Hz.toFixed(2)),
+    regression_target_f2_hz: Number(regressionTargetF2Hz.toFixed(2)),
+    synthetic_alveolar_locus_floor_hz: Number(syntheticAlveolarLocusFloorHz.toFixed(2)),
     analysis_oversampling_factor: Math.min(2, physicalTubeOversamplingFactor()),
     loss: currentTubeLossParams(constraints),
   });
@@ -8507,13 +8518,16 @@ function adaptCoronalNasalReleaseArea(
     hydraulic_loss_scales: adjustedCrossSections.map((section) => section.hydraulic_loss_scale),
     acoustic_place_target_assist: {
       active: true,
-      schema_version: "coronal_nasal_release_target_0.2",
-      method: "regularized finite-difference inverse A(x) control toward a vowel-conditioned alveolar locus equation",
+      schema_version: "coronal_nasal_release_target_0.3",
+      method: "regularized finite-difference inverse A(x) control toward a vowel-conditioned alveolar locus equation with a tract-scaled synthetic 1.8 kHz floor",
       target_role: "strengthen the alveolar place cue in the nasal-to-vowel F2 transition",
       morphology_preservation: "the character-derived tongue-blade geometry and anchored residual contact area are retained",
       following_vowel: followingVowel,
       target_f2_hz: Number(targetF2Hz.toFixed(3)),
       vowel_target_f2_hz: Number(vowelTargetF2Hz.toFixed(3)),
+      regression_target_f2_hz: Number(regressionTargetF2Hz.toFixed(3)),
+      synthetic_alveolar_locus_floor_hz: Number(syntheticAlveolarLocusFloorHz.toFixed(3)),
+      target_selection: "max(regression target, tract-scaled classic synthetic alveolar locus)",
       locus_equation: {
         slope: locusSlope,
         intercept_hz_at_15_5_cm: 848.21,
@@ -8536,7 +8550,7 @@ function adaptCoronalNasalReleaseArea(
       initial_resonances_hz: initialResonances.map((peak) => peak.frequency_hz),
       final_resonances_hz: currentResonances.map((peak) => peak.frequency_hz),
       final_f2_relative_error: Number((Math.abs(currentResonances[1].frequency_hz - targetF2Hz) / targetF2Hz).toFixed(6)),
-      limitation: "The pooled alveolar locus equation is a cross-manner engineering prior, not a Japanese population norm or an individual measurement.",
+      limitation: "The pooled alveolar locus equation and classic 1.8 kHz synthetic locus are engineering priors, not Japanese population norms or individual measurements.",
     },
   };
   state.phoneticAreaCalibrationCache.set(signature, adapted);
@@ -12247,7 +12261,7 @@ function synthesizeCoupledNasalSyllable(context) {
     oral_render_duration_ms: Number((oralSampleCount * 1000 / sampleRate).toFixed(2)),
   };
   const nasalModel = {
-    schema_version: "nasal_consonant_model_1.4",
+    schema_version: "nasal_consonant_model_1.5",
     nasal_class: nasalClass,
     token,
     following_vowel: parsed.vowel,

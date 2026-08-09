@@ -578,6 +578,7 @@ if (process.env.CVD_NASAL_HIGH_RES_BENCHMARK === "1") {
   const benchmarkAudio = synthesizeSyllable(benchmarkToken);
   if (benchmarkToken.startsWith("n")) {
     const topology = benchmarkAudio.nasal_model?.acoustic_topology;
+    const placeCue = benchmarkAudio.nasal_model?.place_cue_model;
     if (topology?.schema_version !== "coronal_multichannel_nasal_waveguide_0.2"
       || topology?.oral_channel_count !== 3
       || topology?.scattering !== "lossy_multiport_pressure_junction_graph"
@@ -587,7 +588,10 @@ if (process.env.CVD_NASAL_HIGH_RES_BENCHMARK === "1") {
       || topology?.channel_split_node >= topology?.channel_merge_node
       || topology?.channel_merge_position - topology?.channel_split_position > 0.3
       || topology?.requested_oral_contact_position <= topology?.channel_split_position
-      || topology?.requested_oral_contact_position >= topology?.channel_merge_position) {
+      || topology?.requested_oral_contact_position >= topology?.channel_merge_position
+      || placeCue?.schema_version !== "coronal_nasal_release_target_0.3"
+      || placeCue?.target_f2_hz < placeCue?.synthetic_alveolar_locus_floor_hz - 0.01
+      || placeCue?.final_f2_relative_error > 0.08) {
       throw new Error("The representative /n/ benchmark did not use the finite-contact three-channel waveguide");
     }
   }
@@ -600,6 +604,7 @@ if (process.env.CVD_NASAL_HIGH_RES_BENCHMARK === "1") {
     output_sample_rate_hz: benchmarkAudio.sampleRate,
     resolution_model: benchmarkAudio.nasal_model.acoustic_topology.resolution_model,
     acoustic_topology: benchmarkAudio.nasal_model.acoustic_topology,
+    place_cue_model: benchmarkAudio.nasal_model.place_cue_model,
     stage_timing: benchmarkAudio.nasal_model.performance_timing,
     finite: benchmarkAudio.samples.every(Number.isFinite),
     peak: benchmarkAudio.samples.reduce((peak, sample) => Math.max(peak, Math.abs(sample)), 0),
@@ -784,9 +789,9 @@ if (process.env.CVD_NASAL_PLACE_DIAGNOSTIC === "1") {
   }, null, 2));
   process.exit(0);
 }
-if (ma.nasal_model?.schema_version !== "nasal_consonant_model_1.4"
+if (ma.nasal_model?.schema_version !== "nasal_consonant_model_1.5"
   || ma.nasal_model.nasal_class !== "m"
-  || na.nasal_model?.schema_version !== "nasal_consonant_model_1.4"
+  || na.nasal_model?.schema_version !== "nasal_consonant_model_1.5"
   || na.nasal_model?.nasal_class !== "n"
   || moraicNasal.nasal_model?.nasal_class !== "N"
   || moraicNasal.vowel !== null) {
@@ -820,7 +825,7 @@ if (na.nasal_model.acoustic_topology?.schema_version !== "coronal_multichannel_n
 }
 for (const alveolarAudio of [na, ni, nu, ne, no]) {
   if (alveolarAudio.nasal_model?.acoustic_topology?.schema_version !== "coronal_multichannel_nasal_waveguide_0.2"
-    || alveolarAudio.nasal_model?.place_cue_model?.schema_version !== "coronal_nasal_release_target_0.2"
+    || alveolarAudio.nasal_model?.place_cue_model?.schema_version !== "coronal_nasal_release_target_0.3"
     || alveolarAudio.nasal_model.place_cue_model.final_f2_relative_error > 0.08
     || !alveolarAudio.nasal_model.place_cue_model.source_keys?.includes("iskarousFowlerWhalen2010LocusEquations")
     || alveolarAudio.samples.some((sample) => !Number.isFinite(sample))
@@ -858,17 +863,19 @@ if (ma.nasal_model.place_gesture?.kind !== "bilabial_end_closure"
   || ma.nasal_model.coronal_release_area_function !== null
   || na.nasal_model.place_gesture?.kind !== "coronal_alveolar"
   || na.nasal_model.coronal_release_area_function?.schema_version !== "nasal_oral_closure_area_0.4"
-  || na.nasal_model.place_cue_model?.schema_version !== "coronal_nasal_release_target_0.2"
+  || na.nasal_model.place_cue_model?.schema_version !== "coronal_nasal_release_target_0.3"
   || na.nasal_model.place_cue_model?.active !== true
   || !na.nasal_model.place_cue_model.source_keys?.includes("malecot1956NasalTransitions")
   || !na.nasal_model.place_cue_model.source_keys?.includes("iskarousFowlerWhalen2010LocusEquations")
   || na.nasal_model.place_cue_model.locus_equation?.slope !== 0.535
+  || na.nasal_model.place_cue_model.target_f2_hz
+    < na.nasal_model.place_cue_model.synthetic_alveolar_locus_floor_hz
   || na.nasal_model.place_cue_model.final_f2_relative_error > 0.08
   || na.nasal_model.place_cue_model.active_control_points.some((point) => point.gain < 0.62 || point.gain > 1.65)
   || nu.nasal_model.place_cue_model.active_control_points.some((point) => point.gain < 0.62 || point.gain > 1.65)
-  || na.nasal_model.coronal_release_area_function.place_gesture_strength !== 0.8
+  || na.nasal_model.coronal_release_area_function.place_gesture_strength !== 0.32
   || ni.nasal_model.coronal_release_area_function.place_gesture_strength !== 0.5
-  || nu.nasal_model.coronal_release_area_function.place_gesture_strength !== 0.8
+  || nu.nasal_model.coronal_release_area_function.place_gesture_strength !== 0.38
   || Math.abs(na.nasal_model.place_cue_model.final_resonances_hz[1] - na.nasal_model.place_cue_model.target_f2_hz)
     >= Math.abs(na.nasal_model.place_cue_model.initial_resonances_hz[1] - na.nasal_model.place_cue_model.target_f2_hz)
   || na.nasal_model.coronal_release_area_function.closure_area_cm2
