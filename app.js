@@ -65,6 +65,7 @@ const state = {
   profileDrag: null,
   profileCursor: { point: null, target: null },
   lastWav: null,
+  outputSampleRate: 44100,
   vowelAreaTuning: {},
   vowelWidthTuning: {},
   tractEditMode: "area",
@@ -328,6 +329,7 @@ const els = {
   physicalGlottalCanvas: document.getElementById("physicalGlottalCanvas"),
   physicalCrossSectionCanvas: document.getElementById("physicalCrossSectionCanvas"),
   physicalModelStatus: document.getElementById("physicalModelStatus"),
+  outputSampleRateSelects: Array.from(document.querySelectorAll("[data-output-sample-rate]")),
   physicalShowBase: document.getElementById("physicalShowBase"),
   physicalShowArticulation: document.getElementById("physicalShowArticulation"),
   physicalShowTube: document.getElementById("physicalShowTube"),
@@ -941,7 +943,7 @@ function updateAreaTuningFromPoint(point) {
   const areaFunction = buildTubeAreaFunction(
     state.vocalTractGeometry,
     drag.vowel,
-    PREVIEW_SAMPLE_RATE,
+    currentOutputSampleRate(),
     currentArticulationMotorProfile(state.constraints)
   );
   if (drag.mode === "width") {
@@ -1868,7 +1870,7 @@ function drawTractProfileCanvas(canvas, geometry, surface = "detail", shouldRend
   const plot = { left: 46, right: width - 18, top: 30, bottom: height - 40 };
   const sections = geometry.sections;
   const vowel = selectedVowel();
-  const areaFunction = buildTubeAreaFunction(geometry, vowel, PREVIEW_SAMPLE_RATE);
+  const areaFunction = buildTubeAreaFunction(geometry, vowel, currentOutputSampleRate());
   const vowelSections = areaFunction.areas_cm2.map((area, index) => ({
     position: areaFunction.areas_cm2.length > 1 ? index / (areaFunction.areas_cm2.length - 1) : 0.5,
     vowel_area_cm2: area,
@@ -1996,7 +1998,7 @@ function drawTractCrossSectionProfileCanvas(canvas, geometry, vowel) {
   ctx.fillStyle = "#f8f6ef";
   ctx.fillRect(0, 0, width, height);
   if (!geometry?.sections?.length) return;
-  const areaFunction = buildTubeAreaFunction(geometry, vowel, PREVIEW_SAMPLE_RATE);
+  const areaFunction = buildTubeAreaFunction(geometry, vowel, currentOutputSampleRate());
   const crossSections = areaFunction.cross_sections_2_5d ?? [];
   const positions = [0.16, 0.42, 0.7, 0.92];
   const maxDimension = Math.max(2.8, ...crossSections.flatMap((section) => [section.sagittal_height_cm, section.coronal_width_cm]));
@@ -2048,7 +2050,7 @@ function drawTractCrossSectionProfileCanvas(canvas, geometry, vowel) {
 function drawPhysicalModelWorkspace(geometry = state.vocalTractGeometry) {
   if (state.activeTab !== "physicalModelTab" || !geometry?.sections?.length) return;
   const vowel = selectedVowel();
-  const areaFunction = buildTubeAreaFunction(geometry, vowel, PREVIEW_SAMPLE_RATE);
+  const areaFunction = buildTubeAreaFunction(geometry, vowel, currentOutputSampleRate());
   const transfer = currentPhysicalTransferAnalysis(geometry, vowel, areaFunction);
   drawPhysicalSagittalModel(geometry, areaFunction);
   drawPhysicalAreaProfile(geometry);
@@ -2421,7 +2423,7 @@ function renderPhysicalModelReadouts(geometry, areaFunction, transfer) {
   const transferPeaks = [...(transfer?.resonances ?? [])].sort((a, b) => a.frequency_hz - b.frequency_hz).slice(0, 4);
 
   if (els.physicalModelStatus) {
-    els.physicalModelStatus.textContent = `/${vowel}/ · ${areaFunction.tube_count}区間 · ${PREVIEW_SAMPLE_RATE / 1000} kHz`;
+    els.physicalModelStatus.textContent = `/${vowel}/ · ${areaFunction.tube_count}区間 · ${formatOutputSampleRate(currentOutputSampleRate())}`;
   }
   if (els.physicalVtlValue) els.physicalVtlValue.textContent = `${geometry.vocal_tract_length_cm.toFixed(2)} cm`;
   if (els.physicalVolumeValue) els.physicalVolumeValue.textContent = `${volume.toFixed(1)} cm³`;
@@ -2602,7 +2604,7 @@ function drawNasalProfile() {
   const token = selectedNasalToken();
   const parsed = parseSyllableToken(token);
   const tuning = normalizedNasalTuning(nasalClassFromToken(token));
-  const baseArea = buildTubeAreaFunction(geometry, parsed.vowel, PREVIEW_SAMPLE_RATE);
+  const baseArea = buildTubeAreaFunction(geometry, parsed.vowel, currentOutputSampleRate());
   const closure = buildNasalOralClosureAreaFunction(baseArea, tuning);
   const plot = { left: 46, right: width - 18, top: 28, bottom: height - 72 };
   const closureBand = { top: height - 51, bottom: height - 20 };
@@ -5134,6 +5136,7 @@ function buildTtsConfiguration() {
     automatic_retry: false,
     compiled_voice_identity_id: state.activeCompiledIdentityId,
     caption_guidance_scale: num(els.ttsCaptionGuidanceInput, 2),
+    output_sample_rate_hz: currentOutputSampleRate(),
     f0_postprocess: {
       enabled: els.ttsF0CorrectionEnabled?.checked !== false,
       strength: num(els.ttsF0CorrectionStrength, 1),
@@ -5576,6 +5579,7 @@ function ttsF0CorrectionSettings() {
   return {
     f0_correction_enabled: els.ttsF0CorrectionEnabled?.checked !== false,
     f0_correction_strength: num(els.ttsF0CorrectionStrength, 1),
+    output_sample_rate_hz: currentOutputSampleRate(),
   };
 }
 
@@ -5610,6 +5614,7 @@ function renderTtsRequestSummary(profile = buildVoiceControlProfile()) {
     ["F0 TARGET", `${Math.round(requestProfile.identity_anchor.f0_mean_hz)} Hz`],
     ["RATE", `${Number(requestProfile.identity_anchor.speaking_rate).toFixed(2)}x`],
     ["DURATION", `${Number(request.options.duration_scale).toFixed(2)}x`],
+    ["SAMPLE RATE", formatOutputSampleRate(request.postprocess.output_sample_rate_hz)],
   ];
   els.ttsRequestSummary.innerHTML = "";
   for (const [labelText, valueText] of items) {
@@ -5951,6 +5956,7 @@ async function generateTtsDemo() {
     compiled_voice_identity_id: state.activeCompiledIdentityId,
     speaking_rate: profile.identity_anchor.speaking_rate,
     f0_target_hz: profile.identity_anchor.f0_mean_hz,
+    output_sample_rate_hz: currentOutputSampleRate(),
   };
   state.lastIdentityEvaluation = null;
   renderTtsIdentityEvaluation(null);
@@ -5980,6 +5986,7 @@ async function generateTtsDemo() {
     const targetF0 = responseNumber("X-CVD-F0-Target-Hz");
     const outputF0 = responseNumber("X-CVD-F0-Output-Hz");
     const shiftSemitones = responseNumber("X-CVD-F0-Shift-Semitones");
+    const outputSampleRate = responseNumber("X-CVD-Output-Sample-Rate-Hz");
     const observationId = response.headers.get("X-CVD-Observation-ID");
     const outputArchiveStatus = response.headers.get("X-CVD-Output-Archive-Status");
     const rawOutputId = response.headers.get("X-CVD-Output-ID");
@@ -6026,12 +6033,15 @@ async function generateTtsDemo() {
       const identitySummary = identity ? ` / identity ${identity.name}` : " / identity未コンパイル";
       const evaluationSummary = evaluation?.status === "warning" ? " / 評価警告あり" : " / 評価完了";
       const observationSummary = observationId ? ` / observation ${observationId}` : "";
+      const sampleRateSummary = Number.isFinite(outputSampleRate)
+        ? ` / ${formatOutputSampleRate(outputSampleRate)}`
+        : "";
       const archiveSummary = outputArchiveStatus === "saved" && outputPath
         ? ` / 保存 ${outputPath}`
         : outputArchiveStatus === "failed" ? " / 自動保存失敗" : "";
       els.ttsDemoStatus.textContent =
         `生成完了 / ${request.model} / 20 Step / 1候補 / seed ${request.seed}` +
-        `${identitySummary}${evaluationSummary}${observationSummary}${archiveSummary}${correctionSummary}`;
+        `${identitySummary}${evaluationSummary}${observationSummary}${archiveSummary}${sampleRateSummary}${correctionSummary}`;
     }
     setAudioCppStatus("ready", "接続済み");
   } catch (error) {
@@ -6422,6 +6432,7 @@ function buildExport() {
       data_source_set: els.dataSourceInput.value,
       image_analysis_weight: Number((state.appliedImageWeight ?? selectedImageWeight()).toFixed(4)),
       preview_synthesis_backend: "tube",
+      output_sample_rate_hz: currentOutputSampleRate(),
       tts_output_language: els.ttsOutputLanguageInput?.value ?? "ja-JP",
       syllable_dataset_set: selectedSyllableSetKey(),
       dataset_prefix: els.datasetPrefixInput?.value?.trim() || "voice_profile",
@@ -7637,7 +7648,42 @@ function currentPhoneticTargetSummary() {
 }
 
 const PREVIEW_REFERENCE_SAMPLE_RATE = 22050;
+// Legacy/default rate for old profiles; live synthesis uses currentOutputSampleRate().
 const PREVIEW_SAMPLE_RATE = 44100;
+const SUPPORTED_OUTPUT_SAMPLE_RATES = Object.freeze([44100, 48000]);
+
+function normalizeOutputSampleRate(value, fallback = PREVIEW_SAMPLE_RATE) {
+  const numeric = Math.round(Number(value));
+  return SUPPORTED_OUTPUT_SAMPLE_RATES.includes(numeric) ? numeric : fallback;
+}
+
+function currentOutputSampleRate() {
+  return normalizeOutputSampleRate(state.outputSampleRate);
+}
+
+function formatOutputSampleRate(sampleRate = currentOutputSampleRate()) {
+  return sampleRate === 44100 ? "44.1 kHz" : "48 kHz";
+}
+
+function setOutputSampleRate(value, { redraw = true } = {}) {
+  state.outputSampleRate = normalizeOutputSampleRate(value);
+  for (const select of els.outputSampleRateSelects ?? []) select.value = String(state.outputSampleRate);
+  state.lastWav = null;
+  state.ttsResultBlob = null;
+  if (state.ttsResultUrl) URL.revokeObjectURL(state.ttsResultUrl);
+  state.ttsResultUrl = null;
+  state.physicalTransferCache = null;
+  if (els.downloadTtsDemoBtn) els.downloadTtsDemoBtn.disabled = true;
+  if (els.ttsDemoAudio) {
+    els.ttsDemoAudio.removeAttribute("src");
+    els.ttsDemoAudio.load();
+  }
+  if (redraw) {
+    renderTtsRequestSummary();
+    renderConstraints();
+    draw();
+  }
+}
 const AREA_TUNING_HANDLES = Object.freeze([0.08, 0.2, 0.34, 0.5, 0.66, 0.82, 0.94]);
 const AREA_TUNING_GAIN_MIN = 0.45;
 const AREA_TUNING_GAIN_MAX = 1.8;
@@ -8109,7 +8155,7 @@ function areaStats(areas, start, end) {
 }
 
 function synthesizeTubeVowel(vowel = selectedVowel(), options = {}) {
-  const sampleRate = PREVIEW_SAMPLE_RATE;
+  const sampleRate = currentOutputSampleRate();
   const constraints = state.constraints;
   const geometry = state.vocalTractGeometry ?? buildVocalTractGeometry();
   const vtl = geometry?.vocal_tract_length_cm ?? constraints.vocal_tract_length_cm?.center ?? 15.5;
@@ -8580,7 +8626,7 @@ function smoothAreaSeries(values, passes = 1) {
 
 function synthesizeTubeSourceSamples(options) {
   const sampleCount = Math.max(1, Math.round(options.sampleCount ?? 1));
-  const sampleRate = Math.max(8000, options.sampleRate ?? PREVIEW_SAMPLE_RATE);
+  const sampleRate = Math.max(8000, options.sampleRate ?? currentOutputSampleRate());
   const out = new Float32Array(sampleCount);
   if (options.sourceMode === "impulse") {
     out[0] = options.impulseAmplitude ?? 1;
@@ -8777,7 +8823,7 @@ function synthesizeBranchedNasalOralTube(oralAreas, nasalAreas, options) {
   const oralCount = Math.max(4, oralAreas.length);
   const nasalCount = Math.max(3, nasalAreas.length);
   const sampleCount = Math.max(1, Math.round(options.sampleCount ?? 1));
-  const sampleRate = Math.max(8000, options.sampleRate ?? PREVIEW_SAMPLE_RATE);
+  const sampleRate = Math.max(8000, options.sampleRate ?? currentOutputSampleRate());
   const vpJunction = clamp(
     Math.round((oralCount - 1) * clamp(options.vpJunctionPosition ?? 0.34, 0.12, 0.72)),
     2,
@@ -9113,7 +9159,7 @@ function buildTubeDistributedLossModel(lossParams, sampleRate, tubeCount) {
 }
 
 function analyzeTubeTransfer(vowel = selectedVowel(), options = {}) {
-  const sampleRate = options.sampleRate ?? PREVIEW_SAMPLE_RATE;
+  const sampleRate = options.sampleRate ?? currentOutputSampleRate();
   const constraints = options.constraints ?? state.constraints;
   const geometry = options.geometry ?? state.vocalTractGeometry ?? buildVocalTractGeometry();
   const motorProfile = options.motorProfile ?? currentArticulationMotorProfile(constraints);
@@ -9833,7 +9879,7 @@ function renderNasalParameterSummary(tuning, sideCavity) {
   const coarticulationStartMs = Math.max(0, tuning.hold_duration_ms - tuning.coarticulation_lead_ms);
   const vowelTargetMs = tuning.hold_duration_ms + tuning.transition_ms;
   const nasalPath = tuning.nasal_class !== "N"
-    ? buildNasalPathAreaFunction(state.constraints, PREVIEW_SAMPLE_RATE)
+    ? buildNasalPathAreaFunction(state.constraints, currentOutputSampleRate())
     : null;
   const coupling = nasalPath
     ? nasalCouplingModel(tuning, nasalPath.areas_cm2[0])
@@ -10491,7 +10537,7 @@ function synthesizeCoupledNasalSyllable(context) {
 
 function synthesizeNasalSyllable(token, parsed, options = {}) {
   const constraints = state.constraints;
-  const sampleRate = PREVIEW_SAMPLE_RATE;
+  const sampleRate = currentOutputSampleRate();
   const nasalClass = parsed.moraic_nasal ? "N" : parsed.consonant;
   const tuning = normalizedNasalTuning(nasalClass, options.manualTuning !== false);
   const vowelAudio = synthesizeVowel(parsed.vowel);
@@ -11019,6 +11065,10 @@ function applyProfile(data) {
   }
   state.voiceControlOverrides = voiceControlProfile?.normalizeOverrides(savedVoiceOverrides) ?? {};
   const savedTtsConfiguration = data.tts_configuration ?? {};
+  setOutputSampleRate(
+    data.inputs?.output_sample_rate_hz ?? savedTtsConfiguration.output_sample_rate_hz ?? PREVIEW_SAMPLE_RATE,
+    { redraw: false }
+  );
   state.ttsCaptionManual = Boolean(savedTtsConfiguration.caption_override);
   state.activeCompiledIdentityId = savedTtsConfiguration.compiled_voice_identity_id || null;
   state.activeCompiledIdentity = null;
@@ -11289,6 +11339,9 @@ function init() {
     els.physicalShowSideBranches,
   ]) {
     toggle?.addEventListener("change", draw);
+  }
+  for (const select of els.outputSampleRateSelects ?? []) {
+    select.addEventListener("change", () => setOutputSampleRate(select.value));
   }
   els.analyzeBtn.addEventListener("click", runBasicAnalysis);
   els.recalculateBtn?.addEventListener("click", runDetailRecalculation);

@@ -2,6 +2,8 @@
 
 ## Ver 0.2 Runtime Update - 2026-08-05
 
+- Added a synchronized 44.1/48 kHz project output setting for physical previews,
+  syllable exports, TTS playback/download, and locally archived output WAVs.
 - `audio.cpp` no longer starts during WebUI bootstrap. The TTS Model screen starts it
   after model and compute-device selection, and replaces it when those conditions change.
 - Added synchronized CPU/GPU selection to the TTS Model and Output Demo screens.

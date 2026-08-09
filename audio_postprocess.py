@@ -146,6 +146,60 @@ def _encode_pcm16_mono(samples: Any, sample_rate: int) -> bytes:
     return output.getvalue()
 
 
+def convert_wav_sample_rate(
+    wav_bytes: bytes,
+    target_sample_rate: int,
+) -> tuple[bytes, dict[str, int | bool | str]]:
+    """Return a PCM WAV at 44.1 or 48 kHz, preserving native-rate bytes when possible."""
+
+    if target_sample_rate not in {44100, 48000}:
+        raise AudioPostprocessError("Output sample rate must be 44100 or 48000 Hz.")
+    try:
+        with wave.open(io.BytesIO(wav_bytes), "rb") as source:
+            if source.getcomptype() != "NONE":
+                raise AudioPostprocessError("Sample-rate conversion requires uncompressed PCM WAV output.")
+            channels = source.getnchannels()
+            sample_width = source.getsampwidth()
+            source_sample_rate = source.getframerate()
+            frames = source.readframes(source.getnframes())
+    except (wave.Error, EOFError) as error:
+        raise AudioPostprocessError("TTS backend returned an invalid WAV file.") from error
+    if channels < 1 or sample_width not in {1, 2, 3, 4} or source_sample_rate < 8000:
+        raise AudioPostprocessError("Sample-rate conversion received unsupported WAV metadata.")
+    metadata: dict[str, int | bool | str] = {
+        "schema_version": "cvd_output_sample_rate_0.1",
+        "source_sample_rate_hz": source_sample_rate,
+        "output_sample_rate_hz": target_sample_rate,
+        "resampled": source_sample_rate != target_sample_rate,
+        "method": "native_passthrough",
+    }
+    if source_sample_rate == target_sample_rate:
+        return wav_bytes, metadata
+    try:
+        audioop = importlib.import_module("audioop")
+    except ImportError as error:
+        raise AudioPostprocessError("PCM sample-rate conversion is unavailable in this Python runtime.") from error
+    try:
+        converted, _state = audioop.ratecv(
+            frames,
+            sample_width,
+            channels,
+            source_sample_rate,
+            target_sample_rate,
+            None,
+        )
+    except (ValueError, audioop.error) as error:
+        raise AudioPostprocessError(f"PCM sample-rate conversion failed: {error}") from error
+    output = io.BytesIO()
+    with wave.open(output, "wb") as target:
+        target.setnchannels(channels)
+        target.setsampwidth(sample_width)
+        target.setframerate(target_sample_rate)
+        target.writeframes(converted)
+    metadata["method"] = "stdlib_audioop_ratecv"
+    return output.getvalue(), metadata
+
+
 def analyze_wav_f0(
     wav_bytes: bytes,
     maximum_seconds: float | None = None,

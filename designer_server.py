@@ -24,6 +24,7 @@ from audio_cpp_runtime import AudioCppRuntimeError
 from audio_postprocess import (
     AudioPostprocessError,
     analyze_wav_f0,
+    convert_wav_sample_rate,
     correct_wav_f0,
     postprocess_dependency_status,
     psola_available,
@@ -868,14 +869,21 @@ class DesignerHandler(SimpleHTTPRequestHandler):
     ) -> None:
         upstream_body = body
         correction_metadata = None
+        sample_rate_metadata = None
         postprocess_seconds = 0.0
         if postprocess and content_type == "audio/wav":
             postprocess_started = time.perf_counter()
-            body, correction_metadata = correct_wav_f0(
-                body,
-                target_hz=postprocess["target_hz"],
-                strength=postprocess["strength"],
-            )
+            if "target_hz" in postprocess:
+                body, correction_metadata = correct_wav_f0(
+                    body,
+                    target_hz=postprocess["target_hz"],
+                    strength=postprocess["strength"],
+                )
+            if "output_sample_rate_hz" in postprocess:
+                body, sample_rate_metadata = convert_wav_sample_rate(
+                    body,
+                    target_sample_rate=postprocess["output_sample_rate_hz"],
+                )
             postprocess_seconds = time.perf_counter() - postprocess_started
         observation_written = False
         if observation:
@@ -924,6 +932,15 @@ class DesignerHandler(SimpleHTTPRequestHandler):
         self.send_header("Content-Type", content_type)
         self.send_header("Content-Length", str(len(body)))
         self.send_header("Cache-Control", "no-store")
+        if sample_rate_metadata:
+            self.send_header(
+                "X-CVD-Output-Sample-Rate-Hz",
+                str(sample_rate_metadata["output_sample_rate_hz"]),
+            )
+            self.send_header(
+                "X-CVD-Sample-Rate-Converted",
+                "true" if sample_rate_metadata["resampled"] else "false",
+            )
         if observation_written:
             self.send_header("X-CVD-Observation-ID", observation.id)
         if archived_output:
@@ -1201,11 +1218,23 @@ def validate_speech_request(payload: dict[str, Any]) -> dict[str, Any]:
     f0_enabled = raw_f0.get("enabled", False)
     if not isinstance(f0_enabled, bool):
         raise ValueError("postprocess.f0.enabled must be boolean.")
+    validated_postprocess: dict[str, Any] = {}
     if f0_enabled:
-        request["_cvd_postprocess"] = {
+        validated_postprocess.update({
             "target_hz": bounded_number(raw_f0.get("target_hz"), "postprocess.f0.target_hz", 60, 500),
             "strength": bounded_number(raw_f0.get("strength", 1), "postprocess.f0.strength", 0, 1),
-        }
+        })
+    raw_output_sample_rate = raw_postprocess.get("output_sample_rate_hz")
+    if raw_output_sample_rate is not None:
+        try:
+            output_sample_rate = int(raw_output_sample_rate)
+        except (TypeError, ValueError) as error:
+            raise ValueError("postprocess.output_sample_rate_hz must be 44100 or 48000.") from error
+        if output_sample_rate not in {44100, 48000}:
+            raise ValueError("postprocess.output_sample_rate_hz must be 44100 or 48000.")
+        validated_postprocess["output_sample_rate_hz"] = output_sample_rate
+    if validated_postprocess:
+        request["_cvd_postprocess"] = validated_postprocess
     observation = validate_observation_options(payload.get("observation"))
     if observation:
         request["_cvd_observation"] = observation
@@ -1256,6 +1285,15 @@ def validate_output_capture(value: Any, generation_mode: str) -> dict[str, Any] 
         not isinstance(identity_id, str) or not OUTPUT_IDENTITY_PATTERN.fullmatch(identity_id)
     ):
         raise ValueError("output_capture.compiled_voice_identity_id is invalid.")
+    raw_output_sample_rate = value.get("output_sample_rate_hz")
+    output_sample_rate = None
+    if raw_output_sample_rate is not None:
+        try:
+            output_sample_rate = int(raw_output_sample_rate)
+        except (TypeError, ValueError) as error:
+            raise ValueError("output_capture.output_sample_rate_hz must be 44100 or 48000.") from error
+        if output_sample_rate not in {44100, 48000}:
+            raise ValueError("output_capture.output_sample_rate_hz must be 44100 or 48000.")
     return {
         "enabled": True,
         "app_version": app_version,
@@ -1267,6 +1305,7 @@ def validate_output_capture(value: Any, generation_mode: str) -> dict[str, Any] 
         "f0_target_hz": bounded_number(
             value.get("f0_target_hz"), "output_capture.f0_target_hz", 60, 500
         ),
+        "output_sample_rate_hz": output_sample_rate,
         "generation_mode": generation_mode,
     }
 

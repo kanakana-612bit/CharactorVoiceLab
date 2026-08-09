@@ -542,7 +542,16 @@
               <span class="section-kicker">2.5D articulatory geometry</span>
               <h2>声道側面形状</h2>
             </div>
-            <span id="physicalModelStatus" class="physical-model-status">解析済み形状を表示</span>
+            <div class="physical-model-runtime-controls">
+              <label class="sample-rate-field">
+                サンプルレート
+                <select data-output-sample-rate aria-label="物理合成サンプルレート">
+                  <option value="44100" selected>44.1 kHz</option>
+                  <option value="48000">48 kHz</option>
+                </select>
+              </label>
+              <span id="physicalModelStatus" class="physical-model-status">解析済み形状を表示</span>
+            </div>
           </div>
           <div class="physical-layer-toolbar" aria-label="物理モデル表示レイヤー">
             <label><input id="physicalShowBase" type="checkbox" checked /> 外形・基準点</label>
@@ -1390,6 +1399,14 @@
               VRAM監視上限
               <input id="ttsDemoRuntimeVramLimit" type="number" min="0" step="256" value="0" />
               <small>MiB / 0で無制限</small>
+            </label>
+            <label>
+              出力サンプルレート
+              <select data-output-sample-rate aria-label="TTS出力サンプルレート">
+                <option value="44100" selected>44.1 kHz</option>
+                <option value="48000">48 kHz</option>
+              </select>
+              <small>WAV・ローカル保存</small>
             </label>
           </div>
           <div class="tts-request-summary" id="ttsRequestSummary"></div>

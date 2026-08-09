@@ -171,6 +171,7 @@ class GeneratedOutputStore:
                     "name": capture.get("profile_name"),
                     "speaking_rate": capture.get("speaking_rate"),
                     "f0_target_hz": capture.get("f0_target_hz"),
+                    "output_sample_rate_hz": capture.get("output_sample_rate_hz"),
                 },
                 "model": backend_metadata,
                 "generation": {
@@ -188,6 +189,7 @@ class GeneratedOutputStore:
                     "spoken_text": request["input"],
                     "duration_scale": options.get("duration_scale"),
                     "trim_tail": options.get("trim_tail"),
+                    "output_sample_rate_hz": capture.get("output_sample_rate_hz"),
                 },
                 "backend_control_plan": {
                     "matched_condition_sha256": matched_condition_sha256,
@@ -224,8 +226,21 @@ class GeneratedOutputStore:
                 "postprocess": {
                     "enabled": bool(postprocess),
                     "f0": {
-                        "requested": dict(postprocess) if postprocess else None,
+                        "requested": (
+                            {
+                                "target_hz": postprocess.get("target_hz"),
+                                "strength": postprocess.get("strength"),
+                            }
+                            if postprocess and "target_hz" in postprocess
+                            else None
+                        ),
                         "result": dict(correction_metadata) if correction_metadata else None,
+                    },
+                    "sample_rate": {
+                        "requested_hz": (
+                            postprocess.get("output_sample_rate_hz") if postprocess else None
+                        ),
+                        "output_hz": audio.get("sample_rate_hz"),
                     },
                 },
                 "audio": audio,

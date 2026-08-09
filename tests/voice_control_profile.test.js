@@ -51,6 +51,7 @@ const request = window.CVD_PROFILE.buildAudioCppRequest(profile, {
   caption_guidance_scale: 3,
   f0_correction_enabled: true,
   f0_correction_strength: 1,
+  output_sample_rate_hz: 48000,
 });
 if (request.model !== "irodori-vdes" || request.options.no_ref !== true || request.options.caption.length < 10) {
   throw new Error("audio.cpp VoiceDesign request mapping is incomplete");
@@ -60,6 +61,9 @@ if (Math.abs(request.options.duration_scale - (1 / 1.2)) > 0.001) {
 }
 if (!request.postprocess.f0.enabled || request.postprocess.f0.target_hz !== 225) {
   throw new Error("Direct F0 target was not mapped to the WORLD postprocessor");
+}
+if (request.postprocess.output_sample_rate_hz !== 48000) {
+  throw new Error("The selected output sample rate was not mapped to the local postprocessor");
 }
 
 console.log("VoiceControlProfile and audio.cpp adapter tests passed");

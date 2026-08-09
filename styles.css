@@ -1796,6 +1796,29 @@ summary {
   align-items: center;
 }
 
+.physical-model-runtime-controls {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.sample-rate-field {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  color: var(--muted);
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.sample-rate-field select {
+  width: auto;
+  min-height: 32px;
+  padding-block: 4px;
+}
+
 .physical-model-heading h2,
 .physical-articulation-pane h2,
 .physical-area-pane h2,
@@ -2433,6 +2456,11 @@ pre {
   .physical-layer-toolbar {
     align-items: flex-start;
     flex-direction: column;
+  }
+
+  .physical-model-runtime-controls {
+    align-items: flex-start;
+    justify-content: flex-start;
   }
 
   .physical-metric-strip {

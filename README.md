@@ -279,7 +279,7 @@ Implemented on this branch:
 Each output-demo JSON records the model and model-config hash, seed, Caption CFG,
 step count, voice-quality caption, full spoken text, compiled identity and Speaker
 condition hashes, design F0 target, speaking rate, duration scale, F0 postprocessing
-request/result, lightweight warning evaluation, output WAV properties and SHA-256,
+request/result, selected 44.1/48 kHz output sample rate, lightweight warning evaluation, output WAV properties and SHA-256,
 generation timing, application version, and observation id. `Outputs/` is local-only
 and ignored by Git because these records can contain full scripts and biometric voice
 references.
@@ -302,7 +302,7 @@ references.
 - a deformable synthetic 2.5D vocal-tract design template over the profile preview
 - landmark-calibrated midsagittal height, coronal width, elliptical section shape, and latent lateral-channel capacity per tract section
 - pharyngeal-length scaling connected to the 2.5D longitudinal area-function allocation rather than only to schematic drawing
-- 44.1 kHz 2.5D-derived acoustic-tube vowel preview that projects the designed cross sections to total `A(x)`, using length-correct Kelly-Lochbaum discretization, separate jaw-opening/oral-volume/lip-rounding vowel targets, an LF-style volume-velocity glottal input, tract-length-normalized distributed losses, simple nasal/sinus/piriform side-branch losses, and restrained soft-wall compliance
+- selectable 44.1/48 kHz 2.5D-derived acoustic-tube vowel preview that projects the designed cross sections to total `A(x)`, using length-correct Kelly-Lochbaum discretization, separate jaw-opening/oral-volume/lip-rounding vowel targets, an LF-style volume-velocity glottal input, tract-length-normalized distributed losses, simple nasal/sinus/piriform side-branch losses, and restrained soft-wall compliance
 - vowel-specific direct editing of total area `A(x)` and coronal width `W(x)`; width edits preserve sagittal height and recompute the projected tube area
 - auditory calibration workflow with untuned/tuned A/B playback, phoneme-clarity and target-match ratings, notes, and profile-persisted evaluation history
 - dedicated nasal calibration for `/m/`, `/n/`, and moraic `/N/`, including oral-closure position/area/width, velopharyngeal opening, nasal-radiation contribution/path damping, hold/transition timing, direct closure-graph editing, A/B playback, and profile-persisted evaluation history
@@ -321,7 +321,7 @@ references.
 - separate primary-language, phonetic-target-profile, and morphology-reference-population metadata; a phonetic profile is a language/variety target and is never an ancestry or ethnicity selector
 - jaw-conditioned relaxed mouth-width inference that treats a stylized commissure distance as a pursed/lower-bound proxy, then supplies vowel-specific `/i/ > /e/ > /o/ > /u/` transverse targets within a PerformanceControlRange
 - reference-image style selection (`illustration` by default, or `photo_realistic`) so stylized images use broader latent anatomy/articulation inference while realistic images retain more direct measurement weight
-- `/a i u e o/` previews using only the 44.1 kHz 2.5D-derived acoustic-tube model; the selected phonetic target supplies Japanese aggregate F1/F2 evaluation targets, higher-resonance engineering references, and vowel-specific articulation cues
+- `/a i u e o/` previews using only the selectable 44.1/48 kHz 2.5D-derived acoustic-tube model; the selected phonetic target supplies Japanese aggregate F1/F2 evaluation targets, higher-resonance engineering references, and vowel-specific articulation cues
 - WAV export
 - local PDF-derived growth and pediatric airway prior scaffold
 - BMI calculation with age-band reference display, Japanese public aggregate body-composition guidance, formula fallback, and conservative regional skinfold-response metadata

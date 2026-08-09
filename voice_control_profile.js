@@ -258,6 +258,7 @@
     const anchor = profile.identity_anchor;
     const caption = String(settings.caption || profile.tts_adapters.audio_cpp.caption_ja).trim();
     const speakingRate = clamp(finite(anchor.speaking_rate, 1), 0.6, 1.4);
+    const outputSampleRate = Number(settings.output_sample_rate_hz) === 48000 ? 48000 : 44100;
     return {
       model: String(settings.model || "irodori-vdes"),
       input: String(settings.text || "").trim(),
@@ -272,6 +273,7 @@
         trim_tail: true,
       },
       postprocess: {
+        output_sample_rate_hz: outputSampleRate,
         f0: {
           enabled: settings.f0_correction_enabled !== false,
           target_hz: round(clamp(finite(anchor.f0_mean_hz, 180), 60, 500), 3),

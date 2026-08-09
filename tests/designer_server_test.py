@@ -143,6 +143,7 @@ class SpeechRequestValidationTest(unittest.TestCase):
                 },
                 "postprocess": {
                     "f0": {"enabled": True, "target_hz": 225, "strength": 0.75},
+                    "output_sample_rate_hz": 48000,
                     "unknown": "not forwarded",
                 },
             }
@@ -153,6 +154,17 @@ class SpeechRequestValidationTest(unittest.TestCase):
         self.assertEqual(request["options"]["duration_scale"], 0.9)
         self.assertEqual(request["_cvd_postprocess"]["target_hz"], 225)
         self.assertEqual(request["_cvd_postprocess"]["strength"], 0.75)
+        self.assertEqual(request["_cvd_postprocess"]["output_sample_rate_hz"], 48000)
+
+    def test_invalid_output_sample_rate_is_rejected(self):
+        with self.assertRaisesRegex(ValueError, "44100 or 48000"):
+            MODULE.validate_speech_request(
+                {
+                    "model": "irodori-vdes",
+                    "input": "test",
+                    "postprocess": {"output_sample_rate_hz": 96000},
+                }
+            )
 
     def test_observation_options_are_validated_and_not_forwarded(self):
         request = MODULE.validate_speech_request(
@@ -653,6 +665,7 @@ class LocalProxyIntegrationTest(unittest.TestCase):
                     "input": "official v4 test",
                     "runtime": {"device_id": "cuda:0", "vram_limit_mib": 8000},
                     "options": {"caption": "neutral", "caption_guidance_scale": 2},
+                    "postprocess": {"output_sample_rate_hz": 48000},
                 }
             ).encode("utf-8"),
             headers={"Content-Type": "application/json"},
@@ -673,7 +686,10 @@ class LocalProxyIntegrationTest(unittest.TestCase):
                 audio = response.read()
                 self.assertEqual(response.headers["X-CVD-Backend-Runtime"], "official_python")
                 self.assertEqual(response.headers["X-CVD-Speaker-Condition-Mode"], "none")
+                self.assertEqual(response.headers["X-CVD-Output-Sample-Rate-Hz"], "48000")
         self.assertTrue(audio.startswith(b"RIFF"))
+        with wave.open(io.BytesIO(audio), "rb") as output:
+            self.assertEqual(output.getframerate(), 48000)
         self.assertEqual(render.call_args.kwargs["embedding"], None)
 
     def test_official_v4_embedding_observation_uses_artifact_hash(self):

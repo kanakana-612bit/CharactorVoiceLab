@@ -54,10 +54,11 @@ class GeneratedOutputStoreTest(unittest.TestCase):
                 "profile_name": "voice_profile",
                 "speaking_rate": 0.9,
                 "f0_target_hz": 180,
+                "output_sample_rate_hz": 44100,
                 "generation_mode": "standard_single",
                 "runtime": {"device_id": "cuda:1", "vram_limit_mib": 14336},
             },
-            "postprocess": {"target_hz": 180, "strength": 1},
+            "postprocess": {"target_hz": 180, "strength": 1, "output_sample_rate_hz": 44100},
             "correction_metadata": {"output_hz": 180},
             "identity": {"id": "sample-id", "name": "試験話者"},
             "evaluation": {"status": "within_provisional_range", "warnings": []},
@@ -87,6 +88,8 @@ class GeneratedOutputStoreTest(unittest.TestCase):
             r"^[a-f0-9]{64}$",
         )
         self.assertEqual(metadata["compute_runtime"]["vram_limit_mib"], 14336)
+        self.assertEqual(metadata["profile"]["output_sample_rate_hz"], 44100)
+        self.assertEqual(metadata["postprocess"]["sample_rate"]["requested_hz"], 44100)
         self.assertTrue(metadata["privacy"]["stored_on_user_pc_only"])
 
 

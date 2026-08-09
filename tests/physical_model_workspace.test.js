@@ -29,6 +29,17 @@ for (const vowel of ["a", "i", "u", "e", "o"]) {
   }
 }
 
+const sampleRateSelectors = html.match(/data-output-sample-rate/g) ?? [];
+if (sampleRateSelectors.length !== 2 || !/value="44100"/.test(html) || !/value="48000"/.test(html)) {
+  throw new Error("The synchronized 44.1/48 kHz output sample-rate controls are missing");
+}
+
+if (!/function setOutputSampleRate\([\s\S]*state\.physicalTransferCache = null/.test(app)
+  || !/const sampleRate = currentOutputSampleRate\(\)/.test(app)
+  || !/output_sample_rate_hz: currentOutputSampleRate\(\)/.test(app)) {
+  throw new Error("The sample-rate controls are not connected to physical synthesis and TTS output");
+}
+
 if (!/function drawPhysicalModelWorkspace\([\s\S]*buildTubeAreaFunction\([\s\S]*currentPhysicalTransferAnalysis\(/.test(app)) {
   throw new Error("The physical workspace is not connected to the existing area-function and transfer models");
 }

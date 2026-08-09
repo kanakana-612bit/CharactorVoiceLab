@@ -5,7 +5,47 @@ import wave
 from unittest import mock
 
 import audio_postprocess
-from audio_postprocess import correct_wav_f0, postprocess_dependency_status, psola_available
+from audio_postprocess import (
+    convert_wav_sample_rate,
+    correct_wav_f0,
+    postprocess_dependency_status,
+    psola_available,
+)
+
+
+def pcm16_wav(sample_rate: int = 48000, seconds: float = 0.25) -> bytes:
+    frames = round(sample_rate * seconds)
+    stream = io.BytesIO()
+    with wave.open(stream, "wb") as target:
+        target.setnchannels(1)
+        target.setsampwidth(2)
+        target.setframerate(sample_rate)
+        target.writeframes(
+            b"".join(
+                int(10000 * math.sin(2 * math.pi * 220 * index / sample_rate)).to_bytes(
+                    2, "little", signed=True
+                )
+                for index in range(frames)
+            )
+        )
+    return stream.getvalue()
+
+
+class OutputSampleRateTest(unittest.TestCase):
+    def test_native_rate_is_preserved_without_reencoding(self):
+        source = pcm16_wav(48000)
+        converted, metadata = convert_wav_sample_rate(source, 48000)
+        self.assertIs(converted, source)
+        self.assertFalse(metadata["resampled"])
+        self.assertEqual(metadata["method"], "native_passthrough")
+
+    def test_pcm_wav_is_resampled_to_selected_rate(self):
+        converted, metadata = convert_wav_sample_rate(pcm16_wav(48000), 44100)
+        with wave.open(io.BytesIO(converted), "rb") as result:
+            self.assertEqual(result.getframerate(), 44100)
+            self.assertAlmostEqual(result.getnframes() / 44100, 0.25, delta=0.001)
+        self.assertTrue(metadata["resampled"])
+        self.assertEqual(metadata["output_sample_rate_hz"], 44100)
 
 
 class PostprocessDependencyTest(unittest.TestCase):
