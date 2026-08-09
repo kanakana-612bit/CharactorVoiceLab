@@ -566,9 +566,62 @@ const na = synthesizeSyllable("na");
 const ni = synthesizeSyllable("ni");
 const nu = synthesizeSyllable("nu");
 const moraicNasal = synthesizeSyllable("n");
-if (ma.nasal_model?.schema_version !== "nasal_consonant_model_1.1"
+if (process.env.CVD_NASAL_PLACE_DIAGNOSTIC === "1") {
+  const releaseResonances = (audio) => {
+    const areaFunction = audio.nasal_model?.coronal_release_area_function
+      ?? audio.nasal_model?.oral_closure_area_function;
+    return coreTubeResonancesForAreas(
+      areaFunction.areas_cm2,
+      audio.sampleRate,
+      state.constraints,
+      currentArticulationMotorProfile(state.constraints)
+    ).map((peak) => peak.frequency_hz);
+  };
+  const diagnosticSpectrum = (audio, startSample) => {
+    const levels = [];
+    const length = 1024;
+    for (let frequencyHz = 200; frequencyHz <= 3000; frequencyHz += 100) {
+      let real = 0;
+      let imaginary = 0;
+      for (let index = 0; index < length; index++) {
+        const window = 0.5 - 0.5 * Math.cos(2 * Math.PI * index / Math.max(1, length - 1));
+        const phase = 2 * Math.PI * frequencyHz * index / audio.sampleRate;
+        const sample = audio.samples[startSample + index] ?? 0;
+        real += sample * window * Math.cos(phase);
+        imaginary -= sample * window * Math.sin(phase);
+      }
+      levels.push(20 * Math.log10(Math.max(1e-8, Math.hypot(real, imaginary))));
+    }
+    const peak = Math.max(...levels);
+    return levels.map((level) => level - peak);
+  };
+  const spectrumDistance = (left, right) => left.reduce(
+    (sum, level, index) => sum + Math.abs(level - right[index]),
+    0
+  ) / Math.max(1, left.length);
+  const holdStart = Math.round(PREVIEW_SAMPLE_RATE * 0.015);
+  const maReleaseStart = Math.round(ma.nasal_model.timing.oral_release_ms * PREVIEW_SAMPLE_RATE / 1000);
+  const naReleaseStart = Math.round(na.nasal_model.timing.oral_release_ms * PREVIEW_SAMPLE_RATE / 1000);
+  console.log(JSON.stringify({
+    spectrum_distance_db: {
+      hold: spectrumDistance(diagnosticSpectrum(ma, holdStart), diagnosticSpectrum(na, holdStart)),
+      release: spectrumDistance(diagnosticSpectrum(ma, maReleaseStart), diagnosticSpectrum(na, naReleaseStart)),
+    },
+    ma: {
+      release_resonances_hz: releaseResonances(ma),
+      area_function: ma.nasal_model.oral_closure_area_function.areas_cm2,
+    },
+    na: {
+      release_resonances_hz: releaseResonances(na),
+      place_gesture: na.nasal_model.place_gesture,
+      area_function: na.nasal_model.coronal_release_area_function.areas_cm2,
+    },
+  }, null, 2));
+  process.exit(0);
+}
+if (ma.nasal_model?.schema_version !== "nasal_consonant_model_1.2"
   || ma.nasal_model.nasal_class !== "m"
-  || na.nasal_model?.schema_version !== "nasal_consonant_model_1.1"
+  || na.nasal_model?.schema_version !== "nasal_consonant_model_1.2"
   || na.nasal_model?.nasal_class !== "n"
   || moraicNasal.nasal_model?.nasal_class !== "N"
   || moraicNasal.vowel !== null) {
@@ -631,6 +684,12 @@ if (ma.nasal_model.place_gesture?.kind !== "bilabial_end_closure"
   || ma.nasal_model.coronal_release_area_function !== null
   || na.nasal_model.place_gesture?.kind !== "coronal_alveolar"
   || na.nasal_model.coronal_release_area_function?.schema_version !== "nasal_oral_closure_area_0.3"
+  || na.nasal_model.place_cue_model?.schema_version !== "coronal_nasal_release_target_0.1"
+  || na.nasal_model.place_cue_model?.active !== true
+  || !na.nasal_model.place_cue_model.source_keys?.includes("malecot1956NasalTransitions")
+  || na.nasal_model.place_cue_model.final_f2_relative_error > 0.08
+  || Math.abs(na.nasal_model.place_cue_model.final_resonances_hz[1] - na.nasal_model.place_cue_model.target_f2_hz)
+    >= Math.abs(na.nasal_model.place_cue_model.initial_resonances_hz[1] - na.nasal_model.place_cue_model.target_f2_hz)
   || na.nasal_model.coronal_release_area_function.closure_area_cm2
     <= na.nasal_model.oral_closure_area_function.closure_area_cm2
   || na.nasal_model.coronal_release_area_function.place_gesture_strength >= 1) {

@@ -8247,6 +8247,142 @@ function adaptAreaFunctionToPhoneticTarget(areas, vowel, sampleRate, constraints
   return result;
 }
 
+function adaptCoronalNasalReleaseArea(areaFunction, followingVowel, sampleRate, constraints, motorProfile) {
+  const initialAreas = areaFunction.areas_cm2.slice();
+  const initialResonances = coreTubeResonancesForAreas(initialAreas, sampleRate, constraints, motorProfile);
+  if (initialResonances.length < 4) {
+    return {
+      ...areaFunction,
+      acoustic_place_target_assist: {
+        active: false,
+        schema_version: "coronal_nasal_release_target_0.1",
+        reason: "four_resonance_solution_unavailable",
+      },
+    };
+  }
+
+  // Historical synthetic-speech design prior, not a population or individual
+  // anatomical value. The target is scaled to the designed tract length.
+  const vocalTractLengthCm = areaFunction.vocal_tract_length_cm
+    ?? state.constraints.vocal_tract_length_cm?.center
+    ?? 15.5;
+  const targetF2Hz = clamp(1800 * 15.5 / Math.max(10, vocalTractLengthCm), 1450, 2450);
+  const targets = initialResonances.map((peak) => peak.frequency_hz);
+  targets[1] = targetF2Hz;
+  const weights = [0.35, 5, 0.55, 0.25];
+  const activeHandleIndices = [3, 4, 5, 6];
+  const anchorIndex = Number.isInteger(areaFunction.anchored_closure_index)
+    ? areaFunction.anchored_closure_index
+    : null;
+  const anchorArea = anchorIndex === null ? null : initialAreas[anchorIndex];
+  const enforceContact = (areas) => {
+    if (anchorIndex !== null) areas[anchorIndex] = anchorArea;
+    return areas;
+  };
+  const errorFor = (resonances) => weights.reduce((sum, weight, index) => {
+    const error = Math.log(resonances[index].frequency_hz / targets[index]);
+    return sum + weight * error * error;
+  }, 0);
+  const signature = JSON.stringify({
+    mode: "coronal_nasal_release",
+    following_vowel: followingVowel,
+    sample_rate_hz: sampleRate,
+    areas: initialAreas.map((area) => Number(area.toFixed(3))),
+    target_f2_hz: Number(targetF2Hz.toFixed(2)),
+    loss: currentTubeLossParams(constraints),
+  });
+  const cached = state.phoneticAreaCalibrationCache.get(signature);
+  if (cached) return { ...areaFunction, ...cached };
+
+  let currentAreas = initialAreas;
+  let currentResonances = initialResonances;
+  const cumulativeGains = AREA_TUNING_HANDLES.map(() => 1);
+  const perturbationLogGain = 0.1;
+  let iterations = 0;
+  for (let iteration = 0; iteration < 4; iteration++) {
+    if (Math.abs(Math.log(targetF2Hz / currentResonances[1].frequency_hz)) < 0.035) break;
+    const jacobian = Array.from({ length: 4 }, () => Array(activeHandleIndices.length).fill(0));
+    for (let column = 0; column < activeHandleIndices.length; column++) {
+      const handleIndex = activeHandleIndices[column];
+      const perturbation = AREA_TUNING_HANDLES.map(() => 1);
+      perturbation[handleIndex] = Math.exp(perturbationLogGain);
+      const perturbedAreas = enforceContact(applyAreaControlPointGains(currentAreas, perturbation));
+      const perturbedResonances = coreTubeResonancesForAreas(perturbedAreas, sampleRate, constraints, motorProfile);
+      if (perturbedResonances.length < 4) continue;
+      for (let resonance = 0; resonance < 4; resonance++) {
+        jacobian[resonance][column] = Math.log(
+          perturbedResonances[resonance].frequency_hz / currentResonances[resonance].frequency_hz
+        ) / perturbationLogGain;
+      }
+    }
+    const size = activeHandleIndices.length;
+    const normalMatrix = Array.from({ length: size }, () => Array(size).fill(0));
+    const normalVector = Array(size).fill(0);
+    const logErrors = targets.map((target, index) => Math.log(target / currentResonances[index].frequency_hz));
+    for (let left = 0; left < size; left++) {
+      for (let right = 0; right < size; right++) {
+        for (let resonance = 0; resonance < 4; resonance++) {
+          normalMatrix[left][right] += weights[resonance] * jacobian[resonance][left] * jacobian[resonance][right];
+        }
+      }
+      normalMatrix[left][left] += 0.28;
+      for (let resonance = 0; resonance < 4; resonance++) {
+        normalVector[left] += weights[resonance] * jacobian[resonance][left] * logErrors[resonance];
+      }
+    }
+    const solution = solveLinearSystem(normalMatrix, normalVector);
+    if (!solution) break;
+    const previousError = errorFor(currentResonances);
+    let accepted = null;
+    for (const scale of [1, 0.5, 0.25]) {
+      const gains = AREA_TUNING_HANDLES.map(() => 1);
+      for (let column = 0; column < activeHandleIndices.length; column++) {
+        gains[activeHandleIndices[column]] = Math.exp(clamp(solution[column] * scale, -0.24, 0.24));
+      }
+      const candidateAreas = enforceContact(applyAreaControlPointGains(currentAreas, gains));
+      const candidateResonances = coreTubeResonancesForAreas(candidateAreas, sampleRate, constraints, motorProfile);
+      if (candidateResonances.length >= 4 && errorFor(candidateResonances) < previousError) {
+        accepted = { areas: candidateAreas, resonances: candidateResonances, gains };
+        break;
+      }
+    }
+    if (!accepted) break;
+    currentAreas = accepted.areas;
+    currentResonances = accepted.resonances;
+    for (let index = 0; index < cumulativeGains.length; index++) cumulativeGains[index] *= accepted.gains[index];
+    iterations += 1;
+  }
+
+  const adapted = {
+    areas_cm2: currentAreas.map((area) => Number(area.toFixed(4))),
+    acoustic_place_target_assist: {
+      active: true,
+      schema_version: "coronal_nasal_release_target_0.1",
+      method: "regularized finite-difference inverse A(x) control at the voiced alveolar release keyframe",
+      target_role: "strengthen the alveolar place cue in the nasal-to-vowel F2 transition",
+      morphology_preservation: "the character-derived tongue-blade geometry and anchored residual contact area are retained",
+      following_vowel: followingVowel,
+      target_f2_hz: Number(targetF2Hz.toFixed(3)),
+      tract_length_scaling: "1800 Hz historical synthetic-speech locus scaled by 15.5 cm / designed vocal-tract length",
+      source_keys: ["malecot1956NasalTransitions", "delattre1955AcousticLoci", "haradaKawarada1987JapaneseNasals"],
+      iterations,
+      active_control_points: activeHandleIndices.map((index) => ({
+        position: AREA_TUNING_HANDLES[index],
+        gain: Number(cumulativeGains[index].toFixed(5)),
+      })),
+      initial_resonances_hz: initialResonances.map((peak) => peak.frequency_hz),
+      final_resonances_hz: currentResonances.map((peak) => peak.frequency_hz),
+      final_f2_relative_error: Number((Math.abs(currentResonances[1].frequency_hz - targetF2Hz) / targetF2Hz).toFixed(6)),
+      limitation: "The locus is an engineering prior for an aggregate-scale 1D release, not a Japanese population norm or an individual measurement.",
+    },
+  };
+  state.phoneticAreaCalibrationCache.set(signature, adapted);
+  if (state.phoneticAreaCalibrationCache.size > 80) {
+    state.phoneticAreaCalibrationCache.delete(state.phoneticAreaCalibrationCache.keys().next().value);
+  }
+  return { ...areaFunction, ...adapted };
+}
+
 function synthesizeVowel(vowel = selectedVowel(), options = {}) {
   return synthesizeTubeVowel(vowel, options);
 }
@@ -10735,7 +10871,7 @@ function synthesizeCoupledNasalSyllable(context) {
     oral_render_duration_ms: Number((oralSampleCount * 1000 / sampleRate).toFixed(2)),
   };
   const nasalModel = {
-    schema_version: "nasal_consonant_model_1.1",
+    schema_version: "nasal_consonant_model_1.2",
     nasal_class: nasalClass,
     token,
     following_vowel: parsed.vowel,
@@ -10743,6 +10879,7 @@ function synthesizeCoupledNasalSyllable(context) {
     oral_closure_area_function: closureArea,
     neutral_oral_closure_area_function: neutralClosureArea,
     coronal_release_area_function: coronalReleaseArea,
+    place_cue_model: coronalReleaseArea?.acoustic_place_target_assist ?? null,
     place_gesture: placeGesture,
     nasal_path_area_function: nasalPath,
     oral_side_cavity: sideCavity,
@@ -10895,16 +11032,22 @@ function synthesizeNasalSyllable(token, parsed, options = {}) {
       { anchorClosureSection: true, placeGesture }
     );
     const coronalReleaseArea = nasalClass === "n"
-      ? buildNasalOralClosureAreaFunction(
-        vowelAudio.area_function,
-        coupledClosureTuning,
-        {
-          anchorClosureSection: true,
-          placeGesture,
-          placeGestureStrength: 0.5,
-          closureAreaCm2: placeGesture.release_constriction_area_cm2,
-          closureWidth: clamp(coupledClosureTuning.closure_width * 0.82, 0.032, 0.065),
-        }
+      ? adaptCoronalNasalReleaseArea(
+        buildNasalOralClosureAreaFunction(
+          vowelAudio.area_function,
+          coupledClosureTuning,
+          {
+            anchorClosureSection: true,
+            placeGesture,
+            placeGestureStrength: 0.5,
+            closureAreaCm2: placeGesture.release_constriction_area_cm2,
+            closureWidth: clamp(coupledClosureTuning.closure_width * 0.82, 0.032, 0.065),
+          }
+        ),
+        parsed.vowel,
+        sampleRate,
+        constraints,
+        currentArticulationMotorProfile(constraints)
       )
       : null;
     return synthesizeCoupledNasalSyllable({

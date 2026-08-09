@@ -8,6 +8,10 @@
   F1-F4 lines and percentage errors to the physical transfer view.
 - Gated paranasal-sinus coloring through the velopharyngeal path and changed the
   oral-vowel default toward a closed velum instead of inferring leakage from sinus size.
+- Strengthened `/n/` place identity at the continuous voiced release by adapting
+  the character-derived coronal A(x) toward a tract-length-scaled historical
+  alveolar F2 locus. The target and before/after resonances are exported for
+  inspection; `/m/`, the nasal hold, and the glottal source remain unchanged.
 - Added a Birkholz/VocalTractLab methodology citation without importing VTL code,
   speaker geometries, area functions, recordings, or fitted coefficients.
 - Documented the remaining integer tube-count quantization and the current
