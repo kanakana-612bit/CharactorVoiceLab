@@ -9,16 +9,28 @@
 - Gated paranasal-sinus coloring through the velopharyngeal path and changed the
   oral-vowel default toward a closed velum instead of inferring leakage from sinus size.
 - Strengthened `/n/` place identity at the continuous voiced release by adapting
-  the character-derived coronal A(x) toward a tract-length-scaled historical
-  alveolar F2 locus. The target and before/after resonances are exported for
+  the character-derived coronal A(x) toward a vowel-conditioned alveolar F2
+  transition target. The target and before/after resonances are exported for
   inspection; `/m/`, the nasal hold, and the glottal source remain unchanged.
 - Moved the untouched `/n/` default contact from x/L 0.88 to 0.86, retained more
   tongue-blade shaping for central/back-vowel releases, and bounded inverse A(x)
   gains to prevent `/na/` and `/nu/` from reaching the target through excessive
   whole-tract deformation. Manually tuned legacy contacts remain unchanged.
+- Replaced the fixed alveolar F2 target with a tract-length-scaled,
+  vowel-conditioned locus equation and lengthened only the untouched `/n/`
+  release transition from 20 to 36 ms. This preserves the already stable `/ni/`
+  and `/ne/` path while reducing excessive `/nu/` and `/no/` deformation.
+- Raised the physical solver to two-times internal temporal and spatial
+  resolution, followed by a Blackman-windowed sinc decimator to the selected
+  44.1/48 kHz output rate. Articulatory geometry is updated at approximately
+  11.025 kHz while pressure propagation retains the full internal rate. The
+  internal status is visible in the physical-model UI.
+- Connected each 2.5D section's width and height to section-local hydraulic
+  wall-loss scaling. Nasal metadata now exports the explicit closed oral branch,
+  branch volume, hydraulic diameter, and release cross-section loss provenance.
 - Added a Birkholz/VocalTractLab methodology citation without importing VTL code,
   speaker geometries, area functions, recordings, or fitted coefficients.
-- Documented the remaining integer tube-count quantization and the current
+- Documented the reduced but remaining integer tube-count quantization and the current
   non-equivalence to a full VocalTractLab articulatory/acoustic model.
 
 ## Ver 0.2 Runtime Update - 2026-08-05

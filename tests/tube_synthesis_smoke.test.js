@@ -84,6 +84,9 @@ if (!/#analyzeBtn\s*\{[^}]*white-space:\s*nowrap;[^}]*writing-mode:\s*horizontal
 }
 
 global.window = global;
+// The full browser defaults to 2x time/space resolution. Most of this broad
+// regression suite uses the baseline grid; a focused test below exercises 3x.
+global.CVD_PHYSICAL_TUBE_OVERSAMPLING = 1;
 
 const elements = new Map();
 
@@ -191,6 +194,9 @@ const appCode = fs.readFileSync(path.join(projectRoot, "app.js"), "utf8").replac
 
 if (/function synthesizeFormantVowel|function synthesizeHybridVowel|function prepareHybridTubeTexture/.test(appCode)) {
   throw new Error("Retired formant or hybrid synthesis functions remain in app.js");
+}
+if (!/const DEFAULT_PHYSICAL_TUBE_OVERSAMPLING = 2;/.test(appCode)) {
+  throw new Error("The browser physical solver is not using the two-times internal resolution default");
 }
 if (!/els\.analyzeBtn\.addEventListener\("click", runBasicAnalysis\)/.test(appCode)) {
   throw new Error("The basic-information analysis button is not wired to its analysis action");
@@ -561,11 +567,76 @@ const aOnly = synthesizeSyllable("a");
 if (ka.samples.length <= aOnly.samples.length || ka.onset_model?.consonant !== "k" || ka.vowel !== "a") {
   throw new Error("CV syllable synthesis did not prepend a consonant onset");
 }
+if (process.env.CVD_NASAL_HIGH_RES_BENCHMARK === "1") {
+  global.CVD_PHYSICAL_TUBE_OVERSAMPLING = Number(process.env.CVD_NASAL_BENCHMARK_OVERSAMPLING) || 3;
+  global.CVD_PHYSICAL_TIMING_DIAGNOSTIC = true;
+  const benchmarkToken = process.env.CVD_NASAL_HIGH_RES_TOKEN || "nu";
+  const vowelStartedAt = performance.now();
+  const benchmarkVowel = synthesizeVowel(benchmarkToken.at(-1));
+  const vowelElapsedMs = performance.now() - vowelStartedAt;
+  const startedAt = performance.now();
+  const benchmarkAudio = synthesizeSyllable(benchmarkToken);
+  console.log(JSON.stringify({
+    token: benchmarkAudio.token,
+    vowel_elapsed_ms: Number(vowelElapsedMs.toFixed(2)),
+    vowel_sample_count: benchmarkVowel.samples.length,
+    elapsed_ms: Number((performance.now() - startedAt).toFixed(2)),
+    sample_count: benchmarkAudio.samples.length,
+    output_sample_rate_hz: benchmarkAudio.sampleRate,
+    resolution_model: benchmarkAudio.nasal_model.acoustic_topology.resolution_model,
+    stage_timing: benchmarkAudio.nasal_model.performance_timing,
+    finite: benchmarkAudio.samples.every(Number.isFinite),
+    peak: benchmarkAudio.samples.reduce((peak, sample) => Math.max(peak, Math.abs(sample)), 0),
+  }, null, 2));
+  process.exit(0);
+}
+
 const ma = synthesizeSyllable("ma");
 const na = synthesizeSyllable("na");
 const ni = synthesizeSyllable("ni");
 const nu = synthesizeSyllable("nu");
+const ne = synthesizeSyllable("ne");
+const no = synthesizeSyllable("no");
 const moraicNasal = synthesizeSyllable("n");
+global.CVD_PHYSICAL_TUBE_OVERSAMPLING = 3;
+const highResolutionImpulse = synthesizeKellyLochbaumTube(
+  [0.9, 1.4, 2.2, 3.1, 1.8, 0.8],
+  {
+    sampleCount: 512,
+    sampleRate: PREVIEW_SAMPLE_RATE,
+    sourceMode: "impulse",
+    impulseAmplitude: 1,
+    effectiveClosure: 0.5,
+    amplitude: 1,
+    lossParams: currentTubeLossParams(state.constraints),
+  }
+);
+const highResolutionBranchedImpulse = synthesizeBranchedNasalOralTube(
+  [1.1, 1.5, 2.2, 2.8, 0.008, 1.2],
+  [0.35, 1.1, 2.1, 1.4],
+  {
+    sampleCount: 512,
+    sampleRate: PREVIEW_SAMPLE_RATE,
+    sourceMode: "impulse",
+    impulseAmplitude: 1,
+    effectiveClosure: 0.5,
+    amplitude: 1,
+    velopharyngealPortAreaCm2: 0.3,
+    vpJunctionPosition: 0.34,
+    oralContactPosition: 0.8,
+    lossParams: currentTubeLossParams(state.constraints),
+  }
+);
+global.CVD_PHYSICAL_TUBE_OVERSAMPLING = 1;
+if (highResolutionImpulse.length !== 512
+  || highResolutionBranchedImpulse.samples.length !== 512
+  || !highResolutionImpulse.every(Number.isFinite)
+  || !highResolutionBranchedImpulse.samples.every(Number.isFinite)
+  || highResolutionBranchedImpulse.topology?.resolution_model?.internal_oversampling_factor !== 3
+  || highResolutionBranchedImpulse.topology?.resolution_model?.oral_section_count_internal !== 18
+  || highResolutionBranchedImpulse.topology?.resolution_model?.nasal_section_count_internal !== 12) {
+  throw new Error("The 3x physical tube resolution path did not preserve finite output and declared geometry");
+}
 if (process.env.CVD_NASAL_PLACE_DIAGNOSTIC === "1") {
   const mi = synthesizeSyllable("mi");
   const mu = synthesizeSyllable("mu");
@@ -690,14 +761,16 @@ if (process.env.CVD_NASAL_PLACE_DIAGNOSTIC === "1") {
     na: { ...diagnosticEntry(na, ma), place_gesture: na.nasal_model.place_gesture },
     ni: diagnosticEntry(ni, mi),
     nu: diagnosticEntry(nu, mu),
+    ne: diagnosticEntry(ne, synthesizeSyllable("me")),
+    no: diagnosticEntry(no, synthesizeSyllable("mo")),
     closure_position_sweep: closurePositionSweep,
     coronal_strength_sweep: coronalStrengthSweep,
   }, null, 2));
   process.exit(0);
 }
-if (ma.nasal_model?.schema_version !== "nasal_consonant_model_1.2"
+if (ma.nasal_model?.schema_version !== "nasal_consonant_model_1.3"
   || ma.nasal_model.nasal_class !== "m"
-  || na.nasal_model?.schema_version !== "nasal_consonant_model_1.2"
+  || na.nasal_model?.schema_version !== "nasal_consonant_model_1.3"
   || na.nasal_model?.nasal_class !== "n"
   || moraicNasal.nasal_model?.nasal_class !== "N"
   || moraicNasal.vowel !== null) {
@@ -712,8 +785,10 @@ if (ma.nasal_model.level_matching?.schema_version !== "coupled_radiation_level_d
   || moraicNasal.nasal_model.level_matching !== null) {
   throw new Error("CV nasal level matching metadata is missing or was incorrectly applied to moraic /N/");
 }
-if (na.nasal_model.acoustic_topology?.schema_version !== "branched_nasal_oral_waveguide_0.2"
-  || ma.nasal_model.acoustic_topology?.schema_version !== "branched_nasal_oral_waveguide_0.2"
+if (na.nasal_model.acoustic_topology?.schema_version !== "branched_nasal_oral_waveguide_0.3"
+  || ma.nasal_model.acoustic_topology?.schema_version !== "branched_nasal_oral_waveguide_0.3"
+  || na.nasal_model.acoustic_topology?.resolution_model?.internal_oversampling_factor !== 1
+  || na.nasal_model.acoustic_topology?.geometry_control_rate_hz !== 11025
   || na.nasal_model.acoustic_topology?.scattering !== "lossy_three_port_pressure_junction"
   || na.nasal_model.acoustic_topology?.shared_glottal_source !== true
   || na.nasal_model.acoustic_topology?.oral_and_nasal_radiation_summed_once !== true
@@ -725,8 +800,11 @@ if (na.nasal_model.acoustic_topology?.schema_version !== "branched_nasal_oral_wa
   || ma.nasal_model.acoustic_topology.peak_oral_contact_strength < 0.7) {
   throw new Error("CV nasals did not use the pressure-coupled branched waveguide exclusively");
 }
-for (const alveolarAudio of [na, ni, nu]) {
-  if (alveolarAudio.nasal_model?.acoustic_topology?.schema_version !== "branched_nasal_oral_waveguide_0.2"
+for (const alveolarAudio of [na, ni, nu, ne, no]) {
+  if (alveolarAudio.nasal_model?.acoustic_topology?.schema_version !== "branched_nasal_oral_waveguide_0.3"
+    || alveolarAudio.nasal_model?.place_cue_model?.schema_version !== "coronal_nasal_release_target_0.2"
+    || alveolarAudio.nasal_model.place_cue_model.final_f2_relative_error > 0.08
+    || !alveolarAudio.nasal_model.place_cue_model.source_keys?.includes("iskarousFowlerWhalen2010LocusEquations")
     || alveolarAudio.samples.some((sample) => !Number.isFinite(sample))
     || alveolarAudio.samples.reduce((peak, sample) => Math.max(peak, Math.abs(sample)), 0) < 0.01) {
     throw new Error("The pressure-coupled alveolar nasal failed for /" + alveolarAudio.token + "/");
@@ -760,9 +838,11 @@ if (ma.nasal_model.place_gesture?.kind !== "bilabial_end_closure"
   || ma.nasal_model.coronal_release_area_function !== null
   || na.nasal_model.place_gesture?.kind !== "coronal_alveolar"
   || na.nasal_model.coronal_release_area_function?.schema_version !== "nasal_oral_closure_area_0.3"
-  || na.nasal_model.place_cue_model?.schema_version !== "coronal_nasal_release_target_0.1"
+  || na.nasal_model.place_cue_model?.schema_version !== "coronal_nasal_release_target_0.2"
   || na.nasal_model.place_cue_model?.active !== true
   || !na.nasal_model.place_cue_model.source_keys?.includes("malecot1956NasalTransitions")
+  || !na.nasal_model.place_cue_model.source_keys?.includes("iskarousFowlerWhalen2010LocusEquations")
+  || na.nasal_model.place_cue_model.locus_equation?.slope !== 0.535
   || na.nasal_model.place_cue_model.final_f2_relative_error > 0.08
   || na.nasal_model.place_cue_model.active_control_points.some((point) => point.gain < 0.62 || point.gain > 1.65)
   || nu.nasal_model.place_cue_model.active_control_points.some((point) => point.gain < 0.62 || point.gain > 1.65)
@@ -773,6 +853,10 @@ if (ma.nasal_model.place_gesture?.kind !== "bilabial_end_closure"
     >= Math.abs(na.nasal_model.place_cue_model.initial_resonances_hz[1] - na.nasal_model.place_cue_model.target_f2_hz)
   || na.nasal_model.coronal_release_area_function.closure_area_cm2
     <= na.nasal_model.oral_closure_area_function.closure_area_cm2
+  || na.nasal_model.cross_section_loss_model?.schema_version !== "hydraulic_cross_section_loss_0.1"
+  || na.nasal_model.oral_side_cavity?.schema_version !== "closed_oral_side_branch_0.2"
+  || na.nasal_model.coronal_release_area_function.hydraulic_diameters_cm?.length
+    !== na.nasal_model.coronal_release_area_function.areas_cm2.length
   || na.nasal_model.coronal_release_area_function.place_gesture_strength >= 1) {
   throw new Error("The alveolar nasal did not derive its coronal tongue and release geometry from place");
 }
@@ -794,7 +878,8 @@ if (migratedPreAnchorNasal.m?.hold_duration_ms !== 45
   throw new Error("Pre-anchor nasal profiles did not retain saved timing while receiving the new coarticulation default");
 }
 if (normalizedNasalTuning("n", false).closure_position !== 0.86
-  || normalizedNasalTuning("n", false).closure_area_cm2 !== 0.008) {
+  || normalizedNasalTuning("n", false).closure_area_cm2 !== 0.008
+  || normalizedNasalTuning("n", false).transition_ms !== 36) {
   throw new Error("The alveolar nasal default is outside its intended place/contact target");
 }
 const migratedV3NasalTuning = normalizeLoadedNasalTuning({
@@ -835,10 +920,28 @@ const retainedCustomV4NasalTuning = normalizeLoadedNasalTuning({
     attack_fade_ms: 15,
   } },
 });
+const migratedDefaultV5NasalTuning = normalizeLoadedNasalTuning({
+  schema_version: "nasal_articulation_tuning_0.5",
+  profiles: { n: {
+    closure_position: 0.86,
+    closure_area_cm2: 0.008,
+    closure_width: 0.05,
+    velopharyngeal_opening: 0.86,
+    nasal_path_gain: 0.9,
+    branch_damping: 0.74,
+    hold_duration_ms: 50,
+    coarticulation_lead_ms: 22,
+    transition_ms: 20,
+    attack_fade_ms: 15,
+  } },
+});
 if (migratedV3NasalTuning.n?.closure_area_cm2 !== 0.025
   || directV4NasalTuning.n?.closure_area_cm2 !== 0.025
   || migratedDefaultV4NasalTuning.n?.closure_position !== 0.86
-  || retainedCustomV4NasalTuning.n?.closure_position !== 0.88) {
+  || migratedDefaultV4NasalTuning.n?.transition_ms !== 36
+  || migratedDefaultV5NasalTuning.n?.transition_ms !== 36
+  || retainedCustomV4NasalTuning.n?.closure_position !== 0.88
+  || retainedCustomV4NasalTuning.n?.transition_ms !== 20) {
   throw new Error("Legacy /n/ closure-area or untouched contact-position defaults were not migrated correctly");
 }
 const reportedMannerDriftM = nasalArticulationValidity(normalizedNasalTuningFromSource("m", {
@@ -1089,7 +1192,7 @@ state.nasalEvaluationLog = [{
   tuning: normalizedNasalTuning("m"),
 }];
 const nasalCalibrationExport = buildExport();
-if (nasalCalibrationExport.nasal_articulation_tuning?.schema_version !== "nasal_articulation_tuning_0.5"
+if (nasalCalibrationExport.nasal_articulation_tuning?.schema_version !== "nasal_articulation_tuning_0.6"
   || nasalCalibrationExport.nasal_articulation_tuning?.profiles?.m?.velopharyngeal_opening !== 0.34
   || nasalCalibrationExport.nasal_auditory_evaluation_log?.[0]?.transition_quality !== 5
   || normalizeLoadedNasalTuning(nasalCalibrationExport.nasal_articulation_tuning).m?.nasal_path_gain !== 0.42
