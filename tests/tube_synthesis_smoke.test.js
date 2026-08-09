@@ -578,13 +578,16 @@ if (process.env.CVD_NASAL_HIGH_RES_BENCHMARK === "1") {
   const benchmarkAudio = synthesizeSyllable(benchmarkToken);
   if (benchmarkToken.startsWith("n")) {
     const topology = benchmarkAudio.nasal_model?.acoustic_topology;
-    if (topology?.schema_version !== "coronal_multichannel_nasal_waveguide_0.1"
+    if (topology?.schema_version !== "coronal_multichannel_nasal_waveguide_0.2"
       || topology?.oral_channel_count !== 3
       || topology?.scattering !== "lossy_multiport_pressure_junction_graph"
       || topology?.finite_contact_band?.schema_version !== "finite_coronal_contact_band_0.1"
       || topology?.minimum_combined_contact_area_cm2 >= 0.02
       || topology?.peak_oral_contact_strength <= 0.9
-      || topology?.channel_split_node >= topology?.channel_merge_node) {
+      || topology?.channel_split_node >= topology?.channel_merge_node
+      || topology?.channel_merge_position - topology?.channel_split_position > 0.3
+      || topology?.requested_oral_contact_position <= topology?.channel_split_position
+      || topology?.requested_oral_contact_position >= topology?.channel_merge_position) {
       throw new Error("The representative /n/ benchmark did not use the finite-contact three-channel waveguide");
     }
   }
@@ -781,9 +784,9 @@ if (process.env.CVD_NASAL_PLACE_DIAGNOSTIC === "1") {
   }, null, 2));
   process.exit(0);
 }
-if (ma.nasal_model?.schema_version !== "nasal_consonant_model_1.3"
+if (ma.nasal_model?.schema_version !== "nasal_consonant_model_1.4"
   || ma.nasal_model.nasal_class !== "m"
-  || na.nasal_model?.schema_version !== "nasal_consonant_model_1.3"
+  || na.nasal_model?.schema_version !== "nasal_consonant_model_1.4"
   || na.nasal_model?.nasal_class !== "n"
   || moraicNasal.nasal_model?.nasal_class !== "N"
   || moraicNasal.vowel !== null) {
@@ -798,7 +801,7 @@ if (ma.nasal_model.level_matching?.schema_version !== "coupled_radiation_level_d
   || moraicNasal.nasal_model.level_matching !== null) {
   throw new Error("CV nasal level matching metadata is missing or was incorrectly applied to moraic /N/");
 }
-if (na.nasal_model.acoustic_topology?.schema_version !== "coronal_multichannel_nasal_waveguide_0.1"
+if (na.nasal_model.acoustic_topology?.schema_version !== "coronal_multichannel_nasal_waveguide_0.2"
   || ma.nasal_model.acoustic_topology?.schema_version !== "branched_nasal_oral_waveguide_0.3"
   || na.nasal_model.acoustic_topology?.resolution_model?.internal_oversampling_factor !== 1
   || na.nasal_model.acoustic_topology?.geometry_control_rate_hz !== 11025
@@ -816,7 +819,7 @@ if (na.nasal_model.acoustic_topology?.schema_version !== "coronal_multichannel_n
   throw new Error("CV nasals did not use the pressure-coupled branched waveguide exclusively");
 }
 for (const alveolarAudio of [na, ni, nu, ne, no]) {
-  if (alveolarAudio.nasal_model?.acoustic_topology?.schema_version !== "coronal_multichannel_nasal_waveguide_0.1"
+  if (alveolarAudio.nasal_model?.acoustic_topology?.schema_version !== "coronal_multichannel_nasal_waveguide_0.2"
     || alveolarAudio.nasal_model?.place_cue_model?.schema_version !== "coronal_nasal_release_target_0.2"
     || alveolarAudio.nasal_model.place_cue_model.final_f2_relative_error > 0.08
     || !alveolarAudio.nasal_model.place_cue_model.source_keys?.includes("iskarousFowlerWhalen2010LocusEquations")
@@ -827,8 +830,10 @@ for (const alveolarAudio of [na, ni, nu, ne, no]) {
 }
 if (ma.nasal_model.release_trajectory?.area_trajectory_schema !== "multi_stage_area_trajectory_0.1"
   || na.nasal_model.release_trajectory?.area_trajectory_schema !== "multi_stage_area_trajectory_0.1"
-  || ma.nasal_model.release_trajectory?.schema_version !== "nasal_release_trajectory_0.8"
-  || na.nasal_model.release_trajectory?.schema_version !== "nasal_release_trajectory_0.8"
+  || ma.nasal_model.release_trajectory?.schema_version !== "nasal_release_trajectory_0.9"
+  || na.nasal_model.release_trajectory?.schema_version !== "nasal_release_trajectory_0.9"
+  || na.nasal_model.release_trajectory?.velopharyngeal_closure_lag_sample
+    <= na.nasal_model.release_trajectory?.place_cue_keyframe_sample
   || na.nasal_model.release_trajectory?.vp_area_trajectory_schema !== "velopharyngeal_port_area_trajectory_0.1"
   || na.nasal_model.release_trajectory?.pressure_coupled_branch !== true
   || ma.nasal_model.release_trajectory.continuous_oral_render !== true

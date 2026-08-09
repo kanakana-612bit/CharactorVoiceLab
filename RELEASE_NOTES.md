@@ -12,8 +12,7 @@
   the character-derived coronal A(x) toward a vowel-conditioned alveolar F2
   transition target. The target and before/after resonances are exported for
   inspection; `/m/`, the nasal hold, and the glottal source remain unchanged.
-- Moved the untouched `/n/` default contact from x/L 0.88 to 0.86, retained more
-  tongue-blade shaping for central/back-vowel releases, and bounded inverse A(x)
+- Moved the untouched `/n/` default contact from x/L 0.88 to 0.86 and bounded inverse A(x)
   gains to prevent `/na/` and `/nu/` from reaching the target through excessive
   whole-tract deformation. Manually tuned legacy contacts remain unchanged.
 - Replaced the fixed alveolar F2 target with a tract-length-scaled,
@@ -34,6 +33,11 @@
   radiation; `/m/` retains its bilabial single-oral-path topology.
 - Preserved finite contact cells during spatial oversampling so a closed design
   cannot be reopened by interpolation between the contact and adjacent sections.
+- Localized the three-channel coronal graph to the finite tongue-contact
+  neighborhood. Low/back-vowel releases now lower the tongue blade before the
+  tongue body reaches its vowel target, and velopharyngeal closure follows with
+  a short lag, reducing persistent lateral/tap-like intervals without injecting
+  a synthetic release burst.
 - Added a Birkholz/VocalTractLab methodology citation without importing VTL code,
   speaker geometries, area functions, recordings, or fitted coefficients.
 - Documented the reduced but remaining integer tube-count quantization and the current

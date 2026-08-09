@@ -9290,6 +9290,39 @@ function channelAreasFromAreaFunction(areaFunction) {
   const totalAreas = areaFunction?.areas_cm2 ?? [];
   const crossSections = areaFunction?.cross_sections_2_5d ?? [];
   const baseHydraulicLoss = hydraulicLossScalesFromAreaFunction(areaFunction);
+  const finalSectionIndex = Math.max(1, totalAreas.length - 1);
+  const contactBand = areaFunction?.finite_contact_band;
+  const contactIndex = clamp(
+    Number.isInteger(areaFunction?.anchored_closure_index)
+      ? areaFunction.anchored_closure_index
+      : Math.round((Number(areaFunction?.closure_position) || 0.86) * finalSectionIndex),
+    0,
+    finalSectionIndex
+  );
+  const firstContactIndex = clamp(
+    Number.isInteger(contactBand?.first_section_index) ? contactBand.first_section_index : contactIndex,
+    0,
+    finalSectionIndex
+  );
+  const lastContactIndex = clamp(
+    Number.isInteger(contactBand?.last_section_index) ? contactBand.last_section_index : contactIndex,
+    firstContactIndex,
+    finalSectionIndex
+  );
+  const contactPosition = contactIndex / finalSectionIndex;
+  // Keep the transverse pressure paths local to the tongue-coronal contact.
+  // Treating the whole anterior oral tract as three parallel ducts creates an
+  // unrealistically persistent lateral-approximant cue during /n/ release.
+  const channelStartPosition = clamp(
+    (firstContactIndex - 1.5) / finalSectionIndex,
+    clamp(contactPosition - 0.18, 0.4, 0.82),
+    clamp(contactPosition - 0.04, 0.44, 0.9)
+  );
+  const channelMergePosition = clamp(
+    (lastContactIndex + 1.5) / finalSectionIndex,
+    clamp(contactPosition + 0.04, channelStartPosition + 0.04, 0.96),
+    0.97
+  );
   const midline = [];
   const leftLateral = [];
   const rightLateral = [];
@@ -9325,9 +9358,11 @@ function channelAreasFromAreaFunction(areaFunction) {
     rightLateralLoss.push(clamp(baseLoss * Math.sqrt(totalArea / rightArea), 0.85, 3.4));
   }
   return {
-    schema_version: "oral_three_channel_area_0.1",
-    channel_start_position: 0.56,
-    channel_merge_position: 0.96,
+    schema_version: "oral_three_channel_area_0.2",
+    channel_start_position: Number(channelStartPosition.toFixed(5)),
+    channel_merge_position: Number(channelMergePosition.toFixed(5)),
+    contact_position: Number(contactPosition.toFixed(5)),
+    channel_extent_basis: "finite tongue-coronal contact band plus one-and-a-half source sections on each side",
     symmetry: "left/right areas are equal unless an explicit cross-section asymmetry is supplied",
     midline_areas_cm2: midline,
     left_lateral_areas_cm2: leftLateral,
@@ -10245,7 +10280,7 @@ function synthesizeCoronalMultiChannelNasalOralTube(oralAreas, nasalAreas, optio
     nasal_radiation: decimate(highResolutionResult.nasal_radiation),
     topology: {
       ...highResolutionResult.topology,
-      schema_version: "coronal_multichannel_nasal_waveguide_0.1",
+      schema_version: "coronal_multichannel_nasal_waveguide_0.2",
       core_schema_version: highResolutionResult.topology.schema_version,
       resolution_model: physicalTubeResolutionModel(
         factor,
@@ -10271,12 +10306,12 @@ function synthesizeCoronalMultiChannelNasalOralTubeCore(oralAreas, nasalAreas, o
   );
   const channelModel = options.oralChannelModel ?? {};
   const splitNode = clamp(
-    Math.round((oralCount - 1) * clamp(channelModel.channel_start_position ?? 0.56, 0.46, 0.72)),
+    Math.round((oralCount - 1) * clamp(channelModel.channel_start_position ?? 0.76, 0.4, 0.9)),
     vpNode + 2,
     oralCount - 4
   );
   const mergeNode = clamp(
-    Math.round((oralCount - 1) * clamp(channelModel.channel_merge_position ?? 0.96, 0.84, 0.98)),
+    Math.round((oralCount - 1) * clamp(channelModel.channel_merge_position ?? 0.93, 0.82, 0.98)),
     splitNode + 2,
     oralCount - 1
   );
@@ -10696,7 +10731,7 @@ function synthesizeCoronalMultiChannelNasalOralTubeCore(oralAreas, nasalAreas, o
     oral_radiation: oralRadiation,
     nasal_radiation: nasalRadiation,
     topology: {
-      schema_version: "coronal_multichannel_nasal_waveguide_core_0.1",
+      schema_version: "coronal_multichannel_nasal_waveguide_core_0.2",
       scattering: "lossy_multiport_pressure_junction_graph",
       oral_channel_count: 3,
       oral_channels: ["midline", "left_lateral", "right_lateral"],
@@ -10706,6 +10741,7 @@ function synthesizeCoronalMultiChannelNasalOralTubeCore(oralAreas, nasalAreas, o
       channel_merge_node: mergeNode,
       channel_split_position: Number((splitNode / oralCount).toFixed(5)),
       channel_merge_position: Number((mergeNode / oralCount).toFixed(5)),
+      channel_extent_basis: channelModel.channel_extent_basis ?? "local tongue-coronal contact neighborhood",
       graph_node_count: nodeCount,
       graph_edge_count: edgeCount,
       vp_junction_index: vpNode,
@@ -11339,6 +11375,7 @@ function nasalPlaceGestureModel(tuning, vocalTractLengthCm = 15.5) {
       contact_position_x_over_l: tuning.closure_position,
       coronal_shaping: false,
       release_locus_fraction: null,
+      velopharyngeal_closure_lag_fraction: null,
       release_constriction_area_cm2: null,
       acoustic_basis: tuning.nasal_class === "m"
         ? "lip-end closure with neutral tongue posture"
@@ -11365,7 +11402,8 @@ function nasalPlaceGestureModel(tuning, vocalTractLengthCm = 15.5) {
     tongue_body_center_x_over_l: Number(bodyCenter.toFixed(5)),
     tongue_body_spread_x_over_l: Number(clamp(tuning.closure_width * 1.9, 0.08, 0.14).toFixed(5)),
     coronal_shaping: true,
-    release_locus_fraction: 0.42,
+    release_locus_fraction: 0.3,
+    velopharyngeal_closure_lag_fraction: 0.16,
     release_constriction_area_cm2: Number(clamp(
       0.3 + Math.max(0, tuning.closure_area_cm2 - 0.006) * 0.4,
       0.3,
@@ -11378,12 +11416,15 @@ function nasalPlaceGestureModel(tuning, vocalTractLengthCm = 15.5) {
 
 function coronalReleaseGestureStrength(followingVowel) {
   return {
-    a: 0.8,
+    // The tongue blade releases before the body reaches a low/back vowel.
+    // Retaining the full coronal dome through those transitions produces a
+    // tap/lateral-like interval; front vowels retain more coronal continuity.
+    a: 0.32,
     i: 0.5,
-    u: 0.8,
-    e: 0.65,
-    o: 0.75,
-  }[followingVowel] ?? 0.65;
+    u: 0.38,
+    e: 0.56,
+    o: 0.34,
+  }[followingVowel] ?? 0.42;
 }
 
 function nasalOralSideCavityModel(tuning, areaFunction = null, closureAreaFunction = null) {
@@ -12001,6 +12042,15 @@ function synthesizeCoupledNasalSyllable(context) {
       vowelTargetSample - 1
     )
     : null;
+  const velopharyngealLagSample = hasCoronalReleaseCue
+    ? clamp(
+      coronalReleaseSample + Math.round(
+        appliedTransitionSamples * placeGesture.velopharyngeal_closure_lag_fraction
+      ),
+      coronalReleaseSample + 1,
+      vowelTargetSample - 1
+    )
+    : null;
   const vowelHydraulicDiameters = hydraulicDiametersFromAreaFunction(vowelAudio.area_function);
   const neutralChannels = channelAreasFromAreaFunction(neutralClosureArea);
   const closureChannels = channelAreasFromAreaFunction(closureArea);
@@ -12070,10 +12120,14 @@ function synthesizeCoupledNasalSyllable(context) {
     keyframes: [
       { role: "nasal_hold", sample: 0, area_cm2: maximumVpPortArea },
       { role: "coarticulation_start", sample: coarticulationStartSample, area_cm2: maximumVpPortArea },
-      { role: "oral_release", sample: holdSamples, area_cm2: maximumVpPortArea * 0.85 },
+      { role: "oral_release", sample: holdSamples, area_cm2: maximumVpPortArea * (hasCoronalReleaseCue ? 0.95 : 0.85) },
       ...(hasCoronalReleaseCue ? [{
         role: "coronal_release_locus",
         sample: coronalReleaseSample,
+        area_cm2: maximumVpPortArea * 0.82,
+      }, {
+        role: "velopharyngeal_closure_lag",
+        sample: velopharyngealLagSample,
         area_cm2: maximumVpPortArea * 0.58,
       }] : []),
       { role: "vowel_target", sample: vowelTargetSample, area_cm2: closedVpPortArea },
@@ -12174,13 +12228,14 @@ function synthesizeCoupledNasalSyllable(context) {
   };
   normalize(samples, 0.92);
   const releaseTrajectory = {
-    schema_version: "nasal_release_trajectory_0.8",
+    schema_version: "nasal_release_trajectory_0.9",
     interpolation: "simultaneous smoothstep A(x,t) and velopharyngeal-port area trajectories",
     area_trajectory_schema: oralAreaTrajectory.schema_version,
     vp_area_trajectory_schema: vpAreaTrajectory.schema_version,
     coarticulation_start_sample: coarticulationStartSample,
     oral_release_sample: holdSamples,
     place_cue_keyframe_sample: coronalReleaseSample,
+    velopharyngeal_closure_lag_sample: velopharyngealLagSample,
     vowel_target_sample: vowelTargetSample,
     closure_position: tuning.closure_position,
     continuous_oral_render: true,
@@ -12192,7 +12247,7 @@ function synthesizeCoupledNasalSyllable(context) {
     oral_render_duration_ms: Number((oralSampleCount * 1000 / sampleRate).toFixed(2)),
   };
   const nasalModel = {
-    schema_version: "nasal_consonant_model_1.3",
+    schema_version: "nasal_consonant_model_1.4",
     nasal_class: nasalClass,
     token,
     following_vowel: parsed.vowel,
@@ -12253,9 +12308,12 @@ function synthesizeCoupledNasalSyllable(context) {
       place_cue_peak_ms: coronalReleaseSample === null
         ? null
         : Number((coronalReleaseSample * 1000 / sampleRate).toFixed(3)),
+      velopharyngeal_closure_lag_ms: velopharyngealLagSample === null
+        ? null
+        : Number((velopharyngealLagSample * 1000 / sampleRate).toFixed(3)),
       attack_fade_ms: tuning.attack_fade_ms,
       attack_fade_curve: "half_cosine",
-      transition_model: "single-state branched waveguide with time-varying oral closure, place-derived tongue posture, vowel posture, and velopharyngeal port",
+      transition_model: "pressure-coupled waveguide with local tongue-coronal channels, center-led oral release, vowel posture, and delayed velopharyngeal closure",
     },
     limitation: nasalClass === "n"
       ? "The nasal geometry is an aggregate-scale synthetic tube. Coronal contact now uses a finite three-channel oral graph, but its left/right symmetry and channel boundaries remain synthetic design assumptions."
