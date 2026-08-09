@@ -1783,6 +1783,267 @@ summary {
   font-size: 12px;
 }
 
+#physicalModelTab {
+  grid-template-columns: minmax(560px, 1.55fr) minmax(300px, 0.72fr);
+  gap: 10px;
+}
+
+.physical-model-workspace > .pane {
+  box-shadow: none;
+}
+
+.physical-model-heading {
+  align-items: center;
+}
+
+.physical-model-heading h2,
+.physical-articulation-pane h2,
+.physical-area-pane h2,
+.physical-transfer-pane h2,
+.physical-source-pane h2,
+.physical-cross-section-pane h2 {
+  margin-bottom: 0;
+}
+
+.physical-model-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  white-space: nowrap;
+}
+
+.physical-model-status::before {
+  content: "";
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--accent);
+}
+
+.physical-layer-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 8px 16px;
+  flex-wrap: wrap;
+  margin: 10px 0 8px;
+  padding: 7px 9px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: #f8f6ef;
+}
+
+.physical-layer-toolbar label {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  color: var(--muted);
+  white-space: nowrap;
+}
+
+.physical-layer-toolbar input {
+  width: auto;
+  min-height: 0;
+  accent-color: var(--accent);
+}
+
+#physicalSagittalCanvas,
+#physicalAreaCanvas,
+#physicalTransferCanvas,
+#physicalGlottalCanvas,
+#physicalCrossSectionCanvas {
+  display: block;
+  width: 100%;
+  height: auto;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: var(--surface);
+}
+
+#physicalSagittalCanvas {
+  aspect-ratio: 45 / 26;
+}
+
+#physicalAreaCanvas {
+  aspect-ratio: 3 / 1;
+  cursor: crosshair;
+  touch-action: none;
+}
+
+#physicalTransferCanvas,
+#physicalGlottalCanvas {
+  aspect-ratio: 31 / 15;
+}
+
+#physicalCrossSectionCanvas {
+  aspect-ratio: 10 / 3;
+  background: #f8f6ef;
+}
+
+.physical-metric-strip {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  margin-top: 8px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  overflow: hidden;
+}
+
+.physical-metric-strip > div {
+  display: grid;
+  gap: 2px;
+  padding: 8px 10px;
+  border-right: 1px solid var(--line);
+  background: #f8f6ef;
+}
+
+.physical-metric-strip > div:last-child {
+  border-right: 0;
+}
+
+.physical-metric-strip span,
+.physical-target-row span,
+.physical-derived-list dt {
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.physical-metric-strip strong,
+.physical-target-row output,
+.physical-derived-list dd {
+  color: var(--ink);
+  font-variant-numeric: tabular-nums;
+  font-weight: 650;
+}
+
+.physical-vowel-selector {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(42px, 1fr));
+  gap: 6px;
+  margin: 12px 0 16px;
+}
+
+.physical-vowel-selector button {
+  min-width: 0;
+  padding: 0 7px;
+  font-variant-numeric: tabular-nums;
+}
+
+.physical-vowel-selector button[aria-pressed="true"] {
+  border-color: var(--accent);
+  background: var(--accent);
+  color: white;
+}
+
+.physical-target-list {
+  display: grid;
+  gap: 13px;
+}
+
+.physical-target-row {
+  display: grid;
+  gap: 5px;
+}
+
+.physical-target-row > div {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: baseline;
+}
+
+.physical-target-row meter {
+  width: 100%;
+  height: 10px;
+  border: 0;
+  accent-color: var(--accent);
+}
+
+.physical-target-row meter::-webkit-meter-bar {
+  border: 0;
+  border-radius: 3px;
+  background: var(--surface-2);
+}
+
+.physical-target-row meter::-webkit-meter-optimum-value {
+  border-radius: 3px;
+  background: var(--accent);
+}
+
+.physical-derived-list {
+  display: grid;
+  gap: 0;
+  margin: 16px 0 10px;
+  border-top: 1px solid var(--line);
+}
+
+.physical-derived-list > div {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 7px 0;
+  border-bottom: 1px solid var(--line);
+}
+
+.physical-derived-list dt,
+.physical-derived-list dd {
+  margin: 0;
+}
+
+.physical-area-pane,
+.physical-cross-section-pane,
+.physical-computation-flow {
+  grid-column: 1 / -1;
+}
+
+.physical-area-pane .pane-head,
+.physical-transfer-pane .pane-head,
+.physical-source-pane .pane-head,
+.physical-cross-section-pane .pane-head {
+  margin-bottom: 9px;
+}
+
+.physical-area-pane .pane-head > span,
+.physical-transfer-pane .pane-head > span {
+  max-width: min(52%, 640px);
+  text-align: right;
+}
+
+.physical-tract-toolbar {
+  grid-template-columns: auto minmax(180px, 1fr) auto auto;
+}
+
+.physical-computation-flow {
+  display: grid;
+  grid-template-columns: minmax(110px, 1fr) auto minmax(110px, 1fr) auto minmax(110px, 1fr) auto minmax(110px, 1fr) auto minmax(110px, 1fr);
+  align-items: center;
+  gap: 6px;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface);
+}
+
+.physical-computation-flow > div {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+  text-align: center;
+}
+
+.physical-computation-flow strong {
+  font-size: 12px;
+}
+
+.physical-computation-flow div span {
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.physical-computation-flow > span {
+  color: var(--accent);
+  font-size: 20px;
+}
+
 .auditory-calibration {
   margin-top: 14px;
   padding-top: 12px;
@@ -2054,6 +2315,7 @@ pre {
   .tab-panel,
   #setupTab,
   #detailTab,
+  #physicalModelTab,
   #vowelTab,
   #consonantTab,
   #ttsModelTab,
@@ -2083,6 +2345,12 @@ pre {
 
   .tract-visual-grid {
     grid-template-columns: 1fr;
+  }
+
+  .physical-area-pane,
+  .physical-cross-section-pane,
+  .physical-computation-flow {
+    grid-column: auto;
   }
 
   .output-settings-grid {
@@ -2160,6 +2428,47 @@ pre {
 
   .composition-metrics {
     grid-template-columns: 1fr;
+  }
+
+  .physical-layer-toolbar {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .physical-metric-strip {
+    grid-template-columns: 1fr;
+  }
+
+  .physical-metric-strip > div {
+    border-right: 0;
+    border-bottom: 1px solid var(--line);
+  }
+
+  .physical-metric-strip > div:last-child {
+    border-bottom: 0;
+  }
+
+  .physical-tract-toolbar {
+    grid-template-columns: 1fr;
+  }
+
+  .physical-area-pane .pane-head > span,
+  .physical-transfer-pane .pane-head > span {
+    max-width: none;
+    text-align: left;
+  }
+
+  .physical-computation-flow {
+    grid-template-columns: 1fr;
+  }
+
+  .physical-computation-flow > div {
+    text-align: left;
+  }
+
+  .physical-computation-flow > span {
+    line-height: 1;
+    transform: rotate(90deg);
   }
 
   .slider-row {

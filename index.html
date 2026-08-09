@@ -28,6 +28,7 @@
     <nav class="tabbar" aria-label="解析タブ">
       <button class="tab-button active" data-tab-target="setupTab">画像・特徴点</button>
       <button class="tab-button" data-tab-target="detailTab">声道プロファイル</button>
+      <button class="tab-button" data-tab-target="physicalModelTab">声道物理モデル</button>
       <button class="tab-button" data-tab-target="vowelTab">母音試聴</button>
       <button class="tab-button" data-tab-target="consonantTab">子音試聴</button>
       <button class="tab-button" data-tab-target="ttsModelTab">TTSモデル</button>
@@ -531,6 +532,145 @@
             <div class="slider-list compact-list" id="advancedAcousticSliders"></div>
             <pre id="constraintOutput"></pre>
           </details>
+        </section>
+      </section>
+
+      <section id="physicalModelTab" class="tab-panel physical-model-workspace" aria-label="声道物理モデル" hidden>
+        <section class="pane physical-model-shape-pane">
+          <div class="pane-head physical-model-heading">
+            <div>
+              <span class="section-kicker">2.5D articulatory geometry</span>
+              <h2>声道側面形状</h2>
+            </div>
+            <span id="physicalModelStatus" class="physical-model-status">解析済み形状を表示</span>
+          </div>
+          <div class="physical-layer-toolbar" aria-label="物理モデル表示レイヤー">
+            <label><input id="physicalShowBase" type="checkbox" checked /> 外形・基準点</label>
+            <label><input id="physicalShowArticulation" type="checkbox" checked /> 構音空間</label>
+            <label><input id="physicalShowTube" type="checkbox" checked /> 等価音響管</label>
+            <label><input id="physicalShowSideBranches" type="checkbox" checked /> 側枝ガイド</label>
+          </div>
+          <canvas id="physicalSagittalCanvas" width="900" height="520" aria-label="選択母音に変形した声道正中矢状面と側枝ガイド"></canvas>
+          <div class="physical-metric-strip" aria-label="声道形状の主要値">
+            <div><span>声道長</span><strong id="physicalVtlValue">-</strong></div>
+            <div><span>管内容積</span><strong id="physicalVolumeValue">-</strong></div>
+            <div><span>最小断面積</span><strong id="physicalMinimumAreaValue">-</strong></div>
+          </div>
+        </section>
+
+        <section class="pane physical-articulation-pane">
+          <div class="pane-head">
+            <div>
+              <span class="section-kicker">Derived target</span>
+              <h2>構音ターゲット</h2>
+            </div>
+            <span>現在の発話運動モデルから導出</span>
+          </div>
+          <div class="physical-vowel-selector" role="group" aria-label="表示する母音">
+            <button type="button" data-physical-vowel="a" aria-pressed="true">/a/</button>
+            <button type="button" data-physical-vowel="i" aria-pressed="false">/i/</button>
+            <button type="button" data-physical-vowel="u" aria-pressed="false">/u/</button>
+            <button type="button" data-physical-vowel="e" aria-pressed="false">/e/</button>
+            <button type="button" data-physical-vowel="o" aria-pressed="false">/o/</button>
+          </div>
+          <div class="physical-target-list">
+            <div class="physical-target-row">
+              <div><span>下顎開口</span><output id="physicalJawTargetValue">-</output></div>
+              <meter id="physicalJawTargetMeter" min="0" max="1" value="0"></meter>
+            </div>
+            <div class="physical-target-row">
+              <div><span>口唇円唇</span><output id="physicalLipRoundingValue">-</output></div>
+              <meter id="physicalLipRoundingMeter" min="0" max="1" value="0"></meter>
+            </div>
+            <div class="physical-target-row">
+              <div><span>口角横展開</span><output id="physicalMouthSpreadValue">-</output></div>
+              <meter id="physicalMouthSpreadMeter" min="0" max="1" value="0"></meter>
+            </div>
+            <div class="physical-target-row">
+              <div><span>舌背形状変形</span><output id="physicalTongueWarpValue">-</output></div>
+              <meter id="physicalTongueWarpMeter" min="0" max="1" value="0"></meter>
+            </div>
+            <div class="physical-target-row">
+              <div><span>発話運動実行</span><output id="physicalGestureExecutionValue">-</output></div>
+              <meter id="physicalGestureExecutionMeter" min="0" max="1.9" value="0"></meter>
+            </div>
+          </div>
+          <dl class="physical-derived-list">
+            <div><dt>声門音源 F0</dt><dd id="physicalF0Value">-</dd></div>
+            <div><dt>Open quotient</dt><dd id="physicalOpenQuotientValue">-</dd></div>
+            <div><dt>Speed quotient</dt><dd id="physicalSpeedQuotientValue">-</dd></div>
+            <div><dt>音素目標</dt><dd id="physicalTargetProfileValue">-</dd></div>
+          </dl>
+          <p class="note">構音ターゲットは母音とPerformanceControlRangeから導く表示値です。断面形状の直接調整は下段のA(x) / W(x)で行います。</p>
+        </section>
+
+        <section class="pane physical-area-pane">
+          <div class="pane-head">
+            <div>
+              <span class="section-kicker">Editable acoustic projection</span>
+              <h2>断面積関数 A(x)・横幅 W(x)</h2>
+            </div>
+            <span id="physicalTractEditStatus">補正点を上下にドラッグできます。</span>
+          </div>
+          <div class="tract-edit-toolbar physical-tract-toolbar">
+            <div class="tract-edit-mode" role="group" aria-label="物理モデルグラフ編集対象">
+              <button id="physicalEditAreaModeBtn" class="active" type="button" aria-pressed="true">断面積 A(x)</button>
+              <button id="physicalEditWidthModeBtn" type="button" aria-pressed="false">横幅 W(x)</button>
+            </div>
+            <span>選択した補正は声道プロファイル画面と共通です。</span>
+            <div class="tract-nudge-controls" aria-label="物理モデル選択点の微調整">
+              <button id="physicalNudgeTractDownBtn" type="button" title="選択点を0.01下げる">−</button>
+              <output id="physicalTractSelectedPointValue">点を選択</output>
+              <button id="physicalNudgeTractUpBtn" type="button" title="選択点を0.01上げる">＋</button>
+            </div>
+            <button id="physicalResetAreaTuningBtn" type="button">選択母音をリセット</button>
+          </div>
+          <canvas id="physicalAreaCanvas" width="900" height="300" tabindex="0" aria-label="声道断面積と横幅の編集グラフ"></canvas>
+        </section>
+
+        <section class="pane physical-transfer-pane">
+          <div class="pane-head">
+            <div>
+              <span class="section-kicker">Tube response</span>
+              <h2>伝達特性</h2>
+            </div>
+            <span id="physicalResonanceSummary">共鳴ピークを計算中</span>
+          </div>
+          <canvas id="physicalTransferCanvas" width="620" height="300" aria-label="音響管の推定伝達特性"></canvas>
+        </section>
+
+        <section class="pane physical-source-pane">
+          <div class="pane-head">
+            <div>
+              <span class="section-kicker">LF-style source</span>
+              <h2>声門体積速度</h2>
+            </div>
+            <span>現在の基準音源</span>
+          </div>
+          <canvas id="physicalGlottalCanvas" width="480" height="300" aria-label="LF型声門体積速度波形"></canvas>
+        </section>
+
+        <section class="pane physical-cross-section-pane">
+          <div class="pane-head">
+            <div>
+              <span class="section-kicker">Coronal projection</span>
+              <h2>2.5D断面列</h2>
+            </div>
+            <span>側面高 × 正面幅 × 楕円形状係数</span>
+          </div>
+          <canvas id="physicalCrossSectionCanvas" width="900" height="270" aria-label="選択母音の2.5D声道断面列"></canvas>
+        </section>
+
+        <section class="physical-computation-flow" aria-label="物理モデルの計算経路">
+          <div><strong>外観参照点</strong><span>手動指定</span></div>
+          <span aria-hidden="true">›</span>
+          <div><strong>形態推定</strong><span>寸法・可動域</span></div>
+          <span aria-hidden="true">›</span>
+          <div><strong>構音形状</strong><span>母音目標</span></div>
+          <span aria-hidden="true">›</span>
+          <div><strong>A(x)・側枝</strong><span>2.5D投影</span></div>
+          <span aria-hidden="true">›</span>
+          <div><strong>音響出力</strong><span>音源・損失・放射</span></div>
         </section>
       </section>
 

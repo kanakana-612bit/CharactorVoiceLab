@@ -70,6 +70,8 @@ const state = {
   tractEditMode: "area",
   areaTuningDrag: null,
   selectedTractTuningHandle: null,
+  physicalAreaTuningPlot: null,
+  physicalTransferCache: null,
   selectedSyllableToken: "a",
   auditoryEvaluationLog: [],
   nasalTuning: {},
@@ -320,6 +322,42 @@ const els = {
   tractProfileCanvas: document.getElementById("tractProfileCanvas"),
   tractCrossSectionCanvas: document.getElementById("tractCrossSectionCanvas"),
   tractRegionSummary: document.getElementById("tractRegionSummary"),
+  physicalSagittalCanvas: document.getElementById("physicalSagittalCanvas"),
+  physicalAreaCanvas: document.getElementById("physicalAreaCanvas"),
+  physicalTransferCanvas: document.getElementById("physicalTransferCanvas"),
+  physicalGlottalCanvas: document.getElementById("physicalGlottalCanvas"),
+  physicalCrossSectionCanvas: document.getElementById("physicalCrossSectionCanvas"),
+  physicalModelStatus: document.getElementById("physicalModelStatus"),
+  physicalShowBase: document.getElementById("physicalShowBase"),
+  physicalShowArticulation: document.getElementById("physicalShowArticulation"),
+  physicalShowTube: document.getElementById("physicalShowTube"),
+  physicalShowSideBranches: document.getElementById("physicalShowSideBranches"),
+  physicalVtlValue: document.getElementById("physicalVtlValue"),
+  physicalVolumeValue: document.getElementById("physicalVolumeValue"),
+  physicalMinimumAreaValue: document.getElementById("physicalMinimumAreaValue"),
+  physicalVowelButtons: Array.from(document.querySelectorAll("[data-physical-vowel]")),
+  physicalJawTargetValue: document.getElementById("physicalJawTargetValue"),
+  physicalJawTargetMeter: document.getElementById("physicalJawTargetMeter"),
+  physicalLipRoundingValue: document.getElementById("physicalLipRoundingValue"),
+  physicalLipRoundingMeter: document.getElementById("physicalLipRoundingMeter"),
+  physicalMouthSpreadValue: document.getElementById("physicalMouthSpreadValue"),
+  physicalMouthSpreadMeter: document.getElementById("physicalMouthSpreadMeter"),
+  physicalTongueWarpValue: document.getElementById("physicalTongueWarpValue"),
+  physicalTongueWarpMeter: document.getElementById("physicalTongueWarpMeter"),
+  physicalGestureExecutionValue: document.getElementById("physicalGestureExecutionValue"),
+  physicalGestureExecutionMeter: document.getElementById("physicalGestureExecutionMeter"),
+  physicalF0Value: document.getElementById("physicalF0Value"),
+  physicalOpenQuotientValue: document.getElementById("physicalOpenQuotientValue"),
+  physicalSpeedQuotientValue: document.getElementById("physicalSpeedQuotientValue"),
+  physicalTargetProfileValue: document.getElementById("physicalTargetProfileValue"),
+  physicalResonanceSummary: document.getElementById("physicalResonanceSummary"),
+  physicalTractEditStatus: document.getElementById("physicalTractEditStatus"),
+  physicalEditAreaModeBtn: document.getElementById("physicalEditAreaModeBtn"),
+  physicalEditWidthModeBtn: document.getElementById("physicalEditWidthModeBtn"),
+  physicalNudgeTractDownBtn: document.getElementById("physicalNudgeTractDownBtn"),
+  physicalNudgeTractUpBtn: document.getElementById("physicalNudgeTractUpBtn"),
+  physicalTractSelectedPointValue: document.getElementById("physicalTractSelectedPointValue"),
+  physicalResetAreaTuningBtn: document.getElementById("physicalResetAreaTuningBtn"),
   vocalTractProfileSliders: document.getElementById("vocalTractProfileSliders"),
   glottalPhysiologySliders: document.getElementById("glottalPhysiologySliders"),
   trunkPhysiologySliders: document.getElementById("trunkPhysiologySliders"),
@@ -847,35 +885,40 @@ function handleProfilePointerLeave(event) {
 
 function handleAreaTuningPointerDown(event) {
   if (!state.vocalTractGeometry?.sections?.length) return;
-  drawTractProfile(state.vocalTractGeometry);
-  const point = canvasPoint(event, els.tractProfileCanvas);
-  const hit = nearestAreaTuningHandle(point);
+  const canvas = event.currentTarget === els.physicalAreaCanvas ? els.physicalAreaCanvas : els.tractProfileCanvas;
+  const surface = canvas === els.physicalAreaCanvas ? "physical" : "detail";
+  if (surface === "physical") drawPhysicalAreaProfile(state.vocalTractGeometry);
+  else drawTractProfile(state.vocalTractGeometry);
+  const point = canvasPoint(event, canvas);
+  const hit = nearestAreaTuningHandle(point, surface === "physical" ? state.physicalAreaTuningPlot : state.areaTuningPlot);
   if (!hit) return;
-  state.areaTuningDrag = hit;
+  state.areaTuningDrag = { ...hit, surface };
   state.selectedTractTuningHandle = hit;
-  els.tractProfileCanvas.setPointerCapture?.(event.pointerId);
+  canvas?.setPointerCapture?.(event.pointerId);
   updateAreaTuningFromPoint(point);
   event.preventDefault();
 }
 
 function handleAreaTuningPointerMove(event) {
   if (!state.areaTuningDrag) return;
-  const point = canvasPoint(event, els.tractProfileCanvas);
+  const canvas = state.areaTuningDrag.surface === "physical" ? els.physicalAreaCanvas : els.tractProfileCanvas;
+  const point = canvasPoint(event, canvas);
   updateAreaTuningFromPoint(point);
   event.preventDefault();
 }
 
 function handleAreaTuningPointerUp(event) {
   if (!state.areaTuningDrag) return;
-  els.tractProfileCanvas.releasePointerCapture?.(event.pointerId);
+  const canvas = state.areaTuningDrag.surface === "physical" ? els.physicalAreaCanvas : els.tractProfileCanvas;
+  canvas?.releasePointerCapture?.(event.pointerId);
   state.areaTuningDrag = null;
+  state.physicalTransferCache = null;
   updateTractEditStatus();
   renderConstraints();
   draw();
 }
 
-function nearestAreaTuningHandle(point) {
-  const meta = state.areaTuningPlot;
+function nearestAreaTuningHandle(point, meta = state.areaTuningPlot) {
   if (!meta) return null;
   const mode = state.tractEditMode === "width" ? "width" : "area";
   const points = mode === "width" ? normalizedWidthTuningPoints(meta.vowel) : normalizedAreaTuningPoints(meta.vowel);
@@ -891,7 +934,7 @@ function nearestAreaTuningHandle(point) {
 
 function updateAreaTuningFromPoint(point) {
   const drag = state.areaTuningDrag;
-  const meta = state.areaTuningPlot;
+  const meta = drag?.surface === "physical" ? state.physicalAreaTuningPlot : state.areaTuningPlot;
   if (!drag || !meta) return;
   const clampedY = clamp(point.y, meta.plot.top, meta.plot.bottom);
   const valueAtPointer = (meta.plot.bottom - clampedY) / Math.max(1, meta.plot.bottom - meta.plot.top) * meta.maxValue;
@@ -920,10 +963,14 @@ function updateAreaTuningFromPoint(point) {
 function setTractEditMode(mode) {
   state.tractEditMode = mode === "width" ? "width" : "area";
   state.selectedTractTuningHandle = null;
-  els.editAreaModeBtn?.classList.toggle("active", state.tractEditMode === "area");
-  els.editWidthModeBtn?.classList.toggle("active", state.tractEditMode === "width");
-  els.editAreaModeBtn?.setAttribute("aria-pressed", state.tractEditMode === "area" ? "true" : "false");
-  els.editWidthModeBtn?.setAttribute("aria-pressed", state.tractEditMode === "width" ? "true" : "false");
+  for (const button of [els.editAreaModeBtn, els.physicalEditAreaModeBtn]) {
+    button?.classList.toggle("active", state.tractEditMode === "area");
+    button?.setAttribute("aria-pressed", state.tractEditMode === "area" ? "true" : "false");
+  }
+  for (const button of [els.editWidthModeBtn, els.physicalEditWidthModeBtn]) {
+    button?.classList.toggle("active", state.tractEditMode === "width");
+    button?.setAttribute("aria-pressed", state.tractEditMode === "width" ? "true" : "false");
+  }
   updateTractEditStatus();
   draw();
 }
@@ -938,6 +985,7 @@ function nudgeSelectedTractPoint(delta) {
   if (!point) return;
   if (selection.mode === "width") setWidthTuningPoint(selection.vowel, selection.handleIndex, point.gain + delta);
   else setAreaTuningPoint(selection.vowel, selection.handleIndex, point.gain + delta);
+  state.physicalTransferCache = null;
   updateTractEditStatus();
   renderConstraints();
   draw();
@@ -1801,7 +1849,14 @@ function drawVocalTractOverlay(ctx, geometry) {
 }
 
 function drawTractProfile(geometry = state.vocalTractGeometry) {
-  const canvas = els.tractProfileCanvas;
+  drawTractProfileCanvas(els.tractProfileCanvas, geometry, "detail", true);
+}
+
+function drawPhysicalAreaProfile(geometry = state.vocalTractGeometry) {
+  drawTractProfileCanvas(els.physicalAreaCanvas, geometry, "physical", false);
+}
+
+function drawTractProfileCanvas(canvas, geometry, surface = "detail", shouldRenderSummary = false) {
   if (!canvas) return;
   const ctx = canvas.getContext("2d");
   const width = canvas.width;
@@ -1827,7 +1882,9 @@ function drawTractProfile(geometry = state.vocalTractGeometry) {
   ) * 1.08;
   const xAt = (position) => plot.left + position * (plot.right - plot.left);
   const yAt = (value) => plot.bottom - value / maxValue * (plot.bottom - plot.top);
-  state.areaTuningPlot = { plot, maxValue, canvasWidth: width, canvasHeight: height, vowel };
+  const plotMeta = { plot, maxValue, canvasWidth: width, canvasHeight: height, vowel };
+  if (surface === "physical") state.physicalAreaTuningPlot = plotMeta;
+  else state.areaTuningPlot = plotMeta;
 
   for (const region of tractRegions) {
     ctx.fillStyle = region.color;
@@ -1870,7 +1927,9 @@ function drawTractProfile(geometry = state.vocalTractGeometry) {
     ["母音横幅 cm", "#36648c"],
     ["側面径 cm", "#236b5b"],
   ], plot.right - 290, plot.top + 12);
-  renderTractRegionSummary(geometry.region_summary, geometry.honda_articulatory_space, geometry.side_branch_guides);
+  if (shouldRenderSummary) {
+    renderTractRegionSummary(geometry.region_summary, geometry.honda_articulatory_space, geometry.side_branch_guides);
+  }
 }
 
 function drawAreaTuningHandles(ctx, areaFunction, xAt, yAt) {
@@ -1921,7 +1980,14 @@ function areaAtPositionFromArray(areas, position) {
 }
 
 function drawTractCrossSectionProfile(geometry = state.vocalTractGeometry, vowel = selectedVowel()) {
-  const canvas = els.tractCrossSectionCanvas;
+  drawTractCrossSectionProfileCanvas(els.tractCrossSectionCanvas, geometry, vowel);
+}
+
+function drawPhysicalCrossSectionProfile(geometry = state.vocalTractGeometry, vowel = selectedVowel()) {
+  drawTractCrossSectionProfileCanvas(els.physicalCrossSectionCanvas, geometry, vowel);
+}
+
+function drawTractCrossSectionProfileCanvas(canvas, geometry, vowel) {
   if (!canvas) return;
   const ctx = canvas.getContext("2d");
   const width = canvas.width;
@@ -1977,6 +2043,411 @@ function drawTractCrossSectionProfile(geometry = state.vocalTractGeometry, vowel
   ctx.fillStyle = "#666257";
   ctx.font = "10px Segoe UI";
   ctx.fillText("紫: 潜在側方流路。現在の1D音響管には総断面積のみを投影。", 14, height - 4);
+}
+
+function drawPhysicalModelWorkspace(geometry = state.vocalTractGeometry) {
+  if (state.activeTab !== "physicalModelTab" || !geometry?.sections?.length) return;
+  const vowel = selectedVowel();
+  const areaFunction = buildTubeAreaFunction(geometry, vowel, PREVIEW_SAMPLE_RATE);
+  const transfer = currentPhysicalTransferAnalysis(geometry, vowel, areaFunction);
+  drawPhysicalSagittalModel(geometry, areaFunction);
+  drawPhysicalAreaProfile(geometry);
+  drawPhysicalTransferChart(transfer);
+  drawPhysicalGlottalSource();
+  drawPhysicalCrossSectionProfile(geometry, vowel);
+  renderPhysicalModelReadouts(geometry, areaFunction, transfer);
+}
+
+function drawPhysicalSagittalModel(geometry, areaFunction) {
+  const canvas = els.physicalSagittalCanvas;
+  if (!canvas) return;
+  const ctx = canvas.getContext("2d");
+  const width = canvas.width;
+  const height = canvas.height;
+  ctx.clearRect(0, 0, width, height);
+  ctx.fillStyle = "#f8f6ef";
+  ctx.fillRect(0, 0, width, height);
+  ctx.strokeStyle = "rgba(184,177,163,0.24)";
+  ctx.lineWidth = 1;
+  for (let x = 40; x < width; x += 40) {
+    ctx.beginPath();
+    ctx.moveTo(x, 0);
+    ctx.lineTo(x, height);
+    ctx.stroke();
+  }
+  for (let y = 40; y < height; y += 40) {
+    ctx.beginPath();
+    ctx.moveTo(0, y);
+    ctx.lineTo(width, y);
+    ctx.stroke();
+  }
+
+  const sourceWidth = els.profileImageCanvas?.width || 720;
+  const sourceHeight = els.profileImageCanvas?.height || 560;
+  const scale = Math.min((width - 36) / sourceWidth, (height - 34) / sourceHeight);
+  const offsetX = (width - sourceWidth * scale) / 2;
+  const offsetY = (height - sourceHeight * scale) / 2;
+  ctx.save();
+  ctx.translate(offsetX, offsetY);
+  ctx.scale(scale, scale);
+
+  if (els.physicalShowBase?.checked !== false) drawPhysicalExternalProfile(ctx);
+  if (els.physicalShowArticulation?.checked !== false) drawPhysicalArticulationGuides(ctx, geometry);
+  if (els.physicalShowSideBranches?.checked !== false) drawPhysicalSideBranchGuides(ctx, geometry);
+  if (els.physicalShowTube?.checked !== false) drawPhysicalEquivalentTube(ctx, geometry, areaFunction);
+  ctx.restore();
+
+  ctx.fillStyle = "rgba(255,253,248,0.94)";
+  roundedRectPath(ctx, 12, 12, 240, 50, 6);
+  ctx.fill();
+  ctx.fillStyle = "#16483d";
+  ctx.font = "12px Segoe UI";
+  ctx.textAlign = "left";
+  ctx.fillText(`/${areaFunction.vowel_shape}/ 等価2.5D声道`, 22, 32);
+  ctx.fillStyle = "#666257";
+  ctx.fillText("実線: 母音形状  破線: 安静形態", 22, 50);
+}
+
+function drawPhysicalExternalProfile(ctx) {
+  const points = resolvedProfilePoints();
+  const outline = [
+    points.profile_neck_back,
+    points.profile_occiput,
+    points.profile_vertex,
+    points.profile_nasion,
+    points.profile_nose_tip,
+    points.profile_subnasale,
+    points.profile_lip,
+    points.profile_chin,
+    points.profile_menton,
+    points.profile_jaw_angle,
+    points.profile_neck_back,
+  ].filter(finitePoint);
+  if (outline.length > 1) {
+    ctx.strokeStyle = "rgba(78,74,66,0.7)";
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    outline.forEach((point, index) => index ? ctx.lineTo(point.x, point.y) : ctx.moveTo(point.x, point.y));
+    ctx.stroke();
+  }
+  const neckFront = points.profile_neck_front;
+  if (finitePoint(points.profile_chin) && finitePoint(neckFront)) {
+    ctx.beginPath();
+    ctx.moveTo(points.profile_chin.x, points.profile_chin.y);
+    ctx.lineTo(neckFront.x, neckFront.y);
+    ctx.stroke();
+  }
+  const baseKeys = ["profile_vertex", "profile_nasion", "profile_nose_tip", "profile_lip", "profile_chin", "profile_hyoid", "profile_larynx"];
+  ctx.font = "10px Segoe UI";
+  ctx.textAlign = "left";
+  for (const key of baseKeys) {
+    const point = points[key];
+    if (!finitePoint(point)) continue;
+    ctx.fillStyle = "#fffdf8";
+    ctx.strokeStyle = "#236b5b";
+    ctx.lineWidth = 1.6;
+    ctx.beginPath();
+    ctx.arc(point.x, point.y, 4.5, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.stroke();
+  }
+}
+
+function drawPhysicalArticulationGuides(ctx, geometry) {
+  const honda = geometry?.honda_articulatory_space;
+  const points = honda?.points_px ?? {};
+  const polygon = (points.articulatory_polygon ?? []).filter(finitePoint);
+  if (polygon.length >= 3) {
+    ctx.fillStyle = "rgba(196,136,54,0.10)";
+    ctx.strokeStyle = "rgba(196,136,54,0.78)";
+    ctx.lineWidth = 1.5;
+    ctx.setLineDash([6, 4]);
+    ctx.beginPath();
+    polygon.forEach((point, index) => index ? ctx.lineTo(point.x, point.y) : ctx.moveTo(point.x, point.y));
+    ctx.closePath();
+    ctx.fill();
+    ctx.stroke();
+    ctx.setLineDash([]);
+  }
+  if (finitePoint(points.ans) && finitePoint(points.pns)) {
+    ctx.strokeStyle = "rgba(196,136,54,0.95)";
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.moveTo(points.ans.x, points.ans.y);
+    ctx.lineTo(points.pns.x, points.pns.y);
+    ctx.stroke();
+  }
+  if (finitePoint(points.soft_palate_hinge) && finitePoint(points.velum_tip)) {
+    ctx.strokeStyle = "rgba(97,79,151,0.95)";
+    ctx.lineWidth = 2.2;
+    ctx.beginPath();
+    ctx.moveTo(points.soft_palate_hinge.x, points.soft_palate_hinge.y);
+    ctx.lineTo(points.velum_tip.x, points.velum_tip.y);
+    ctx.stroke();
+  }
+}
+
+function drawPhysicalSideBranchGuides(ctx, geometry) {
+  const guides = geometry?.side_branch_guides;
+  for (const guide of guides?.paranasal_sinus_guides ?? []) {
+    if (!finitePoint(guide.center_px)) continue;
+    ctx.fillStyle = "rgba(143,96,157,0.12)";
+    ctx.strokeStyle = "rgba(143,96,157,0.72)";
+    ctx.lineWidth = 1.3;
+    ctx.beginPath();
+    ctx.ellipse(guide.center_px.x, guide.center_px.y, guide.radius_px.x, guide.radius_px.y, 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.stroke();
+  }
+  const vp = guides?.velopharyngeal_port;
+  if (finitePoint(vp?.velum_tip_px) && finitePoint(vp?.posterior_wall_px)) {
+    ctx.strokeStyle = "rgba(97,79,151,0.8)";
+    ctx.lineWidth = 1.5;
+    ctx.setLineDash([4, 4]);
+    ctx.beginPath();
+    ctx.moveTo(vp.velum_tip_px.x, vp.velum_tip_px.y);
+    ctx.lineTo(vp.posterior_wall_px.x, vp.posterior_wall_px.y);
+    ctx.stroke();
+    ctx.setLineDash([]);
+  }
+}
+
+function drawPhysicalEquivalentTube(ctx, geometry, areaFunction) {
+  const sections = geometry.sections;
+  const vowelSagittalHeights = areaFunction.cross_sections_2_5d.map((section) => section.sagittal_height_cm);
+  const vowelSections = sections.map((section) => {
+    const vowelSagittalHeight = areaAtPositionFromArray(vowelSagittalHeights, section.position);
+    const sagittalGain = clamp(
+      vowelSagittalHeight / Math.max(0.08, section.sagittal_diameter_cm),
+      0.22,
+      2.1,
+    );
+    const neutralHalf = dist(section.upper, section.lower) / 2;
+    const half = neutralHalf * sagittalGain;
+    return {
+      ...section,
+      upper: { x: section.center.x + section.normal.x * half, y: section.center.y + section.normal.y * half },
+      lower: { x: section.center.x - section.normal.x * half, y: section.center.y - section.normal.y * half },
+    };
+  });
+
+  ctx.strokeStyle = "rgba(78,74,66,0.46)";
+  ctx.lineWidth = 1.4;
+  ctx.setLineDash([5, 5]);
+  for (const side of ["upper", "lower"]) {
+    ctx.beginPath();
+    sections.forEach((section, index) => index ? ctx.lineTo(section[side].x, section[side].y) : ctx.moveTo(section[side].x, section[side].y));
+    ctx.stroke();
+  }
+  ctx.setLineDash([]);
+
+  for (let index = 0; index < vowelSections.length - 1; index++) {
+    const current = vowelSections[index];
+    const next = vowelSections[index + 1];
+    ctx.fillStyle = regionForPosition(current.position).color;
+    ctx.beginPath();
+    ctx.moveTo(current.upper.x, current.upper.y);
+    ctx.lineTo(next.upper.x, next.upper.y);
+    ctx.lineTo(next.lower.x, next.lower.y);
+    ctx.lineTo(current.lower.x, current.lower.y);
+    ctx.closePath();
+    ctx.fill();
+  }
+  ctx.strokeStyle = "rgba(54,100,140,0.95)";
+  ctx.lineWidth = 2.3;
+  for (const side of ["upper", "lower"]) {
+    ctx.beginPath();
+    vowelSections.forEach((section, index) => index ? ctx.lineTo(section[side].x, section[side].y) : ctx.moveTo(section[side].x, section[side].y));
+    ctx.stroke();
+  }
+  ctx.strokeStyle = "rgba(54,100,140,0.62)";
+  ctx.lineWidth = 1;
+  ctx.setLineDash([4, 5]);
+  ctx.beginPath();
+  vowelSections.forEach((section, index) => index ? ctx.lineTo(section.center.x, section.center.y) : ctx.moveTo(section.center.x, section.center.y));
+  ctx.stroke();
+  ctx.setLineDash([]);
+}
+
+function physicalTransferSignature(geometry, vowel, areaFunction) {
+  const loss = currentTubeLossParams(state.constraints);
+  const glottal = currentGlottalSourceParams(state.constraints, 1);
+  return JSON.stringify({
+    revision: state.analysisRevision,
+    vowel,
+    vtl: geometry?.vocal_tract_length_cm,
+    areas: areaFunction?.areas_cm2,
+    width: areaFunction?.cross_sections_2_5d?.map((section) => section.coronal_width_cm),
+    loss,
+    oq: glottal.open_quotient,
+  });
+}
+
+function currentPhysicalTransferAnalysis(geometry, vowel, areaFunction) {
+  const signature = physicalTransferSignature(geometry, vowel, areaFunction);
+  if (state.physicalTransferCache?.signature === signature) return state.physicalTransferCache.analysis;
+  if (state.areaTuningDrag && state.physicalTransferCache?.analysis) return state.physicalTransferCache.analysis;
+  const analysis = analyzeTubeTransfer(vowel, {
+    geometry,
+    areaFunction,
+    sampleCount: 4096,
+    frequencyStep: 20,
+    minFrequency: 100,
+    maxFrequency: 4500,
+    maxPeaks: 5,
+  });
+  state.physicalTransferCache = { signature, analysis };
+  return analysis;
+}
+
+function drawPhysicalTransferChart(analysis) {
+  const canvas = els.physicalTransferCanvas;
+  if (!canvas) return;
+  const ctx = canvas.getContext("2d");
+  const width = canvas.width;
+  const height = canvas.height;
+  const plot = { left: 48, right: width - 16, top: 18, bottom: height - 38 };
+  ctx.clearRect(0, 0, width, height);
+  ctx.fillStyle = "#fffdf8";
+  ctx.fillRect(0, 0, width, height);
+  ctx.fillStyle = "#f8f6ef";
+  ctx.fillRect(plot.left, plot.top, plot.right - plot.left, plot.bottom - plot.top);
+  ctx.strokeStyle = "rgba(184,177,163,0.5)";
+  ctx.lineWidth = 1;
+  ctx.font = "10px Segoe UI";
+  ctx.fillStyle = "#666257";
+  ctx.textAlign = "right";
+  for (let level = -60; level <= 0; level += 15) {
+    const y = plot.bottom - (level + 60) / 60 * (plot.bottom - plot.top);
+    ctx.beginPath();
+    ctx.moveTo(plot.left, y);
+    ctx.lineTo(plot.right, y);
+    ctx.stroke();
+    ctx.fillText(`${level}`, plot.left - 6, y + 3);
+  }
+  ctx.textAlign = "center";
+  for (let frequency = 0; frequency <= 4000; frequency += 1000) {
+    const x = plot.left + frequency / 4500 * (plot.right - plot.left);
+    ctx.beginPath();
+    ctx.moveTo(x, plot.top);
+    ctx.lineTo(x, plot.bottom);
+    ctx.stroke();
+    ctx.fillText(`${frequency}`, x, height - 17);
+  }
+  ctx.fillText("周波数 Hz", (plot.left + plot.right) / 2, height - 4);
+  ctx.save();
+  ctx.beginPath();
+  ctx.rect(plot.left, plot.top, plot.right - plot.left, plot.bottom - plot.top);
+  ctx.clip();
+  ctx.strokeStyle = "#36648c";
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  for (let index = 0; index < (analysis?.spectrum?.length ?? 0); index++) {
+    const point = analysis.spectrum[index];
+    const x = plot.left + point.frequency_hz / 4500 * (plot.right - plot.left);
+    const y = plot.bottom - (clamp(point.level_db, -60, 0) + 60) / 60 * (plot.bottom - plot.top);
+    if (index === 0) ctx.moveTo(x, y);
+    else ctx.lineTo(x, y);
+  }
+  ctx.stroke();
+  const peaks = [...(analysis?.resonances ?? [])].sort((a, b) => a.frequency_hz - b.frequency_hz).slice(0, 5);
+  peaks.forEach((peak, index) => {
+    const x = plot.left + peak.frequency_hz / 4500 * (plot.right - plot.left);
+    ctx.strokeStyle = "rgba(185,71,47,0.76)";
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    ctx.moveTo(x, plot.top);
+    ctx.lineTo(x, plot.bottom);
+    ctx.stroke();
+    ctx.fillStyle = "#b9472f";
+    ctx.textAlign = "left";
+    ctx.fillText(`R${index + 1}`, x + 4, plot.top + 12 + (index % 2) * 12);
+  });
+  ctx.restore();
+}
+
+function drawPhysicalGlottalSource() {
+  const canvas = els.physicalGlottalCanvas;
+  if (!canvas) return;
+  const ctx = canvas.getContext("2d");
+  const width = canvas.width;
+  const height = canvas.height;
+  const plot = { left: 42, right: width - 14, top: 18, bottom: height - 38 };
+  const params = currentGlottalSourceParams(state.constraints, 1);
+  ctx.clearRect(0, 0, width, height);
+  ctx.fillStyle = "#fffdf8";
+  ctx.fillRect(0, 0, width, height);
+  ctx.fillStyle = "#f8f6ef";
+  ctx.fillRect(plot.left, plot.top, plot.right - plot.left, plot.bottom - plot.top);
+  ctx.strokeStyle = "rgba(184,177,163,0.5)";
+  ctx.lineWidth = 1;
+  for (let tick = 0; tick <= 4; tick++) {
+    const y = plot.top + tick / 4 * (plot.bottom - plot.top);
+    ctx.beginPath();
+    ctx.moveTo(plot.left, y);
+    ctx.lineTo(plot.right, y);
+    ctx.stroke();
+  }
+  ctx.strokeStyle = "#a06b13";
+  ctx.lineWidth = 2.2;
+  ctx.beginPath();
+  const sampleCount = 280;
+  for (let index = 0; index < sampleCount; index++) {
+    const cycle = index / (sampleCount - 1) * 3;
+    const flow = lfLikeGlottalFlow(cycle % 1, params);
+    const x = plot.left + index / (sampleCount - 1) * (plot.right - plot.left);
+    const y = plot.bottom - (flow + 0.08) / 1.12 * (plot.bottom - plot.top);
+    if (index === 0) ctx.moveTo(x, y);
+    else ctx.lineTo(x, y);
+  }
+  ctx.stroke();
+  ctx.fillStyle = "#666257";
+  ctx.font = "10px Segoe UI";
+  ctx.textAlign = "center";
+  ctx.fillText("3声門周期", (plot.left + plot.right) / 2, height - 12);
+}
+
+function renderPhysicalModelReadouts(geometry, areaFunction, transfer) {
+  const vowel = selectedVowel();
+  const target = vowelArticulationTarget(vowel);
+  const motor = currentArticulationMotorProfile(state.constraints);
+  const source = currentGlottalSourceParams(state.constraints, 1);
+  const minArea = Math.min(...areaFunction.areas_cm2);
+  const minIndex = areaFunction.areas_cm2.indexOf(minArea);
+  const minPositionCm = (minIndex + 0.5) * areaFunction.section_length_cm;
+  const volume = areaFunction.areas_cm2.reduce((sum, area) => sum + area * areaFunction.section_length_cm, 0);
+  const tongueWarpStrength = Math.max(0, ...(target.tongue_warps ?? []).map((warp) => Math.abs(Math.log(Math.max(0.05, warp.gain)))));
+  const tongueWarpMeter = clamp(tongueWarpStrength / Math.log(3), 0, 1);
+  const transferPeaks = [...(transfer?.resonances ?? [])].sort((a, b) => a.frequency_hz - b.frequency_hz).slice(0, 4);
+
+  if (els.physicalModelStatus) {
+    els.physicalModelStatus.textContent = `/${vowel}/ · ${areaFunction.tube_count}区間 · ${PREVIEW_SAMPLE_RATE / 1000} kHz`;
+  }
+  if (els.physicalVtlValue) els.physicalVtlValue.textContent = `${geometry.vocal_tract_length_cm.toFixed(2)} cm`;
+  if (els.physicalVolumeValue) els.physicalVolumeValue.textContent = `${volume.toFixed(1)} cm³`;
+  if (els.physicalMinimumAreaValue) els.physicalMinimumAreaValue.textContent = `${minArea.toFixed(2)} cm² @ ${minPositionCm.toFixed(1)} cm`;
+  for (const button of els.physicalVowelButtons) {
+    button.setAttribute("aria-pressed", button.dataset.physicalVowel === vowel ? "true" : "false");
+  }
+  setPhysicalMeter(els.physicalJawTargetMeter, els.physicalJawTargetValue, target.jaw_opening_target, 2);
+  setPhysicalMeter(els.physicalLipRoundingMeter, els.physicalLipRoundingValue, target.lip_rounding_target, 2);
+  setPhysicalMeter(els.physicalMouthSpreadMeter, els.physicalMouthSpreadValue, target.mouth_spread_target, 2);
+  setPhysicalMeter(els.physicalTongueWarpMeter, els.physicalTongueWarpValue, tongueWarpMeter, 2, `${Math.exp(tongueWarpStrength).toFixed(2)}x`);
+  setPhysicalMeter(els.physicalGestureExecutionMeter, els.physicalGestureExecutionValue, motor.gesture_execution, 2);
+  if (els.physicalF0Value) els.physicalF0Value.textContent = `${currentDerivedF0(state.constraints).toFixed(1)} Hz`;
+  if (els.physicalOpenQuotientValue) els.physicalOpenQuotientValue.textContent = source.open_quotient.toFixed(3);
+  if (els.physicalSpeedQuotientValue) els.physicalSpeedQuotientValue.textContent = source.speed_quotient.toFixed(3);
+  if (els.physicalTargetProfileValue) els.physicalTargetProfileValue.textContent = areaFunction.phonetic_target_profile?.label ?? "-";
+  if (els.physicalResonanceSummary) {
+    els.physicalResonanceSummary.textContent = transferPeaks.length
+      ? transferPeaks.map((peak, index) => `R${index + 1} ${Math.round(peak.frequency_hz)} Hz`).join(" · ")
+      : "明瞭な共鳴ピークなし";
+  }
+}
+
+function setPhysicalMeter(meter, output, value, digits = 2, label = null) {
+  if (meter) meter.value = Number.isFinite(value) ? value : 0;
+  if (output) output.textContent = label ?? (Number.isFinite(value) ? value.toFixed(digits) : "-");
 }
 
 function drawProfileLine(ctx, sections, key, color, xAt, yAt, lineWidth) {
@@ -2281,6 +2752,7 @@ function draw() {
   drawTractProfile(state.vocalTractGeometry ?? liveGeometry);
   drawTractCrossSectionProfile(state.vocalTractGeometry ?? liveGeometry);
   drawNasalProfile();
+  drawPhysicalModelWorkspace(state.vocalTractGeometry ?? liveGeometry);
 }
 
 // Legacy extraction helpers are kept for future comparison experiments; the current UI is manual-only.
@@ -2858,6 +3330,7 @@ function analyze() {
   state.vocalTractGeometry = buildVocalTractGeometry();
   state.appliedImageWeight = globalWeight;
   state.analysisRevision += 1;
+  state.physicalTransferCache = null;
   state.lastWav = null;
   renderDetailControls();
   renderCompositionGuide();
@@ -5607,20 +6080,24 @@ function renderSyllableDatasetPreview() {
 }
 
 function updateTractEditStatus() {
-  if (!els.tractEditStatus) return;
+  if (!els.tractEditStatus && !els.physicalTractEditStatus) return;
   const vowel = selectedVowel();
   const mode = state.tractEditMode === "width" ? "width" : "area";
   const points = mode === "width" ? normalizedWidthTuningPoints(vowel) : normalizedAreaTuningPoints(vowel);
   const changed = points.filter((point) => Math.abs(point.gain - 1) > 0.0001);
   const label = mode === "width" ? "W(x)横幅" : "A(x)断面積";
-  els.tractEditStatus.textContent = changed.length
+  const statusText = changed.length
     ? `/${vowel}/ ${label}補正: ${changed.map((point) => `${Math.round(point.position * 100)}%=${point.gain.toFixed(2)}x`).join(" / ")}`
     : `/${vowel}/ ${label}補正なし。丸い補正点を上下にドラッグできます。`;
+  if (els.tractEditStatus) els.tractEditStatus.textContent = statusText;
+  if (els.physicalTractEditStatus) els.physicalTractEditStatus.textContent = statusText;
   const selected = state.selectedTractTuningHandle;
-  if (els.tractSelectedPointValue) {
+  if (els.tractSelectedPointValue || els.physicalTractSelectedPointValue) {
     const selectedPoints = selected?.mode === "width" ? normalizedWidthTuningPoints(vowel) : normalizedAreaTuningPoints(vowel);
     const point = selected?.vowel === vowel ? selectedPoints[selected.handleIndex] : null;
-    els.tractSelectedPointValue.textContent = point ? `${Math.round(point.position * 100)}%  ${point.gain.toFixed(2)}x` : "点を選択";
+    const selectedText = point ? `${Math.round(point.position * 100)}%  ${point.gain.toFixed(2)}x` : "点を選択";
+    if (els.tractSelectedPointValue) els.tractSelectedPointValue.textContent = selectedText;
+    if (els.physicalTractSelectedPointValue) els.physicalTractSelectedPointValue.textContent = selectedText;
   }
 }
 
@@ -7012,7 +7489,7 @@ function setActiveTab(tabId) {
     panel.hidden = !active;
   }
   if (els.floatingPreviewDock) {
-    els.floatingPreviewDock.hidden = !["detailTab", "vowelTab"].includes(tabId);
+    els.floatingPreviewDock.hidden = !["detailTab", "physicalModelTab", "vowelTab"].includes(tabId);
   }
   if (tabId === "ttsModelTab" || tabId === "outputTab") {
     renderVoiceDesignerControls();
@@ -7437,6 +7914,7 @@ function resetAreaTuning(vowel = selectedVowel()) {
   state.vowelAreaTuning = nextArea;
   state.vowelWidthTuning = nextWidth;
   state.selectedTractTuningHandle = null;
+  state.physicalTransferCache = null;
   state.lastWav = null;
   updateTractEditStatus();
   renderConstraints();
@@ -10781,6 +11259,12 @@ function init() {
   els.tractProfileCanvas?.addEventListener("pointercancel", handleAreaTuningPointerUp);
   els.tractProfileCanvas?.addEventListener("pointerleave", handleAreaTuningPointerUp);
   els.tractProfileCanvas?.addEventListener("keydown", handleTractTuningKeyDown);
+  els.physicalAreaCanvas?.addEventListener("pointerdown", handleAreaTuningPointerDown);
+  els.physicalAreaCanvas?.addEventListener("pointermove", handleAreaTuningPointerMove);
+  els.physicalAreaCanvas?.addEventListener("pointerup", handleAreaTuningPointerUp);
+  els.physicalAreaCanvas?.addEventListener("pointercancel", handleAreaTuningPointerUp);
+  els.physicalAreaCanvas?.addEventListener("pointerleave", handleAreaTuningPointerUp);
+  els.physicalAreaCanvas?.addEventListener("keydown", handleTractTuningKeyDown);
   els.nasalProfileCanvas?.addEventListener("pointerdown", handleNasalProfilePointerDown);
   els.nasalProfileCanvas?.addEventListener("pointermove", handleNasalProfilePointerMove);
   els.nasalProfileCanvas?.addEventListener("pointerup", handleNasalProfilePointerUp);
@@ -10799,6 +11283,10 @@ function init() {
     els.profileShowBaseLandmarks,
     els.profileShowArticulationLandmarks,
     els.profileShowVocalTract,
+    els.physicalShowBase,
+    els.physicalShowArticulation,
+    els.physicalShowTube,
+    els.physicalShowSideBranches,
   ]) {
     toggle?.addEventListener("change", draw);
   }
@@ -10807,16 +11295,30 @@ function init() {
   els.playSampleButton.addEventListener("click", playVowel);
   els.vowelSelect.addEventListener("input", () => {
     state.lastWav = null;
+    state.physicalTransferCache = null;
     state.selectedTractTuningHandle = null;
     updateTractEditStatus();
     renderAuditoryEvaluation();
     draw();
   });
   els.resetAreaTuningBtn?.addEventListener("click", () => resetAreaTuning(selectedVowel()));
+  els.physicalResetAreaTuningBtn?.addEventListener("click", () => resetAreaTuning(selectedVowel()));
   els.editAreaModeBtn?.addEventListener("click", () => setTractEditMode("area"));
   els.editWidthModeBtn?.addEventListener("click", () => setTractEditMode("width"));
+  els.physicalEditAreaModeBtn?.addEventListener("click", () => setTractEditMode("area"));
+  els.physicalEditWidthModeBtn?.addEventListener("click", () => setTractEditMode("width"));
   els.nudgeTractDownBtn?.addEventListener("click", () => nudgeSelectedTractPoint(-0.01));
   els.nudgeTractUpBtn?.addEventListener("click", () => nudgeSelectedTractPoint(0.01));
+  els.physicalNudgeTractDownBtn?.addEventListener("click", () => nudgeSelectedTractPoint(-0.01));
+  els.physicalNudgeTractUpBtn?.addEventListener("click", () => nudgeSelectedTractPoint(0.01));
+  for (const button of els.physicalVowelButtons) {
+    button.addEventListener("click", () => {
+      const vowel = button.dataset.physicalVowel;
+      if (!vowelFormants[vowel] || !els.vowelSelect) return;
+      els.vowelSelect.value = vowel;
+      els.vowelSelect.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+  }
   els.playUntunedVowelBtn?.addEventListener("click", () => playVowelCalibrationVariant(false));
   els.playTunedVowelBtn?.addEventListener("click", () => playVowelCalibrationVariant(true));
   els.phonemeClarityInput?.addEventListener("input", updateAuditoryRatingOutputs);

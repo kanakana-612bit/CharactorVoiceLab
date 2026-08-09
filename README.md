@@ -11,6 +11,15 @@ CharacterVoiceDesigner converts appearance-derived and manually designed voice f
 This repository is a concept-implementation prototype of the design framework
 proposed in [「身体構造推定に基づくキャラクター指向音声合成の設計枠組み」](https://doi.org/10.51094/jxiv.4033).
 
+The **Physical Vocal-Tract Model** tab presents the frozen physical synthesizer as
+one traceable pipeline: manually placed appearance landmarks, derived morphological
+articulatory space, vowel-conditioned 2.5D equivalent-tube geometry, editable
+`A(x)`/coronal-width functions, the lossy-tube transfer response, and the LF-style
+glottal source. Its controls share the same vowel-tuning state used by the profile
+and audition screens. Internal tongue, sinus, and cross-sectional contours remain
+synthetic design guides; the UI does not claim that they were observed in the
+reference image.
+
 ## One-click Windows setup
 
 On 64-bit Windows 10 or 11, clone or extract the repository and run:
