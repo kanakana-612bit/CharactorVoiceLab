@@ -73,6 +73,7 @@ const state = {
   selectedTractTuningHandle: null,
   physicalAreaTuningPlot: null,
   physicalTransferCache: null,
+  phoneticAreaCalibrationCache: new Map(),
   selectedSyllableToken: "a",
   auditoryEvaluationLog: [],
   nasalTuning: {},
@@ -2282,6 +2283,17 @@ function physicalTransferSignature(geometry, vowel, areaFunction) {
     width: areaFunction?.cross_sections_2_5d?.map((section) => section.coronal_width_cm),
     loss,
     oq: glottal.open_quotient,
+    side_branches: {
+      sinus_coupling: constraintCenter(state.constraints, "sinus_coupling", 0),
+      velopharyngeal_coupling: constraintCenter(state.constraints, "velopharyngeal_loss_coupling", 0),
+      piriform_coupling: constraintCenter(state.constraints, "piriform_fossa_loss_coupling", 0),
+      nasal_damping: constraintCenter(state.constraints, "nasal_branch_damping", 0.72),
+    },
+    body_resonance: {
+      frequency_hz: currentBodyResonanceFrequency(state.constraints),
+      gain_db: constraintCenter(state.constraints, "body_resonance_gain_db", 4),
+      coupling: constraintCenter(state.constraints, "body_resonance_coupling", 0),
+    },
   });
 }
 
@@ -2297,6 +2309,8 @@ function currentPhysicalTransferAnalysis(geometry, vowel, areaFunction) {
     minFrequency: 100,
     maxFrequency: 4500,
     maxPeaks: 5,
+    includeSideBranches: true,
+    includeBodyResonance: true,
   });
   state.physicalTransferCache = { signature, analysis };
   return analysis;
@@ -2352,6 +2366,21 @@ function drawPhysicalTransferChart(analysis) {
     else ctx.lineTo(x, y);
   }
   ctx.stroke();
+  const targetFormants = analysis?.area_function?.formant_target_reference?.target_formants_hz ?? [];
+  ctx.setLineDash([5, 4]);
+  targetFormants.slice(0, 4).forEach((frequency, index) => {
+    const x = plot.left + frequency / 4500 * (plot.right - plot.left);
+    ctx.strokeStyle = "rgba(44,126,92,0.78)";
+    ctx.lineWidth = 1.2;
+    ctx.beginPath();
+    ctx.moveTo(x, plot.top);
+    ctx.lineTo(x, plot.bottom);
+    ctx.stroke();
+    ctx.fillStyle = "#2c7e5c";
+    ctx.textAlign = "right";
+    ctx.fillText(`F${index + 1}`, x - 3, plot.bottom - 6 - (index % 2) * 12);
+  });
+  ctx.setLineDash([]);
   const peaks = [...(analysis?.resonances ?? [])].sort((a, b) => a.frequency_hz - b.frequency_hz).slice(0, 5);
   peaks.forEach((peak, index) => {
     const x = plot.left + peak.frequency_hz / 4500 * (plot.right - plot.left);
@@ -2441,8 +2470,13 @@ function renderPhysicalModelReadouts(geometry, areaFunction, transfer) {
   if (els.physicalSpeedQuotientValue) els.physicalSpeedQuotientValue.textContent = source.speed_quotient.toFixed(3);
   if (els.physicalTargetProfileValue) els.physicalTargetProfileValue.textContent = areaFunction.phonetic_target_profile?.label ?? "-";
   if (els.physicalResonanceSummary) {
+    const targetFormants = areaFunction.formant_target_reference?.target_formants_hz ?? [];
     els.physicalResonanceSummary.textContent = transferPeaks.length
-      ? transferPeaks.map((peak, index) => `R${index + 1} ${Math.round(peak.frequency_hz)} Hz`).join(" · ")
+      ? transferPeaks.map((peak, index) => {
+        const targetHz = targetFormants[index];
+        const error = Number.isFinite(targetHz) ? Math.round((peak.frequency_hz - targetHz) / targetHz * 100) : null;
+        return `R${index + 1} ${Math.round(peak.frequency_hz)} Hz${error === null ? "" : ` (${error >= 0 ? "+" : ""}${error}%)`}`;
+      }).join(" · ")
       : "明瞭な共鳴ピークなし";
   }
 }
@@ -4067,7 +4101,7 @@ function mapVoiceConstraints(features) {
   const ventilation = Math.min(ventilationEstimate, ventilationCapacityCeiling);
   const respiratorySupport = 1;
   const sinusCoupling = clamp(0.18 + (nasal / (sex === "male" ? 22 : sex === "female" ? 18 : 20) - 1) * 0.18 + (sinusVolume / sinusBase - 1) * 0.22, 0.04, 0.55);
-  const velopharyngealLossCoupling = clamp(0.10 + sinusCoupling * 0.24 + (1 - baselineTension) * 0.04, 0.03, 0.42);
+  const velopharyngealLossCoupling = clamp(0.018 + Math.max(0, 1 - baselineTension) * 0.015, 0.008, 0.08);
   const piriformFossaLossCoupling = clamp(0.12 + (vtl / baseVtl - 1) * 0.08 + (pharynxLen - 1) * 0.06, 0.04, 0.36);
   const piriformFossaFrequency = clamp(3700 * Math.pow(baseVtl / vtl, 0.42), 2600, 4800);
   const bodyResonanceCoupling = clamp(0.22 + (thoracicVolume / thoracicBase - 1) * 0.24 + bodyFatDeltaPercent * 0.003 + abdomenSkinfoldDeltaMm * 0.002, 0.04, 0.7);
@@ -4178,7 +4212,7 @@ function mapVoiceConstraints(features) {
     sinus_neck_length_cm: range(1.2 * Math.pow(sinusVolume / sinusBase, 0.12), 0.25 * k, "cm", "Helmholtz side-branch proxy; manual/detail parameter pending", 0.12, "sourceMap"),
     sinus_coupling: editableControl(sinusCoupling, 0, 1, "ratio", "nasal/sinus proxy plus manual slider", 0.22, "sourceMap"),
     sinus_damping: editableControl(0.68, 0.25, 1.2, "ratio", "preview synthesis control; higher values smear sinus effect", 0.1, "sourceMap"),
-    velopharyngeal_loss_coupling: editableControl(velopharyngealLossCoupling, 0, 0.75, "ratio", "nasal side-branch loss control guided by the manually placed velopharyngeal gap when available", 0.1, "sourceMap"),
+    velopharyngeal_loss_coupling: editableControl(velopharyngealLossCoupling, 0, 0.75, "ratio", "velopharyngeal opening/leakage design control; an oral-vowel baseline is near closed and is not inferred from sinus volume", 0.1, "sourceMap"),
     piriform_fossa_loss_coupling: editableControl(piriformFossaLossCoupling, 0, 0.65, "ratio", "piriform-fossa antiresonance preview control; not an image-observed cavity estimate", 0.1, "sourceMap"),
     piriform_fossa_frequency_hz: editableControl(piriformFossaFrequency, 2200, 5200, "Hz", "vocal-tract-length-scaled piriform-fossa antiresonance preview frequency", 0.1, "sourceMap"),
     nasal_branch_damping: editableControl(0.72, 0.25, 1.4, "ratio", "nasal/velopharyngeal side-branch damping control for the lightweight preview", 0.1, "sourceMap"),
@@ -6096,9 +6130,10 @@ function updateTractEditStatus() {
   const points = mode === "width" ? normalizedWidthTuningPoints(vowel) : normalizedAreaTuningPoints(vowel);
   const changed = points.filter((point) => Math.abs(point.gain - 1) > 0.0001);
   const label = mode === "width" ? "W(x)横幅" : "A(x)断面積";
+  const hasTargetAssist = mode === "area" && vowelArticulationTarget(vowel).acoustic_area_calibration?.adaptive_target_assist;
   const statusText = changed.length
-    ? `/${vowel}/ ${label}補正: ${changed.map((point) => `${Math.round(point.position * 100)}%=${point.gain.toFixed(2)}x`).join(" / ")}`
-    : `/${vowel}/ ${label}補正なし。丸い補正点を上下にドラッグできます。`;
+    ? `/${vowel}/ ${label}${hasTargetAssist ? "音素目標追従 + " : ""}手動補正: ${changed.map((point) => `${Math.round(point.position * 100)}%=${point.gain.toFixed(2)}x`).join(" / ")}`
+    : `/${vowel}/ ${label}${hasTargetAssist ? "音素目標追従あり。" : ""}手動補正なし。丸い補正点を上下にドラッグできます。`;
   if (els.tractEditStatus) els.tractEditStatus.textContent = statusText;
   if (els.physicalTractEditStatus) els.physicalTractEditStatus.textContent = statusText;
   const selected = state.selectedTractTuningHandle;
@@ -8005,6 +8040,213 @@ function applyAreaTuning(areas, vowel) {
   });
 }
 
+function resolvedAcousticAreaCalibration(calibration, tubeCount) {
+  if (!calibration) return null;
+  const tubeSpecificPoints = calibration.points_by_tube_count?.[String(tubeCount)]
+    ?? calibration.points_by_tube_count?.[tubeCount];
+  return {
+    ...calibration,
+    points: Array.isArray(tubeSpecificPoints) ? tubeSpecificPoints : calibration.points,
+    selected_tube_count: tubeCount,
+    tube_count_specific: Array.isArray(tubeSpecificPoints),
+  };
+}
+
+function acousticAreaCalibrationGainAt(position, calibration) {
+  const points = Array.isArray(calibration?.points)
+    ? calibration.points
+      .filter((point) => Number.isFinite(Number(point?.position)) && Number.isFinite(Number(point?.gain)))
+      .map((point) => ({
+        position: clamp(Number(point.position), 0, 1),
+        gain: clamp(Number(point.gain), 0.3, 2.4),
+      }))
+      .sort((left, right) => left.position - right.position)
+    : [];
+  if (!points.length) return 1;
+  if (position <= points[0].position) return points[0].gain;
+  for (let index = 1; index < points.length; index++) {
+    const right = points[index];
+    if (position > right.position) continue;
+    const left = points[index - 1];
+    const t = (position - left.position) / Math.max(0.0001, right.position - left.position);
+    const smoothT = t * t * (3 - 2 * t);
+    return left.gain + (right.gain - left.gain) * smoothT;
+  }
+  return points.at(-1).gain;
+}
+
+function applyAcousticAreaCalibration(areas, calibration) {
+  if (!Array.isArray(calibration?.points) || !calibration.points.length) return areas;
+  return areas.map((area, index) => {
+    const position = areas.length > 1 ? index / (areas.length - 1) : 0.5;
+    return clamp(area * acousticAreaCalibrationGainAt(position, calibration), 0.07, 14);
+  });
+}
+
+function applyAreaControlPointGains(areas, gains) {
+  const calibration = {
+    points: AREA_TUNING_HANDLES.map((position, index) => ({ position, gain: gains[index] ?? 1 })),
+  };
+  return applyAcousticAreaCalibration(areas, calibration);
+}
+
+function solveLinearSystem(matrix, vector) {
+  const size = vector.length;
+  const augmented = matrix.map((row, index) => [...row, vector[index]]);
+  for (let column = 0; column < size; column++) {
+    let pivot = column;
+    for (let row = column + 1; row < size; row++) {
+      if (Math.abs(augmented[row][column]) > Math.abs(augmented[pivot][column])) pivot = row;
+    }
+    if (Math.abs(augmented[pivot][column]) < 1e-9) return null;
+    [augmented[column], augmented[pivot]] = [augmented[pivot], augmented[column]];
+    const divisor = augmented[column][column];
+    for (let index = column; index <= size; index++) augmented[column][index] /= divisor;
+    for (let row = 0; row < size; row++) {
+      if (row === column) continue;
+      const factor = augmented[row][column];
+      for (let index = column; index <= size; index++) augmented[row][index] -= factor * augmented[column][index];
+    }
+  }
+  return augmented.map((row) => row[size]);
+}
+
+function coreTubeResonancesForAreas(areas, sampleRate, constraints, motorProfile) {
+  const glottalParams = currentGlottalSourceParams(constraints, 1);
+  const lossParams = currentTubeLossParams(constraints);
+  const lossModel = buildTubeDistributedLossModel(lossParams, sampleRate, areas.length);
+  const impulse = synthesizeKellyLochbaumTube(areas, {
+    sampleCount: 2048,
+    sampleRate,
+    sourceMode: "impulse",
+    impulseAmplitude: 1,
+    f0: 0,
+    pressure: 900,
+    effectiveClosure: glottalClosureProxyFromOpenQuotient(glottalParams.open_quotient),
+    respiratorySupport: 1,
+    tension: 1,
+    amplitude: 1,
+    motorControlPrecision: motorProfile.motor_control_precision,
+    glottalParams,
+    lossParams,
+    lossModel,
+  });
+  const spectrum = sampledMagnitudeSpectrum(impulse, sampleRate, 120, 4500, 15);
+  return selectResonancePeaks(spectrum, 260, 6).slice(0, 4);
+}
+
+function resonanceTargetError(resonances, targets) {
+  if (resonances.length < 4 || targets.length < 4) return Number.POSITIVE_INFINITY;
+  const weights = [4, 4, 1.4, 0.8];
+  return weights.reduce((sum, weight, index) => {
+    const error = Math.log(resonances[index].frequency_hz / targets[index]);
+    return sum + weight * error * error;
+  }, 0);
+}
+
+function adaptAreaFunctionToPhoneticTarget(areas, vowel, sampleRate, constraints, motorProfile, formantReference, calibration) {
+  if (!calibration?.adaptive_target_assist || vowel !== "a") {
+    return { areas, metadata: { active: false, reason: "profile_not_enabled" } };
+  }
+  const targets = formantReference?.target_formants_hz ?? [];
+  if (targets.length < 4) return { areas, metadata: { active: false, reason: "four_formant_target_unavailable" } };
+  const signature = JSON.stringify({
+    vowel,
+    sample_rate_hz: sampleRate,
+    areas: areas.map((area) => Number(area.toFixed(3))),
+    targets: targets.slice(0, 4).map((frequency) => Number(frequency.toFixed(2))),
+    loss: currentTubeLossParams(constraints),
+  });
+  const cached = state.phoneticAreaCalibrationCache.get(signature);
+  if (cached) return cached;
+
+  let currentAreas = areas.slice();
+  let currentResonances = coreTubeResonancesForAreas(currentAreas, sampleRate, constraints, motorProfile);
+  const initialResonances = currentResonances.map((peak) => ({ ...peak }));
+  const cumulativeGains = AREA_TUNING_HANDLES.map(() => 1);
+  const perturbationLogGain = 0.12;
+  const weights = [4, 4, 1.4, 0.8];
+  let iterations = 0;
+
+  for (let iteration = 0; iteration < 2 && currentResonances.length >= 4; iteration++) {
+    const logErrors = targets.slice(0, 4).map((target, index) => Math.log(target / currentResonances[index].frequency_hz));
+    if (Math.max(Math.abs(logErrors[0]), Math.abs(logErrors[1])) < 0.035
+      && Math.max(...logErrors.map(Math.abs)) < 0.08) break;
+    const jacobian = Array.from({ length: 4 }, () => Array(AREA_TUNING_HANDLES.length).fill(0));
+    for (let handleIndex = 0; handleIndex < AREA_TUNING_HANDLES.length; handleIndex++) {
+      const perturbation = AREA_TUNING_HANDLES.map(() => 1);
+      perturbation[handleIndex] = Math.exp(perturbationLogGain);
+      const perturbedAreas = applyAreaControlPointGains(currentAreas, perturbation);
+      const perturbedResonances = coreTubeResonancesForAreas(perturbedAreas, sampleRate, constraints, motorProfile);
+      if (perturbedResonances.length < 4) continue;
+      for (let formantIndex = 0; formantIndex < 4; formantIndex++) {
+        jacobian[formantIndex][handleIndex] = Math.log(
+          perturbedResonances[formantIndex].frequency_hz / currentResonances[formantIndex].frequency_hz
+        ) / perturbationLogGain;
+      }
+    }
+    const size = AREA_TUNING_HANDLES.length;
+    const normalMatrix = Array.from({ length: size }, () => Array(size).fill(0));
+    const normalVector = Array(size).fill(0);
+    for (let left = 0; left < size; left++) {
+      for (let right = 0; right < size; right++) {
+        for (let formant = 0; formant < 4; formant++) {
+          normalMatrix[left][right] += weights[formant] * jacobian[formant][left] * jacobian[formant][right];
+        }
+      }
+      normalMatrix[left][left] += 0.16;
+      for (let formant = 0; formant < 4; formant++) {
+        normalVector[left] += weights[formant] * jacobian[formant][left] * logErrors[formant];
+      }
+    }
+    const solution = solveLinearSystem(normalMatrix, normalVector);
+    if (!solution) break;
+    const previousError = resonanceTargetError(currentResonances, targets);
+    let accepted = null;
+    for (const scale of [1, 0.5, 0.25]) {
+      const gains = solution.map((value) => Math.exp(clamp(value * scale, -0.3, 0.3)));
+      const candidateAreas = applyAreaControlPointGains(currentAreas, gains);
+      const candidateResonances = coreTubeResonancesForAreas(candidateAreas, sampleRate, constraints, motorProfile);
+      const candidateError = resonanceTargetError(candidateResonances, targets);
+      if (candidateError < previousError) {
+        accepted = { areas: candidateAreas, resonances: candidateResonances, gains };
+        break;
+      }
+    }
+    if (!accepted) break;
+    currentAreas = accepted.areas;
+    currentResonances = accepted.resonances;
+    for (let index = 0; index < cumulativeGains.length; index++) cumulativeGains[index] *= accepted.gains[index];
+    iterations += 1;
+  }
+
+  const finalWeightedError = resonanceTargetError(currentResonances, targets);
+  const result = {
+    areas: currentAreas,
+    metadata: {
+      active: true,
+      schema_version: "phonetic_target_area_assist_0.1",
+      method: "regularized finite-difference inverse A(x) control",
+      target_role: "speech-motor adaptation toward the selected linguistic vowel category",
+      morphology_preservation: "the character-derived geometry is retained as the initial state and correction gains are log-regularized",
+      iterations,
+      control_points: AREA_TUNING_HANDLES.map((position, index) => ({
+        position,
+        gain: Number(cumulativeGains[index].toFixed(5)),
+      })),
+      target_formants_hz: targets.slice(0, 4).map((frequency) => Number(frequency.toFixed(3))),
+      initial_resonances_hz: initialResonances.map((peak) => peak.frequency_hz),
+      final_resonances_hz: currentResonances.map((peak) => peak.frequency_hz),
+      final_weighted_log_error: Number.isFinite(finalWeightedError) ? Number(finalWeightedError.toFixed(8)) : null,
+    },
+  };
+  state.phoneticAreaCalibrationCache.set(signature, result);
+  if (state.phoneticAreaCalibrationCache.size > 80) {
+    state.phoneticAreaCalibrationCache.delete(state.phoneticAreaCalibrationCache.keys().next().value);
+  }
+  return result;
+}
+
 function synthesizeVowel(vowel = selectedVowel(), options = {}) {
   return synthesizeTubeVowel(vowel, options);
 }
@@ -8262,7 +8504,19 @@ function buildTubeAreaFunction(geometry, vowel, sampleRate, motorProfile = curre
   const articulationTarget = vowelArticulationTarget(vowel);
   const useManualTuning = options.manualTuning !== false;
   const vowelWarpedAreas = applyVowelAreaWarp(rawAreas, vowel, motorProfile, articulationTarget);
-  const warpedAreas = useManualTuning ? applyAreaTuning(vowelWarpedAreas, vowel) : vowelWarpedAreas;
+  const acousticAreaCalibration = resolvedAcousticAreaCalibration(articulationTarget.acoustic_area_calibration, tubeCount);
+  const calibratedAreas = applyAcousticAreaCalibration(vowelWarpedAreas, acousticAreaCalibration);
+  const formantReference = currentVowelReference(vowel, vtlCm);
+  const targetAdaptation = adaptAreaFunctionToPhoneticTarget(
+    calibratedAreas,
+    vowel,
+    sampleRate,
+    state.constraints,
+    motorProfile,
+    formantReference,
+    acousticAreaCalibration
+  );
+  const warpedAreas = useManualTuning ? applyAreaTuning(targetAdaptation.areas, vowel) : targetAdaptation.areas;
   const crossSections2_5d = realizeVowelCrossSections2_5D(
     rawCrossSections,
     warpedAreas,
@@ -8272,11 +8526,11 @@ function buildTubeAreaFunction(geometry, vowel, sampleRate, motorProfile = curre
     { manualWidthTuning: useManualTuning }
   );
   const derivedAreas = crossSections2_5d.map((section) => section.total_area_cm2);
-  const formantReference = currentVowelReference(vowel, vtlCm);
   return {
     schema_version: "area_function_tube_0.2",
     source_geometry: geometry?.schema_version ?? "fallback",
     acoustic_model: "lossy Kelly-Lochbaum style 1D tube with volume-velocity source input and post side-branch coloring",
+    model_method_sources: ["birkholz2013VocalTractLab", "baer1991"],
     geometry_projection: "synthetic 2.5D sections are projected to total A(x) for the current single-channel browser solver",
     vowel_shape: vowel,
     vocal_tract_length_cm: Number(vtlCm.toFixed(4)),
@@ -8287,6 +8541,8 @@ function buildTubeAreaFunction(geometry, vowel, sampleRate, motorProfile = curre
     vowel_area_tuning: normalizedAreaTuningPoints(vowel),
     vowel_width_tuning: normalizedWidthTuningPoints(vowel),
     manual_tuning_applied: useManualTuning,
+    acoustic_area_calibration: acousticAreaCalibration,
+    phonetic_target_area_assist: targetAdaptation.metadata,
     cross_sections_2_5d: crossSections2_5d,
     phonetic_target_profile: {
       id: formantReference.profile_id,
@@ -8315,7 +8571,7 @@ function buildTubeAreaFunction(geometry, vowel, sampleRate, motorProfile = curre
       cross_section: articulationTarget.cross_section,
     },
     motor_profile: motorProfile,
-    note: "Areas are derived from a synthetic 2.5D midsagittal-plus-coronal template, then projected to total A(x). The retained lateral-channel fields are design metadata for a later multi-channel or 3D backend, not individually observed anatomy.",
+    note: "Areas are derived from a synthetic 2.5D midsagittal-plus-coronal template, optionally corrected by a documented smooth aggregate-target inverse-design calibration, then projected to total A(x). The retained lateral-channel fields are design metadata for a later multi-channel or 3D backend, not individually observed anatomy.",
   };
 }
 
@@ -9184,6 +9440,12 @@ function analyzeTubeTransfer(vowel = selectedVowel(), options = {}) {
     lossParams,
     lossModel: distributedLossModel,
   });
+  const sideBranchLossModel = options.includeSideBranches
+    ? applySideBranchLosses(impulse, sampleRate, constraints, vowel, geometry, areaFunction, { strength: 1 })
+    : null;
+  const bodyResonanceModel = options.includeBodyResonance
+    ? applyBodyResonance(impulse, sampleRate, constraints)
+    : null;
   const spectrum = sampledMagnitudeSpectrum(
     impulse,
     sampleRate,
@@ -9196,6 +9458,8 @@ function analyzeTubeTransfer(vowel = selectedVowel(), options = {}) {
     vowel,
     area_function: areaFunction,
     distributed_loss_model: distributedLossModel,
+    side_branch_loss_model: sideBranchLossModel,
+    body_resonance_model: bodyResonanceModel,
     resonances: selectResonancePeaks(spectrum, options.minimumPeakSpacingHz ?? 260, options.maxPeaks ?? 5),
     spectrum,
   };
@@ -9312,6 +9576,7 @@ function buildSideBranchLossModel(constraints, vowel, geometry = null, areaFunct
   const piriformControl = clamp(constraints.piriform_fossa_loss_coupling?.center ?? 0.14, 0, 0.65);
   const piriformFrequency = clamp(constraints.piriform_fossa_frequency_hz?.center ?? 3700 * Math.pow(15.5 / tractLength, 0.42), 2200, 5200);
   const laryngealNarrowness = clamp((1.10 - areaDescriptor.laryngeal.mean) / 1.10, 0, 1);
+  const sinusAccessThroughNasalPath = clamp(vpControl / 0.75, 0, 1);
   const branches = [];
 
   const c = 34300;
@@ -9320,7 +9585,7 @@ function buildSideBranchLossModel(constraints, vowel, geometry = null, areaFunct
     const notchFrequency = clamp(helmholtz, 380, 1450);
     const peakFrequency = clamp(notchFrequency * 1.55, 700, 2600);
     const q = clamp(3.8 / damping, 1.2, 8);
-    const effectiveCoupling = clamp(sinusCoupling * vowelNasalFactor, 0, 1);
+    const effectiveCoupling = clamp(sinusCoupling * vowelNasalFactor * sinusAccessThroughNasalPath, 0, 1);
     branches.push({
       key: "paranasal_sinus_peak",
       branch: "paranasal_sinus",
@@ -9392,6 +9657,8 @@ function buildSideBranchLossModel(constraints, vowel, geometry = null, areaFunct
     source_role: "lightweight browser-preview coloring; not a subject-specific anatomical side-branch solver",
     controls: {
       sinus_coupling: roundMetric(sinusCoupling, 4),
+      sinus_access_through_nasal_path: roundMetric(sinusAccessThroughNasalPath, 4),
+      effective_sinus_coupling: roundMetric(sinusCoupling * vowelNasalFactor * sinusAccessThroughNasalPath, 4),
       velopharyngeal_coupling: roundMetric(vpControl, 4),
       piriform_fossa_coupling: roundMetric(piriformControl, 4),
       nasal_branch_damping: roundMetric(nasalDamping, 4),

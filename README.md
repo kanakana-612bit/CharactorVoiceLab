@@ -302,7 +302,8 @@ references.
 - a deformable synthetic 2.5D vocal-tract design template over the profile preview
 - landmark-calibrated midsagittal height, coronal width, elliptical section shape, and latent lateral-channel capacity per tract section
 - pharyngeal-length scaling connected to the 2.5D longitudinal area-function allocation rather than only to schematic drawing
-- selectable 44.1/48 kHz 2.5D-derived acoustic-tube vowel preview that projects the designed cross sections to total `A(x)`, using length-correct Kelly-Lochbaum discretization, separate jaw-opening/oral-volume/lip-rounding vowel targets, an LF-style volume-velocity glottal input, tract-length-normalized distributed losses, simple nasal/sinus/piriform side-branch losses, and restrained soft-wall compliance
+- selectable 44.1/48 kHz 2.5D-derived acoustic-tube vowel preview that projects the designed cross sections to total `A(x)`, using one-sample-section Kelly-Lochbaum discretization, separate jaw-opening/oral-volume/lip-rounding vowel targets, an LF-style volume-velocity glottal input, tract-length-normalized distributed losses, velopharyngeally gated nasal/sinus coupling, simple piriform side-branch loss, and restrained soft-wall compliance
+- a regularized phonetic-target area controller for Japanese `/a/`: the character-derived geometry remains the initial state, a finite-difference inverse calculation moves the physical `A(x)` toward the selected aggregate F1-F4 target, and user A(x)/W(x) edits remain a final explicit override
 - vowel-specific direct editing of total area `A(x)` and coronal width `W(x)`; width edits preserve sagittal height and recompute the projected tube area
 - auditory calibration workflow with untuned/tuned A/B playback, phoneme-clarity and target-match ratings, notes, and profile-persisted evaluation history
 - dedicated nasal calibration for `/m/`, `/n/`, and moraic `/N/`, including oral-closure position/area/width, velopharyngeal opening, nasal-radiation contribution/path damping, hold/transition timing, direct closure-graph editing, A/B playback, and profile-persisted evaluation history
@@ -345,6 +346,7 @@ Not implemented in this MVP:
 
 - SMPL-X, MediaPipe Face Mesh, DensePose, or robust background removal
 - VocalTractLab adapter
+- fractional-delay or fixed-spatial-grid tube propagation; the current one-sample-section solver still quantizes tract length by integer tube count, while the `/a/` target controller mitigates the resulting category error without claiming VTL-equivalent precision
 - direct low-level control of learned TTS latent variables beyond the current caption/duration adapter; exact median F0 is available only as an explicit WORLD-measured, Praat-PSOLA waveform postprocess
 - direct use of newly trained v4-Small Speaker Inversion embeddings by the legacy v3/audio.cpp path; training and same-model v4-Small generation are implemented in an isolated official runtime
 - validated anthropometric database
@@ -363,6 +365,7 @@ Reference status:
 - AIST/HQL 2003 public aggregate neck-root breadth statistics provide the current external-neck reference.
 - The AIST 1991-92 anthropometry manual supplies the canonical Japanese landmark names and definitions.
 - Baer et al. 1991 supports the area-function modeling concept only; subject-specific coefficients are not imported.
+- Birkholz 2013 is used only to compare articulatory-synthesizer layers and motivate the separation of geometry, movement control, glottal source, and acoustic propagation. VocalTractLab code, speaker geometries, area functions, recordings, and fitted coefficients are not imported.
 - Honda 2001 is used for conceptual/schema support around facial shape, oral cavity length, lower facial height, nasal/paranasal side branches, and formant-space interpretation. It is not used as a validated subject-specific predictor.
 - The Japanese UHRCT tracheal study is an adult plausibility check only. It is not used to infer tracheal diameter from a character image.
 - The single-individual reconstruction paper is absent from runtime references and dependencies; the exclusion decision is retained only in the source ethics audit.

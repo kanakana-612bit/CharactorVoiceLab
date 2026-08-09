@@ -125,6 +125,8 @@ function element(id) {
       style: { setProperty() {} },
       classList: { toggle() {}, add() {}, remove() {} },
       setAttribute() {},
+      removeAttribute() {},
+      load() {},
       append(...nodes) {
         this.childNodes.push(...nodes);
       },
@@ -180,6 +182,7 @@ for (const sourceKey of [
   "hiraharaAkahaneYamada2004JapaneseVowels",
   "kagomiya2015JapaneseVowelDuration",
   "mokhtariTanaka2000JapaneseFormantCorpus",
+  "birkholz2013VocalTractLab",
 ]) {
   if (!window.CVL_REFERENCE.sources[sourceKey]) throw new Error(`Missing phonetic reference source: ${sourceKey}`);
 }
@@ -337,7 +340,106 @@ state.constraints = {
   coarticulation_strength: { center: 0.58 },
   phonological_contrast_maturity: { center: 1 },
 };
+const diagnosticVtlCm = Number(process.env.CVD_TRANSFER_VTL_CM);
+if (Number.isFinite(diagnosticVtlCm)) state.constraints.vocal_tract_length_cm.center = diagnosticVtlCm;
 state.vocalTractGeometry = buildVocalTractGeometry();
+if (process.env.CVD_A_CALIBRATION_SWEEP === "1") {
+  const diagnosticSampleRate = Number(process.env.CVD_TRANSFER_SAMPLE_RATE) || 96000;
+  const target = currentVowelReference("a", state.constraints.vocal_tract_length_cm.center).target_formants_hz;
+  const weights = [4, 4, 1.4, 0.8];
+  const evaluate = (gains) => {
+    state.vowelAreaTuning = {
+      a: AREA_TUNING_HANDLES.map((position, index) => ({ position, gain: gains[index] })),
+    };
+    const areaFunction = buildTubeAreaFunction(state.vocalTractGeometry, "a", diagnosticSampleRate);
+    const transfer = analyzeTubeTransfer("a", {
+      sampleRate: diagnosticSampleRate,
+      areaFunction,
+      sampleCount: 2048,
+      frequencyStep: 15,
+      maxPeaks: 6,
+    });
+    const resonances = transfer.resonances.slice(0, 4);
+    let score = Math.max(0, 4 - resonances.length) * 2;
+    for (let index = 0; index < Math.min(4, resonances.length); index++) {
+      const error = Math.log(resonances[index].frequency_hz / target[index]);
+      score += weights[index] * error * error;
+      score += Math.max(0, 2.5 - resonances[index].prominence_db) * 0.03;
+    }
+    score += gains.reduce((sum, gain) => sum + Math.pow(Math.log(gain), 2) * 0.025, 0);
+    return { score, gains: gains.slice(), resonances, areas_cm2: areaFunction.areas_cm2 };
+  };
+  let best = evaluate(AREA_TUNING_HANDLES.map(() => 1));
+  const coarseValues = [0.5, 0.68, 0.84, 1, 1.18, 1.42, 1.72];
+  for (let handleIndex = 0; handleIndex < AREA_TUNING_HANDLES.length; handleIndex++) {
+    for (const value of coarseValues) {
+      const candidate = best.gains.slice();
+      candidate[handleIndex] = value;
+      const result = evaluate(candidate);
+      if (result.score < best.score) best = result;
+    }
+  }
+  for (const radius of [0.18, 0.09, 0.045]) {
+    for (let handleIndex = 0; handleIndex < AREA_TUNING_HANDLES.length; handleIndex++) {
+      for (const direction of [-1, 1]) {
+        const candidate = best.gains.slice();
+        candidate[handleIndex] = Math.max(AREA_TUNING_GAIN_MIN, Math.min(AREA_TUNING_GAIN_MAX, candidate[handleIndex] + radius * direction));
+        const result = evaluate(candidate);
+        if (result.score < best.score) best = result;
+      }
+    }
+  }
+  console.log(JSON.stringify({ target_formants_hz: target, ...best }, null, 2));
+  process.exit(0);
+}
+if (process.env.CVD_TRANSFER_DIAGNOSTIC === "1") {
+  const diagnosticSampleRate = Number(process.env.CVD_TRANSFER_SAMPLE_RATE) || PREVIEW_SAMPLE_RATE;
+  const includeFinalColoring = process.env.CVD_TRANSFER_FULL === "1";
+  const diagnostics = Object.fromEntries(["a", "i", "u", "e", "o"].map((vowel) => {
+    const areaFunction = buildTubeAreaFunction(state.vocalTractGeometry, vowel, diagnosticSampleRate);
+    const transfer = analyzeTubeTransfer(vowel, {
+      sampleRate: diagnosticSampleRate,
+      areaFunction,
+      sampleCount: 4096,
+      frequencyStep: 5,
+      maxPeaks: 6,
+      includeSideBranches: includeFinalColoring,
+      includeBodyResonance: includeFinalColoring,
+    });
+    return [vowel, {
+      target_formants_hz: currentVowelReference(vowel, state.constraints.vocal_tract_length_cm.center).target_formants_hz,
+      resonances: transfer.resonances,
+      areas_cm2: areaFunction.areas_cm2,
+    }];
+  }));
+  console.log(JSON.stringify(diagnostics, null, 2));
+  process.exit(0);
+}
+const calibratedAArea = buildTubeAreaFunction(state.vocalTractGeometry, "a", PREVIEW_SAMPLE_RATE);
+if (calibratedAArea.acoustic_area_calibration?.schema_version !== "aggregate_target_inverse_area_0.1") {
+  throw new Error("Japanese /a/ is missing its documented aggregate-target A(x) calibration");
+}
+if (calibratedAArea.phonetic_target_area_assist?.schema_version !== "phonetic_target_area_assist_0.1") {
+  throw new Error("Japanese /a/ is missing character-specific phonetic target adaptation metadata");
+}
+const calibratedATransfer = analyzeTubeTransfer("a", {
+  areaFunction: calibratedAArea,
+  sampleCount: 4096,
+  frequencyStep: 5,
+  maxPeaks: 6,
+});
+const calibratedATargets = calibratedAArea.formant_target_reference.target_formants_hz;
+if (calibratedATransfer.resonances.length < 4) {
+  throw new Error("Calibrated Japanese /a/ has fewer than four detectable resonances");
+}
+for (let index = 0; index < 4; index++) {
+  const relativeError = Math.abs(calibratedATransfer.resonances[index].frequency_hz - calibratedATargets[index]) / calibratedATargets[index];
+  if (relativeError > 0.1) throw new Error("Calibrated Japanese /a/ R" + (index + 1) + " exceeds 10% target error");
+}
+const oralVowelBranchModel = buildSideBranchLossModel(state.constraints, "a", state.vocalTractGeometry, calibratedAArea);
+if (oralVowelBranchModel.controls.effective_sinus_coupling >= oralVowelBranchModel.controls.sinus_coupling * 0.3) {
+  throw new Error("Paranasal sinus coloring bypasses the velopharyngeal access gate");
+}
 const japaneseUReference = currentVowelReference("u", state.constraints.vocal_tract_length_cm.center);
 const japaneseOReference = currentVowelReference("o", state.constraints.vocal_tract_length_cm.center);
 if (japaneseUReference.profile_id !== "ja_JP_standard_neutral_aggregate_0_1") {

@@ -1,5 +1,18 @@
 # CharacterVoiceDesigner Release Notes
 
+## Ver 0.2 Physical Model Update - 2026-08-09
+
+- Added a documented smooth inverse-design seed and a character-specific,
+  regularized phonetic-target area controller for Japanese `/a/`.
+- Restored four detectable `/a/` resonances and added target-versus-measured
+  F1-F4 lines and percentage errors to the physical transfer view.
+- Gated paranasal-sinus coloring through the velopharyngeal path and changed the
+  oral-vowel default toward a closed velum instead of inferring leakage from sinus size.
+- Added a Birkholz/VocalTractLab methodology citation without importing VTL code,
+  speaker geometries, area functions, recordings, or fitted coefficients.
+- Documented the remaining integer tube-count quantization and the current
+  non-equivalence to a full VocalTractLab articulatory/acoustic model.
+
 ## Ver 0.2 Runtime Update - 2026-08-05
 
 - Added a synchronized 44.1/48 kHz project output setting for physical previews,
