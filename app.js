@@ -2586,14 +2586,29 @@ function buildNasalOralClosureAreaFunction(baseAreaFunction, tuning, options = {
       );
       gesturedArea = clamp(area * (1 - coronalCompression), 0.045, 14);
     }
-    const d = (position - tuning.closure_position) / closureWidth;
-    const closureWeight = Math.exp(-0.5 * d * d);
+    const distanceFromContact = Math.abs(position - tuning.closure_position);
+    const contactHalfLength = placeGesture.kind === "coronal_alveolar"
+      ? Math.max(0.012, closureWidth * 0.38)
+      : 0;
+    const contactShoulderWidth = Math.max(0.008, closureWidth - contactHalfLength);
+    const closureWeight = distanceFromContact <= contactHalfLength
+      ? 1
+      : Math.exp(-0.5 * Math.pow(
+        (distanceFromContact - contactHalfLength) / contactShoulderWidth,
+        2
+      ));
     const realizedArea = clamp(
       gesturedArea * (1 - closureWeight) + Math.min(gesturedArea, closureAreaCm2) * closureWeight,
       0.006,
       14
     );
-    sectionShapeState.push({ position, closureWeight, coronalCompression, realizedArea });
+    sectionShapeState.push({
+      position,
+      closureWeight,
+      coronalCompression,
+      realizedArea,
+      contactHalfLength,
+    });
     return realizedArea;
   });
   let anchoredClosureIndex = null;
@@ -2622,17 +2637,36 @@ function buildNasalOralClosureAreaFunction(baseAreaFunction, tuning, options = {
       : stateAtSection.closureWeight * 0.18;
     const coronalWidth = clamp(baseWidth * (1 - transverseCompression), 0.04, 8);
     const sagittalHeight = clamp(area / Math.max(0.01, shapeFactor * coronalWidth), 0.003, 6);
+    const sourceTotalArea = Math.max(0.006, Number(source.total_area_cm2) || baseAreaFunction.areas_cm2[index] || area);
+    const sourceLateralFraction = clamp(
+      (Number(source.lateral_channel_area_cm2) || 0) / sourceTotalArea,
+      0,
+      0.34
+    );
+    const lateralSeal = placeGesture.kind === "coronal_alveolar"
+      ? 1 - 0.96 * stateAtSection.closureWeight
+      : 1;
+    const lateralTotalArea = clamp(
+      area * sourceLateralFraction * lateralSeal,
+      0,
+      area * 0.34
+    );
+    const midlineArea = Math.max(0.0005, area - lateralTotalArea);
+    const leftLateralArea = lateralTotalArea * 0.5;
+    const rightLateralArea = lateralTotalArea * 0.5;
+    const hydraulicDiameter = hydraulicDiameterForEllipse(area, coronalWidth, sagittalHeight);
     return {
       position: Number(stateAtSection.position.toFixed(5)),
       total_area_cm2: Number(area.toFixed(5)),
       sagittal_height_cm: Number(sagittalHeight.toFixed(5)),
       coronal_width_cm: Number(coronalWidth.toFixed(5)),
       ellipse_shape_factor: Number(shapeFactor.toFixed(5)),
-      hydraulic_diameter_cm: Number(hydraulicDiameterForEllipse(area, coronalWidth, sagittalHeight).toFixed(6)),
-      hydraulic_loss_scale: Number(hydraulicPerimeterLossScale(
-        area,
-        hydraulicDiameterForEllipse(area, coronalWidth, sagittalHeight)
-      ).toFixed(6)),
+      midline_area_cm2: Number(midlineArea.toFixed(6)),
+      lateral_channel_area_cm2: Number(lateralTotalArea.toFixed(6)),
+      left_lateral_area_cm2: Number(leftLateralArea.toFixed(6)),
+      right_lateral_area_cm2: Number(rightLateralArea.toFixed(6)),
+      hydraulic_diameter_cm: Number(hydraulicDiameter.toFixed(6)),
+      hydraulic_loss_scale: Number(hydraulicPerimeterLossScale(area, hydraulicDiameter).toFixed(6)),
       closure_weight: Number(stateAtSection.closureWeight.toFixed(5)),
       coronal_compression: Number(stateAtSection.coronalCompression.toFixed(5)),
     };
@@ -2645,8 +2679,21 @@ function buildNasalOralClosureAreaFunction(baseAreaFunction, tuning, options = {
   const oralSideVolumeCm3 = areas
     .slice(Math.min(vpIndex, contactIndex), Math.max(vpIndex, contactIndex) + 1)
     .reduce((sum, area) => sum + area * sectionLengthCm, 0);
+  const contactSections = sectionShapeState
+    .map((section, index) => ({ ...section, index }))
+    .filter((section) => section.closureWeight >= 0.98);
+  const finiteContactBand = contactSections.length
+    ? {
+      schema_version: "finite_coronal_contact_band_0.1",
+      first_section_index: contactSections[0].index,
+      last_section_index: contactSections[contactSections.length - 1].index,
+      section_count: contactSections.length,
+      length_cm: Number((contactSections.length * sectionLengthCm).toFixed(5)),
+      channel_seal: "midline and paired lateral paths share the finite contact band",
+    }
+    : null;
   return {
-    schema_version: "nasal_oral_closure_area_0.3",
+    schema_version: "nasal_oral_closure_area_0.4",
     closure_position: tuning.closure_position,
     closure_area_cm2: closureAreaCm2,
     closure_width: closureWidth,
@@ -2654,9 +2701,15 @@ function buildNasalOralClosureAreaFunction(baseAreaFunction, tuning, options = {
     place_gesture: placeGesture,
     place_gesture_strength: Number(placeGestureStrength.toFixed(4)),
     oral_side_volume_cm3: Number(oralSideVolumeCm3.toFixed(4)),
+    finite_contact_band: finiteContactBand,
     cross_sections_2_5d: crossSections2_5d,
     hydraulic_diameters_cm: crossSections2_5d.map((section) => section.hydraulic_diameter_cm),
     hydraulic_loss_scales: crossSections2_5d.map((section) => section.hydraulic_loss_scale),
+    channel_areas_cm2: {
+      midline: crossSections2_5d.map((section) => section.midline_area_cm2),
+      left_lateral: crossSections2_5d.map((section) => section.left_lateral_area_cm2),
+      right_lateral: crossSections2_5d.map((section) => section.right_lateral_area_cm2),
+    },
     areas_cm2: areas.map((area) => Number(area.toFixed(4))),
   };
 }
@@ -4252,7 +4305,7 @@ function mapVoiceConstraints(features) {
     velopharyngeal_loss_coupling: editableControl(velopharyngealLossCoupling, 0, 0.75, "ratio", "velopharyngeal opening/leakage design control; an oral-vowel baseline is near closed and is not inferred from sinus volume", 0.1, "sourceMap"),
     piriform_fossa_loss_coupling: editableControl(piriformFossaLossCoupling, 0, 0.65, "ratio", "piriform-fossa antiresonance preview control; not an image-observed cavity estimate", 0.1, "sourceMap"),
     piriform_fossa_frequency_hz: editableControl(piriformFossaFrequency, 2200, 5200, "Hz", "vocal-tract-length-scaled piriform-fossa antiresonance preview frequency", 0.1, "sourceMap"),
-    nasal_branch_damping: editableControl(0.72, 0.25, 1.4, "ratio", "nasal/velopharyngeal side-branch damping control for the lightweight preview", 0.1, "sourceMap"),
+    nasal_branch_damping: editableControl(0.72, 0.25, 1.4, "ratio", "nasal/velopharyngeal branch damping control for the physical preview", 0.1, "sourceMap"),
     maximum_ventilation_l_min: maximumVentilationConstraint,
     young_respiratory_capacity_modifier: {
       center: Number(youngRespiratoryScale.toFixed(4)),
@@ -4461,12 +4514,12 @@ function mapVoiceConstraints(features) {
       "sourceMap",
       performanceConstraintRange(glottalFlowInertance, clamp(glottalFlowInertance - 0.08, 0, 0.65), clamp(glottalFlowInertance + 0.10, 0, 0.65), "phonatory inertive-flow range around the baseline")
     ),
-    vocal_tract_wall_loss: editableControl(0.018, 0, 0.08, "ratio", "generalized wall-loss damping for the lightweight 1D tube preview; human-average placeholder", 0.1, "sourceMap"),
-    vocal_tract_viscothermal_loss: editableControl(0.012, 0, 0.06, "ratio", "generalized viscothermal damping for the lightweight 1D tube preview; human-average placeholder", 0.1, "sourceMap"),
-    vocal_tract_high_frequency_damping: editableControl(0.28, 0, 0.85, "ratio", "generalized high-frequency loss for the lightweight 1D tube preview; human-average placeholder", 0.1, "sourceMap"),
+    vocal_tract_wall_loss: editableControl(0.018, 0, 0.08, "ratio", "generalized wall-loss damping for the physical acoustic-tube model; human-average placeholder", 0.1, "sourceMap"),
+    vocal_tract_viscothermal_loss: editableControl(0.012, 0, 0.06, "ratio", "generalized viscothermal damping for the physical acoustic-tube model; human-average placeholder", 0.1, "sourceMap"),
+    vocal_tract_high_frequency_damping: editableControl(0.28, 0, 0.85, "ratio", "generalized high-frequency loss for the physical acoustic-tube model; human-average placeholder", 0.1, "sourceMap"),
     vocal_tract_wall_compliance: editableControl(0.18, 0, 0.7, "ratio", "soft-wall compliance approximation for broadening raw 1D tube resonances; human-average placeholder", 0.1, "sourceMap"),
     vocal_tract_resonance_broadening: editableControl(0.26, 0, 0.85, "ratio", "frequency-dependent resonance broadening for the raw 1D tube preview; human-average placeholder", 0.1, "sourceMap"),
-    lip_radiation_smoothing: editableControl(0.32, 0, 0.85, "ratio", "mouth-radiation smoothing for the lightweight 1D tube preview; human-average placeholder", 0.1, "sourceMap"),
+    lip_radiation_smoothing: editableControl(0.32, 0, 0.85, "ratio", "mouth-radiation smoothing for the physical acoustic-tube model; human-average placeholder", 0.1, "sourceMap"),
     vocal_fold_spring_constant: range(
       springConstant,
       0.18 * k,
@@ -8785,7 +8838,7 @@ function buildTubeAreaFunction(geometry, vowel, sampleRate, motorProfile = curre
     source_geometry: geometry?.schema_version ?? "fallback",
     acoustic_model: "lossy Kelly-Lochbaum style 1D tube with volume-velocity source input and post side-branch coloring",
     model_method_sources: ["birkholz2013VocalTractLab", "baer1991"],
-    geometry_projection: "synthetic 2.5D sections are projected to total A(x) for the current single-channel browser solver",
+    geometry_projection: "synthetic 2.5D sections provide total A(x); coronal nasal synthesis additionally propagates midline and paired lateral areas",
     vowel_shape: vowel,
     vocal_tract_length_cm: Number(vtlCm.toFixed(4)),
     tube_count: tubeCount,
@@ -8933,6 +8986,8 @@ function realizeVowelCrossSections2_5D(rawSections, warpedAreas, vowel, articula
       total_area_cm2: Number(totalArea.toFixed(4)),
       midline_area_cm2: Number((totalArea - lateralArea).toFixed(4)),
       lateral_channel_area_cm2: Number(lateralArea.toFixed(4)),
+      left_lateral_area_cm2: Number((lateralArea * 0.5).toFixed(5)),
+      right_lateral_area_cm2: Number((lateralArea * 0.5).toFixed(5)),
       sagittal_height_cm: Number(sagittalHeight.toFixed(4)),
       coronal_width_cm: Number(coronalWidth.toFixed(4)),
       ellipse_shape_factor: Number(shapeFactor.toFixed(5)),
@@ -9231,6 +9286,58 @@ function hydraulicLossScalesFromAreaFunction(areaFunction) {
   return areas.map((area, index) => hydraulicPerimeterLossScale(area, diameters[index]));
 }
 
+function channelAreasFromAreaFunction(areaFunction) {
+  const totalAreas = areaFunction?.areas_cm2 ?? [];
+  const crossSections = areaFunction?.cross_sections_2_5d ?? [];
+  const baseHydraulicLoss = hydraulicLossScalesFromAreaFunction(areaFunction);
+  const midline = [];
+  const leftLateral = [];
+  const rightLateral = [];
+  const midlineLoss = [];
+  const leftLateralLoss = [];
+  const rightLateralLoss = [];
+  for (let index = 0; index < totalAreas.length; index++) {
+    const totalArea = Math.max(0.0005, Number(totalAreas[index]) || 0.0005);
+    const section = crossSections[index] ?? {};
+    const declaredLateral = Number(section.lateral_channel_area_cm2);
+    const declaredLeft = Number(section.left_lateral_area_cm2);
+    const declaredRight = Number(section.right_lateral_area_cm2);
+    const lateralTotal = clamp(
+      Number.isFinite(declaredLateral)
+        ? declaredLateral
+        : (Number.isFinite(declaredLeft) ? declaredLeft : 0)
+          + (Number.isFinite(declaredRight) ? declaredRight : 0),
+      0,
+      totalArea * 0.34
+    );
+    const leftShare = Number.isFinite(declaredLeft) && Number.isFinite(declaredRight)
+      ? clamp(declaredLeft / Math.max(1e-8, declaredLeft + declaredRight), 0.35, 0.65)
+      : 0.5;
+    const leftArea = Math.max(0.00005, lateralTotal * leftShare);
+    const rightArea = Math.max(0.00005, lateralTotal * (1 - leftShare));
+    const midlineArea = Math.max(0.0005, totalArea - lateralTotal);
+    const baseLoss = clamp(Number(baseHydraulicLoss[index]) || 1, 0.85, 3.4);
+    midline.push(Number(midlineArea.toFixed(6)));
+    leftLateral.push(Number(leftArea.toFixed(6)));
+    rightLateral.push(Number(rightArea.toFixed(6)));
+    midlineLoss.push(clamp(baseLoss * Math.sqrt(totalArea / midlineArea), 0.85, 3.4));
+    leftLateralLoss.push(clamp(baseLoss * Math.sqrt(totalArea / leftArea), 0.85, 3.4));
+    rightLateralLoss.push(clamp(baseLoss * Math.sqrt(totalArea / rightArea), 0.85, 3.4));
+  }
+  return {
+    schema_version: "oral_three_channel_area_0.1",
+    channel_start_position: 0.56,
+    channel_merge_position: 0.96,
+    symmetry: "left/right areas are equal unless an explicit cross-section asymmetry is supplied",
+    midline_areas_cm2: midline,
+    left_lateral_areas_cm2: leftLateral,
+    right_lateral_areas_cm2: rightLateral,
+    midline_hydraulic_loss_scales: midlineLoss,
+    left_lateral_hydraulic_loss_scales: leftLateralLoss,
+    right_lateral_hydraulic_loss_scales: rightLateralLoss,
+  };
+}
+
 function crossSectionsForAdjustedAreas(areaFunction, adjustedAreas) {
   const sourceSections = areaFunction?.cross_sections_2_5d ?? [];
   return adjustedAreas.map((area, index) => {
@@ -9240,9 +9347,20 @@ function crossSectionsForAdjustedAreas(areaFunction, adjustedAreas) {
     const width = clamp(Number(source.coronal_width_cm) || circularDiameter, 0.04, 8);
     const height = clamp(area / Math.max(0.01, shapeFactor * width), 0.003, 6);
     const hydraulicDiameter = hydraulicDiameterForEllipse(area, width, height);
+    const sourceTotalArea = Math.max(0.006, Number(source.total_area_cm2) || areaFunction.areas_cm2?.[index] || area);
+    const lateralFraction = clamp(
+      (Number(source.lateral_channel_area_cm2) || 0) / sourceTotalArea,
+      0,
+      0.34
+    );
+    const lateralArea = clamp(area * lateralFraction, 0, area * 0.34);
     return {
       ...source,
       total_area_cm2: Number(area.toFixed(5)),
+      midline_area_cm2: Number((area - lateralArea).toFixed(6)),
+      lateral_channel_area_cm2: Number(lateralArea.toFixed(6)),
+      left_lateral_area_cm2: Number((lateralArea * 0.5).toFixed(6)),
+      right_lateral_area_cm2: Number((lateralArea * 0.5).toFixed(6)),
       sagittal_height_cm: Number(height.toFixed(5)),
       coronal_width_cm: Number(width.toFixed(5)),
       ellipse_shape_factor: Number(shapeFactor.toFixed(5)),
@@ -9330,6 +9448,24 @@ function oversampleAreaTrajectory(areaTrajectory, factor, minimumArea) {
       hydraulic_loss_scales: Array.isArray(keyframe.hydraulic_loss_scales)
         ? spatiallyOversampleTubeValues(keyframe.hydraulic_loss_scales, factor, 0.85)
         : keyframe.hydraulic_loss_scales,
+      midline_areas_cm2: Array.isArray(keyframe.midline_areas_cm2)
+        ? spatiallyOversampleTubeValues(keyframe.midline_areas_cm2, factor, 0.0005)
+        : keyframe.midline_areas_cm2,
+      left_lateral_areas_cm2: Array.isArray(keyframe.left_lateral_areas_cm2)
+        ? spatiallyOversampleTubeValues(keyframe.left_lateral_areas_cm2, factor, 0.00005)
+        : keyframe.left_lateral_areas_cm2,
+      right_lateral_areas_cm2: Array.isArray(keyframe.right_lateral_areas_cm2)
+        ? spatiallyOversampleTubeValues(keyframe.right_lateral_areas_cm2, factor, 0.00005)
+        : keyframe.right_lateral_areas_cm2,
+      midline_hydraulic_loss_scales: Array.isArray(keyframe.midline_hydraulic_loss_scales)
+        ? spatiallyOversampleTubeValues(keyframe.midline_hydraulic_loss_scales, factor, 0.85)
+        : keyframe.midline_hydraulic_loss_scales,
+      left_lateral_hydraulic_loss_scales: Array.isArray(keyframe.left_lateral_hydraulic_loss_scales)
+        ? spatiallyOversampleTubeValues(keyframe.left_lateral_hydraulic_loss_scales, factor, 0.85)
+        : keyframe.left_lateral_hydraulic_loss_scales,
+      right_lateral_hydraulic_loss_scales: Array.isArray(keyframe.right_lateral_hydraulic_loss_scales)
+        ? spatiallyOversampleTubeValues(keyframe.right_lateral_hydraulic_loss_scales, factor, 0.85)
+        : keyframe.right_lateral_hydraulic_loss_scales,
     }));
   }
   if (Number.isFinite(Number(areaTrajectory.start_sample))) {
@@ -9389,6 +9525,53 @@ function highResolutionTubeOptions(options, factor, minimumArea) {
     areaTrajectory: oversampleAreaTrajectory(options.areaTrajectory, factor, minimumArea),
     velopharyngealAreaTrajectory: oversampleScalarTrajectory(options.velopharyngealAreaTrajectory, factor),
   };
+  const contactBand = options.finiteContactBand;
+  if (factor > 1
+    && contactBand
+    && Array.isArray(options.areaTrajectory?.keyframes)
+    && Array.isArray(highOptions.areaTrajectory?.keyframes)) {
+    const firstSourceIndex = clamp(
+      Math.round(contactBand.first_section_index ?? 0),
+      0,
+      Math.max(0, (options.areaTrajectory.keyframes[0]?.areas_cm2?.length ?? 1) - 1)
+    );
+    const lastSourceIndex = clamp(
+      Math.round(contactBand.last_section_index ?? firstSourceIndex),
+      firstSourceIndex,
+      Math.max(firstSourceIndex, (options.areaTrajectory.keyframes[0]?.areas_cm2?.length ?? 1) - 1)
+    );
+    const preservedFields = [
+      "areas_cm2",
+      "hydraulic_loss_scales",
+      "midline_areas_cm2",
+      "left_lateral_areas_cm2",
+      "right_lateral_areas_cm2",
+      "midline_hydraulic_loss_scales",
+      "left_lateral_hydraulic_loss_scales",
+      "right_lateral_hydraulic_loss_scales",
+    ];
+    for (let keyframeIndex = 0; keyframeIndex < highOptions.areaTrajectory.keyframes.length; keyframeIndex++) {
+      const sourceKeyframe = options.areaTrajectory.keyframes[keyframeIndex];
+      const targetKeyframe = highOptions.areaTrajectory.keyframes[keyframeIndex];
+      for (const field of preservedFields) {
+        if (!Array.isArray(sourceKeyframe?.[field]) || !Array.isArray(targetKeyframe?.[field])) continue;
+        for (let sourceIndex = firstSourceIndex; sourceIndex <= lastSourceIndex; sourceIndex++) {
+          for (let subIndex = 0; subIndex < factor; subIndex++) {
+            const targetIndex = sourceIndex * factor + subIndex;
+            if (targetIndex < targetKeyframe[field].length) {
+              targetKeyframe[field][targetIndex] = sourceKeyframe[field][sourceIndex];
+            }
+          }
+        }
+      }
+    }
+    highOptions.finiteContactBand = {
+      ...contactBand,
+      first_internal_section_index: firstSourceIndex * factor,
+      last_internal_section_index: (lastSourceIndex + 1) * factor - 1,
+      internal_section_count: (lastSourceIndex - firstSourceIndex + 1) * factor,
+    };
+  }
   if (options.sourceSamples?.length) {
     highOptions.sourceSamples = temporallyOversampleSignal(options.sourceSamples, factor, highSampleCount);
   }
@@ -10039,6 +10222,513 @@ function synthesizeBranchedNasalOralTubeCore(oralAreas, nasalAreas, options) {
   };
 }
 
+function synthesizeCoronalMultiChannelNasalOralTube(oralAreas, nasalAreas, options) {
+  const factor = physicalTubeOversamplingFactor(options);
+  const outputSampleCount = Math.max(1, Math.round(options.sampleCount ?? 1));
+  const outputSampleRate = Math.max(8000, options.sampleRate ?? currentOutputSampleRate());
+  const highOralAreas = spatiallyOversampleTubeValues(oralAreas, factor, 0.0005);
+  const highNasalAreas = spatiallyOversampleTubeValues(nasalAreas, factor, 0.012);
+  const highOptions = factor > 1
+    ? highResolutionTubeOptions(options, factor, 0.00005)
+    : options;
+  const highResolutionResult = synthesizeCoronalMultiChannelNasalOralTubeCore(
+    highOralAreas,
+    highNasalAreas,
+    highOptions
+  );
+  const decimate = (samples) => factor > 1
+    ? bandlimitedDecimate(samples, factor, outputSampleCount)
+    : samples;
+  return {
+    samples: decimate(highResolutionResult.samples),
+    oral_radiation: decimate(highResolutionResult.oral_radiation),
+    nasal_radiation: decimate(highResolutionResult.nasal_radiation),
+    topology: {
+      ...highResolutionResult.topology,
+      schema_version: "coronal_multichannel_nasal_waveguide_0.1",
+      core_schema_version: highResolutionResult.topology.schema_version,
+      resolution_model: physicalTubeResolutionModel(
+        factor,
+        outputSampleRate,
+        oralAreas.length,
+        nasalAreas.length
+      ),
+    },
+  };
+}
+
+// The coronal graph shares posterior and pre-labial oral nodes, but carries
+// independent midline/left/right pressure states through the tongue-contact zone.
+function synthesizeCoronalMultiChannelNasalOralTubeCore(oralAreas, nasalAreas, options) {
+  const oralCount = Math.max(8, oralAreas.length);
+  const nasalCount = Math.max(3, nasalAreas.length);
+  const sampleCount = Math.max(1, Math.round(options.sampleCount ?? 1));
+  const sampleRate = Math.max(8000, options.sampleRate ?? currentOutputSampleRate());
+  const vpNode = clamp(
+    Math.round((oralCount - 1) * clamp(options.vpJunctionPosition ?? 0.34, 0.12, 0.52)),
+    2,
+    oralCount - 5
+  );
+  const channelModel = options.oralChannelModel ?? {};
+  const splitNode = clamp(
+    Math.round((oralCount - 1) * clamp(channelModel.channel_start_position ?? 0.56, 0.46, 0.72)),
+    vpNode + 2,
+    oralCount - 4
+  );
+  const mergeNode = clamp(
+    Math.round((oralCount - 1) * clamp(channelModel.channel_merge_position ?? 0.96, 0.84, 0.98)),
+    splitNode + 2,
+    oralCount - 1
+  );
+  const channelLength = mergeNode - splitNode;
+  const requestedContactPosition = clamp(Number(options.oralContactPosition) || 0.86, 0, 1);
+  const requestedContactIndex = clamp(
+    Math.round((oralCount - 1) * requestedContactPosition),
+    splitNode,
+    mergeNode - 1
+  );
+
+  const oralTrajectory = Array.isArray(options.areaTrajectory?.keyframes)
+    ? options.areaTrajectory.keyframes
+      .filter((keyframe) => Array.isArray(keyframe?.areas_cm2) && keyframe.areas_cm2.length >= oralCount)
+      .map((keyframe) => ({
+        sample: clamp(Math.round(keyframe.sample ?? 0), 0, Math.max(0, sampleCount - 1)),
+        areas_cm2: keyframe.areas_cm2,
+        hydraulic_loss_scales: keyframe.hydraulic_loss_scales,
+        midline_areas_cm2: keyframe.midline_areas_cm2,
+        left_lateral_areas_cm2: keyframe.left_lateral_areas_cm2,
+        right_lateral_areas_cm2: keyframe.right_lateral_areas_cm2,
+        midline_hydraulic_loss_scales: keyframe.midline_hydraulic_loss_scales,
+        left_lateral_hydraulic_loss_scales: keyframe.left_lateral_hydraulic_loss_scales,
+        right_lateral_hydraulic_loss_scales: keyframe.right_lateral_hydraulic_loss_scales,
+      }))
+      .sort((a, b) => a.sample - b.sample)
+    : [];
+  const vpTrajectory = Array.isArray(options.velopharyngealAreaTrajectory?.keyframes)
+    ? options.velopharyngealAreaTrajectory.keyframes
+      .filter((keyframe) => Number.isFinite(Number(keyframe?.area_cm2)))
+      .map((keyframe) => ({
+        sample: clamp(Math.round(keyframe.sample ?? 0), 0, Math.max(0, sampleCount - 1)),
+        area_cm2: Math.max(0.0005, Number(keyframe.area_cm2)),
+      }))
+      .sort((a, b) => a.sample - b.sample)
+    : [];
+
+  const activeTotal = Float32Array.from(oralAreas, (area) => Math.max(0.0005, area));
+  const activeMidline = new Float32Array(oralCount);
+  const activeLeft = new Float32Array(oralCount);
+  const activeRight = new Float32Array(oralCount);
+  const activeTotalLoss = Float32Array.from(
+    options.hydraulicLossScales?.length >= oralCount
+      ? options.hydraulicLossScales
+      : Array(oralCount).fill(1),
+    (scale) => clamp(Number(scale) || 1, 0.85, 3.4)
+  );
+  const activeMidlineLoss = new Float32Array(oralCount).fill(1);
+  const activeLeftLoss = new Float32Array(oralCount).fill(1);
+  const activeRightLoss = new Float32Array(oralCount).fill(1);
+  const activeNasal = Float32Array.from(nasalAreas, (area) => Math.max(0.012, area));
+
+  const defaultChannels = (index) => {
+    const total = activeTotal[index];
+    const declaredMidline = Number(channelModel.midline_areas_cm2?.[index]);
+    const declaredLeft = Number(channelModel.left_lateral_areas_cm2?.[index]);
+    const declaredRight = Number(channelModel.right_lateral_areas_cm2?.[index]);
+    const left = Number.isFinite(declaredLeft) ? declaredLeft : total * 0.015;
+    const right = Number.isFinite(declaredRight) ? declaredRight : total * 0.015;
+    const midline = Number.isFinite(declaredMidline)
+      ? declaredMidline
+      : Math.max(0.0005, total - left - right);
+    return { midline, left, right };
+  };
+  for (let index = 0; index < oralCount; index++) {
+    const channels = defaultChannels(index);
+    activeMidline[index] = Math.max(0.0005, channels.midline);
+    activeLeft[index] = Math.max(0.00005, channels.left);
+    activeRight[index] = Math.max(0.00005, channels.right);
+  }
+
+  let vpPortArea = Math.max(0.0005, options.velopharyngealPortAreaCm2 ?? activeNasal[0]);
+  let trajectoryCursor = 0;
+  const keyframePair = (keyframes, sampleIndex) => {
+    if (keyframes.length < 2) return null;
+    while (trajectoryCursor < keyframes.length - 2 && sampleIndex > keyframes[trajectoryCursor + 1].sample) {
+      trajectoryCursor += 1;
+    }
+    const left = keyframes[trajectoryCursor];
+    const right = keyframes[Math.min(keyframes.length - 1, trajectoryCursor + 1)];
+    return {
+      left,
+      right,
+      progress: smoothstep01((sampleIndex - left.sample) / Math.max(1, right.sample - left.sample)),
+    };
+  };
+  const interpolateArrayValue = (left, right, field, index, progress, fallback) => {
+    const start = Number(left?.[field]?.[index]);
+    const end = Number(right?.[field]?.[index]);
+    if (!Number.isFinite(start) || !Number.isFinite(end)) return fallback;
+    return start + (end - start) * progress;
+  };
+
+  const oralNodes = oralCount + 1;
+  const lateralInternalCount = channelLength - 1;
+  const leftNodeBase = oralNodes;
+  const rightNodeBase = leftNodeBase + lateralInternalCount;
+  const nasalNodeBase = rightNodeBase + lateralInternalCount;
+  const nodeCount = nasalNodeBase + nasalCount;
+  const noseNode = nasalNodeBase + nasalCount - 1;
+  const lipNode = oralCount;
+  const edgeA = [];
+  const edgeB = [];
+  const edgePath = [];
+  const edgeSourceIndex = [];
+  const addEdge = (a, b, path, sourceIndex) => {
+    edgeA.push(a);
+    edgeB.push(b);
+    edgePath.push(path);
+    edgeSourceIndex.push(sourceIndex);
+  };
+  for (let index = 0; index < oralCount; index++) addEdge(index, index + 1, "oral", index);
+  for (let offset = 0; offset < channelLength; offset++) {
+    const leftA = offset === 0 ? splitNode : leftNodeBase + offset - 1;
+    const leftB = offset === channelLength - 1 ? mergeNode : leftNodeBase + offset;
+    addEdge(leftA, leftB, "left_lateral", splitNode + offset);
+    const rightA = offset === 0 ? splitNode : rightNodeBase + offset - 1;
+    const rightB = offset === channelLength - 1 ? mergeNode : rightNodeBase + offset;
+    addEdge(rightA, rightB, "right_lateral", splitNode + offset);
+  }
+  for (let index = 0; index < nasalCount; index++) {
+    const a = index === 0 ? vpNode : nasalNodeBase + index - 1;
+    const b = nasalNodeBase + index;
+    addEdge(a, b, "nasal", index);
+  }
+  const edgeCount = edgeA.length;
+  const adjacency = Array.from({ length: nodeCount }, () => []);
+  for (let edge = 0; edge < edgeCount; edge++) {
+    adjacency[edgeA[edge]].push({ edge, endpoint: 0 });
+    adjacency[edgeB[edge]].push({ edge, endpoint: 1 });
+  }
+
+  const lossParams = options.lossParams ?? currentTubeLossParams({});
+  const oralLossModel = buildTubeDistributedLossModel(lossParams, sampleRate, oralCount);
+  const nasalLossModel = buildTubeDistributedLossModel(lossParams, sampleRate, nasalCount);
+  const oralDamping = oralLossModel.per_section_gain;
+  const nasalDampingControl = clamp(options.nasalBranchDamping ?? 0.74, 0.3, 1.4);
+  const nasalDamping = clamp(
+    Math.pow(nasalLossModel.per_section_gain, 0.9) * Math.exp(-0.002 - 0.004 * nasalDampingControl),
+    0.9,
+    0.9998
+  );
+  const nasalWallMemoryMix = clamp(
+    nasalLossModel.wall_memory_mix * 1.8 + 0.012 + nasalDampingControl * 0.028,
+    0.016,
+    0.075
+  );
+  const nasalWallMemoryRelaxation = sampleRateAdjustedAlpha(
+    clamp(0.11 + nasalDampingControl * 0.07, 0.1, 0.24),
+    sampleRate
+  );
+  const edgeArea = new Float32Array(edgeCount);
+  const edgeDamping = new Float32Array(edgeCount);
+  const edgeWallMix = new Float32Array(edgeCount);
+  const edgeWallRelaxation = new Float32Array(edgeCount);
+  const waveToA = new Float32Array(edgeCount);
+  const waveToB = new Float32Array(edgeCount);
+  const nextToA = new Float32Array(edgeCount);
+  const nextToB = new Float32Array(edgeCount);
+  const wallToA = new Float32Array(edgeCount);
+  const wallToB = new Float32Array(edgeCount);
+  let minimumContactArea = Number.POSITIVE_INFINITY;
+  let peakContactStrength = 0;
+  let peakVpPortArea = vpPortArea;
+  let minimumVpPortArea = vpPortArea;
+
+  const updateGeometry = (sampleIndex) => {
+    const pair = keyframePair(oralTrajectory, sampleIndex);
+    if (pair) {
+      for (let index = 0; index < oralCount; index++) {
+        const fallbackTotal = activeTotal[index];
+        activeTotal[index] = Math.max(0.0005, interpolateArrayValue(
+          pair.left,
+          pair.right,
+          "areas_cm2",
+          index,
+          pair.progress,
+          fallbackTotal
+        ));
+        activeMidline[index] = Math.max(0.0005, interpolateArrayValue(
+          pair.left,
+          pair.right,
+          "midline_areas_cm2",
+          index,
+          pair.progress,
+          activeMidline[index]
+        ));
+        activeLeft[index] = Math.max(0.00005, interpolateArrayValue(
+          pair.left,
+          pair.right,
+          "left_lateral_areas_cm2",
+          index,
+          pair.progress,
+          activeLeft[index]
+        ));
+        activeRight[index] = Math.max(0.00005, interpolateArrayValue(
+          pair.left,
+          pair.right,
+          "right_lateral_areas_cm2",
+          index,
+          pair.progress,
+          activeRight[index]
+        ));
+        activeTotalLoss[index] = clamp(interpolateArrayValue(
+          pair.left,
+          pair.right,
+          "hydraulic_loss_scales",
+          index,
+          pair.progress,
+          activeTotalLoss[index]
+        ), 0.85, 3.4);
+        activeMidlineLoss[index] = clamp(interpolateArrayValue(
+          pair.left,
+          pair.right,
+          "midline_hydraulic_loss_scales",
+          index,
+          pair.progress,
+          activeMidlineLoss[index]
+        ), 0.85, 3.4);
+        activeLeftLoss[index] = clamp(interpolateArrayValue(
+          pair.left,
+          pair.right,
+          "left_lateral_hydraulic_loss_scales",
+          index,
+          pair.progress,
+          activeLeftLoss[index]
+        ), 0.85, 3.4);
+        activeRightLoss[index] = clamp(interpolateArrayValue(
+          pair.left,
+          pair.right,
+          "right_lateral_hydraulic_loss_scales",
+          index,
+          pair.progress,
+          activeRightLoss[index]
+        ), 0.85, 3.4);
+      }
+    }
+    if (vpTrajectory.length >= 2) {
+      let left = vpTrajectory[0];
+      let right = vpTrajectory[vpTrajectory.length - 1];
+      for (let index = 1; index < vpTrajectory.length; index++) {
+        if (sampleIndex <= vpTrajectory[index].sample) {
+          left = vpTrajectory[index - 1];
+          right = vpTrajectory[index];
+          break;
+        }
+        left = vpTrajectory[index];
+      }
+      const progress = smoothstep01((sampleIndex - left.sample) / Math.max(1, right.sample - left.sample));
+      vpPortArea = Math.max(0.0005, left.area_cm2 + (right.area_cm2 - left.area_cm2) * progress);
+    }
+    activeNasal[0] = vpPortArea;
+    peakVpPortArea = Math.max(peakVpPortArea, vpPortArea);
+    minimumVpPortArea = Math.min(minimumVpPortArea, vpPortArea);
+    let oralAreaSum = 0;
+    for (let index = 0; index < oralCount; index++) oralAreaSum += activeTotal[index];
+    const oralMeanArea = oralAreaSum / oralCount;
+    let nasalAreaSum = 0;
+    for (let index = 0; index < nasalCount; index++) nasalAreaSum += activeNasal[index];
+    const nasalMeanArea = nasalAreaSum / nasalCount;
+    for (let edge = 0; edge < edgeCount; edge++) {
+      const path = edgePath[edge];
+      const sourceIndex = edgeSourceIndex[edge];
+      let area;
+      let hydraulicLossScale;
+      let wallBaseMix;
+      let meanArea;
+      if (path === "nasal") {
+        area = activeNasal[sourceIndex];
+        hydraulicLossScale = 1;
+        edgeDamping[edge] = nasalDamping;
+        wallBaseMix = nasalWallMemoryMix;
+        edgeWallRelaxation[edge] = nasalWallMemoryRelaxation;
+        meanArea = nasalMeanArea;
+      } else if (path === "left_lateral") {
+        area = activeLeft[sourceIndex];
+        hydraulicLossScale = activeLeftLoss[sourceIndex];
+        edgeDamping[edge] = oralDamping;
+        wallBaseMix = oralLossModel.wall_memory_mix;
+        edgeWallRelaxation[edge] = oralLossModel.wall_memory_relaxation;
+        meanArea = oralMeanArea;
+      } else if (path === "right_lateral") {
+        area = activeRight[sourceIndex];
+        hydraulicLossScale = activeRightLoss[sourceIndex];
+        edgeDamping[edge] = oralDamping;
+        wallBaseMix = oralLossModel.wall_memory_mix;
+        edgeWallRelaxation[edge] = oralLossModel.wall_memory_relaxation;
+        meanArea = oralMeanArea;
+      } else if (sourceIndex >= splitNode && sourceIndex < mergeNode) {
+        area = activeMidline[sourceIndex];
+        hydraulicLossScale = activeMidlineLoss[sourceIndex];
+        edgeDamping[edge] = oralDamping;
+        wallBaseMix = oralLossModel.wall_memory_mix;
+        edgeWallRelaxation[edge] = oralLossModel.wall_memory_relaxation;
+        meanArea = oralMeanArea;
+      } else {
+        area = activeTotal[sourceIndex];
+        hydraulicLossScale = activeTotalLoss[sourceIndex];
+        edgeDamping[edge] = oralDamping;
+        wallBaseMix = oralLossModel.wall_memory_mix;
+        edgeWallRelaxation[edge] = oralLossModel.wall_memory_relaxation;
+        meanArea = oralMeanArea;
+      }
+      edgeArea[edge] = Math.max(path === "nasal" ? 0.0005 : 0.00005, area);
+      const narrowness = clamp(Math.sqrt(meanArea / Math.max(0.00005, edgeArea[edge])), 0.55, 1.8);
+      edgeWallMix[edge] = clamp(
+        wallBaseMix * narrowness * Math.sqrt(clamp(hydraulicLossScale, 0.85, 3.4)),
+        0,
+        0.42
+      );
+    }
+    const contactTotal = activeMidline[requestedContactIndex]
+      + activeLeft[requestedContactIndex]
+      + activeRight[requestedContactIndex];
+    minimumContactArea = Math.min(minimumContactArea, contactTotal);
+    peakContactStrength = Math.max(
+      peakContactStrength,
+      1 - smoothstep01((contactTotal - 0.006) / 0.044)
+    );
+  };
+
+  const geometryUpdateStride = Math.max(1, Math.round(sampleRate / 11025));
+  updateGeometry(0);
+  const glottalReflection = clamp(0.64 + options.effectiveClosure * 0.3, 0.52, 0.96);
+  const nasalRadiationScale = clamp(options.nasalRadiationScale ?? 0.3, 0.08, 0.72);
+  const sourceSamples = options.sourceSamples?.length >= sampleCount
+    ? options.sourceSamples
+    : synthesizeTubeSourceSamples(options);
+  const out = new Float32Array(sampleCount);
+  const oralRadiation = new Float32Array(sampleCount);
+  const nasalRadiation = new Float32Array(sampleCount);
+  const radiationAlpha = sampleRateAdjustedAlpha(clamp(1 - lossParams.lip_radiation_smoothing, 0.08, 1), sampleRate);
+  const oralRadiationMemory = sampleRateAdjustedPole(clamp(0.985 - lossParams.high_frequency_damping * 0.12, 0.82, 0.99), sampleRate);
+  const nasalRadiationMemory = sampleRateAdjustedPole(clamp(0.988 - lossParams.high_frequency_damping * 0.1, 0.84, 0.992), sampleRate);
+  const outputMemory = sampleRateAdjustedPole(clamp(0.12 + lossParams.high_frequency_damping * 0.12, 0.08, 0.28), sampleRate);
+  const outputAmplitude = options.amplitude ?? 0.9;
+  let oralFlowState = 0;
+  let nasalFlowState = 0;
+  let previousOralFlow = 0;
+  let previousNasalFlow = 0;
+  let previousOralOutput = 0;
+  let previousNasalOutput = 0;
+
+  const incomingAt = (port) => port.endpoint === 0 ? waveToA[port.edge] : waveToB[port.edge];
+  const sendFrom = (port, outgoing) => {
+    const edge = port.edge;
+    const mix = edgeWallMix[edge];
+    const relaxation = edgeWallRelaxation[edge];
+    if (port.endpoint === 0) {
+      wallToB[edge] += relaxation * (outgoing - wallToB[edge]);
+      nextToB[edge] = (outgoing * (1 - mix) + wallToB[edge] * mix) * edgeDamping[edge];
+    } else {
+      wallToA[edge] += relaxation * (outgoing - wallToA[edge]);
+      nextToA[edge] = (outgoing * (1 - mix) + wallToA[edge] * mix) * edgeDamping[edge];
+    }
+  };
+
+  for (let sampleIndex = 0; sampleIndex < sampleCount; sampleIndex++) {
+    if (sampleIndex > 0 && sampleIndex % geometryUpdateStride === 0) updateGeometry(sampleIndex);
+    nextToA.fill(0);
+    nextToB.fill(0);
+    const sourcePort = adjacency[0][0];
+    sendFrom(sourcePort, (sourceSamples[sampleIndex] ?? 0) + glottalReflection * incomingAt(sourcePort));
+
+    let mouthFlow = 0;
+    let noseFlow = 0;
+    for (let node = 1; node < nodeCount; node++) {
+      const ports = adjacency[node];
+      if (node === lipNode || node === noseNode) {
+        const port = ports[0];
+        const incoming = incomingAt(port);
+        const area = edgeArea[port.edge];
+        if (node === lipNode) {
+          const reflection = clamp(-0.92 + Math.min(0.2, area * 0.022), -0.93, -0.66);
+          mouthFlow = (1 - reflection) * incoming * area;
+          sendFrom(port, reflection * incoming);
+        } else {
+          const reflection = clamp(-0.88 + Math.min(0.16, area * 0.018), -0.9, -0.7);
+          noseFlow = (1 - reflection) * incoming * area;
+          sendFrom(port, reflection * incoming);
+        }
+        continue;
+      }
+      let weightedIncoming = 0;
+      let admittance = 0;
+      for (const port of ports) {
+        const area = edgeArea[port.edge];
+        weightedIncoming += area * incomingAt(port);
+        admittance += area;
+      }
+      const pressure = 2 * weightedIncoming / Math.max(0.0001, admittance);
+      const junctionLoss = ports.length > 2
+        ? clamp(1 - oralLossModel.discontinuity_loss_scale * 0.7, 0.985, 1)
+        : 1;
+      for (const port of ports) sendFrom(port, (pressure - incomingAt(port)) * junctionLoss);
+    }
+
+    oralFlowState += radiationAlpha * (mouthFlow - oralFlowState);
+    nasalFlowState += radiationAlpha * 0.82 * (noseFlow - nasalFlowState);
+    const mouthRadiated = (oralFlowState - previousOralFlow * oralRadiationMemory)
+      + previousOralOutput * outputMemory;
+    const noseRadiated = (nasalFlowState - previousNasalFlow * nasalRadiationMemory)
+      + previousNasalOutput * outputMemory;
+    previousOralFlow = oralFlowState;
+    previousNasalFlow = nasalFlowState;
+    previousOralOutput = mouthRadiated;
+    previousNasalOutput = noseRadiated;
+    oralRadiation[sampleIndex] = mouthRadiated;
+    nasalRadiation[sampleIndex] = noseRadiated;
+    out[sampleIndex] = (mouthRadiated * 0.68 + noseRadiated * nasalRadiationScale) * outputAmplitude;
+    waveToA.set(nextToA);
+    waveToB.set(nextToB);
+  }
+  applyTubeOutputConditioning(out, sampleRate, lossParams);
+  return {
+    samples: out,
+    oral_radiation: oralRadiation,
+    nasal_radiation: nasalRadiation,
+    topology: {
+      schema_version: "coronal_multichannel_nasal_waveguide_core_0.1",
+      scattering: "lossy_multiport_pressure_junction_graph",
+      oral_channel_count: 3,
+      oral_channels: ["midline", "left_lateral", "right_lateral"],
+      channel_admittance_source: "2.5D midline/lateral cross-section areas with independent pressure-wave state",
+      lateral_symmetry: channelModel.symmetry ?? "symmetric",
+      channel_split_node: splitNode,
+      channel_merge_node: mergeNode,
+      channel_split_position: Number((splitNode / oralCount).toFixed(5)),
+      channel_merge_position: Number((mergeNode / oralCount).toFixed(5)),
+      graph_node_count: nodeCount,
+      graph_edge_count: edgeCount,
+      vp_junction_index: vpNode,
+      vp_junction_position: Number((vpNode / oralCount).toFixed(5)),
+      oral_section_count: oralCount,
+      nasal_section_count: nasalCount,
+      peak_vp_port_area_cm2: Number(peakVpPortArea.toFixed(6)),
+      minimum_vp_port_area_cm2: Number(minimumVpPortArea.toFixed(6)),
+      requested_oral_contact_junction: requestedContactIndex,
+      requested_oral_contact_position: Number(requestedContactPosition.toFixed(5)),
+      minimum_combined_contact_area_cm2: Number(minimumContactArea.toFixed(6)),
+      peak_oral_contact_strength: Number(peakContactStrength.toFixed(6)),
+      finite_contact_band: options.finiteContactBand ?? null,
+      geometry_control_rate_hz: Number((sampleRate / geometryUpdateStride).toFixed(3)),
+      geometry_update_stride_samples: geometryUpdateStride,
+      nasal_radiation_scale: Number(nasalRadiationScale.toFixed(5)),
+      oral_contact_boundary: "finite three-channel low-admittance contact band",
+      oral_and_nasal_radiation_summed_once: true,
+      shared_glottal_source: true,
+    },
+  };
+}
+
 function buildTubeDistributedLossModel(lossParams, sampleRate, tubeCount) {
   const count = Math.max(1, tubeCount);
   const sectionLengthCm = 35000 / sampleRate;
@@ -10330,7 +11020,7 @@ function buildSideBranchLossModel(constraints, vowel, geometry = null, areaFunct
 
   return {
     schema_version: "side_branch_loss_model_0.1",
-    source_role: "lightweight browser-preview coloring; not a subject-specific anatomical side-branch solver",
+    source_role: "provisional post-waveguide coloring; not a subject-specific anatomical side-branch solver",
     controls: {
       sinus_coupling: roundMetric(sinusCoupling, 4),
       sinus_access_through_nasal_path: roundMetric(sinusAccessThroughNasalPath, 4),
@@ -11312,6 +12002,20 @@ function synthesizeCoupledNasalSyllable(context) {
     )
     : null;
   const vowelHydraulicDiameters = hydraulicDiametersFromAreaFunction(vowelAudio.area_function);
+  const neutralChannels = channelAreasFromAreaFunction(neutralClosureArea);
+  const closureChannels = channelAreasFromAreaFunction(closureArea);
+  const releaseChannels = coronalReleaseArea
+    ? channelAreasFromAreaFunction(coronalReleaseArea)
+    : null;
+  const vowelChannels = channelAreasFromAreaFunction(vowelAudio.area_function);
+  const channelKeyframeFields = (channels) => ({
+    midline_areas_cm2: channels.midline_areas_cm2,
+    left_lateral_areas_cm2: channels.left_lateral_areas_cm2,
+    right_lateral_areas_cm2: channels.right_lateral_areas_cm2,
+    midline_hydraulic_loss_scales: channels.midline_hydraulic_loss_scales,
+    left_lateral_hydraulic_loss_scales: channels.left_lateral_hydraulic_loss_scales,
+    right_lateral_hydraulic_loss_scales: channels.right_lateral_hydraulic_loss_scales,
+  });
   const effectiveContactPosition = Number.isInteger(closureArea.anchored_closure_index)
     ? closureArea.anchored_closure_index / Math.max(1, closureArea.areas_cm2.length - 1)
     : tuning.closure_position;
@@ -11324,6 +12028,7 @@ function synthesizeCoupledNasalSyllable(context) {
         areas_cm2: neutralClosureArea.areas_cm2,
         hydraulic_diameters_cm: neutralClosureArea.hydraulic_diameters_cm,
         hydraulic_loss_scales: neutralClosureArea.hydraulic_loss_scales,
+        ...channelKeyframeFields(neutralChannels),
       },
       {
         role: "coarticulation_start",
@@ -11331,6 +12036,7 @@ function synthesizeCoupledNasalSyllable(context) {
         areas_cm2: neutralClosureArea.areas_cm2,
         hydraulic_diameters_cm: neutralClosureArea.hydraulic_diameters_cm,
         hydraulic_loss_scales: neutralClosureArea.hydraulic_loss_scales,
+        ...channelKeyframeFields(neutralChannels),
       },
       {
         role: "oral_release",
@@ -11338,6 +12044,7 @@ function synthesizeCoupledNasalSyllable(context) {
         areas_cm2: closureArea.areas_cm2,
         hydraulic_diameters_cm: closureArea.hydraulic_diameters_cm,
         hydraulic_loss_scales: closureArea.hydraulic_loss_scales,
+        ...channelKeyframeFields(closureChannels),
       },
       ...(hasCoronalReleaseCue ? [{
         role: "coronal_release_locus",
@@ -11345,6 +12052,7 @@ function synthesizeCoupledNasalSyllable(context) {
         areas_cm2: coronalReleaseArea.areas_cm2,
         hydraulic_diameters_cm: coronalReleaseArea.hydraulic_diameters_cm,
         hydraulic_loss_scales: coronalReleaseArea.hydraulic_loss_scales,
+        ...channelKeyframeFields(releaseChannels),
       }] : []),
       {
         role: "vowel_target",
@@ -11352,6 +12060,7 @@ function synthesizeCoupledNasalSyllable(context) {
         areas_cm2: vowelAudio.area_function.areas_cm2,
         hydraulic_diameters_cm: vowelHydraulicDiameters,
         hydraulic_loss_scales: hydraulicLossScalesFromAreaFunction(vowelAudio.area_function),
+        ...channelKeyframeFields(vowelChannels),
       },
     ],
   };
@@ -11370,7 +12079,9 @@ function synthesizeCoupledNasalSyllable(context) {
       { role: "vowel_target", sample: vowelTargetSample, area_cm2: closedVpPortArea },
     ],
   };
-  const coupled = synthesizeBranchedNasalOralTube(
+  const coupled = (nasalClass === "n"
+    ? synthesizeCoronalMultiChannelNasalOralTube
+    : synthesizeBranchedNasalOralTube)(
     closureArea.areas_cm2,
     nasalPath.areas_cm2,
     {
@@ -11385,6 +12096,8 @@ function synthesizeCoupledNasalSyllable(context) {
       oralContactPosition: effectiveContactPosition,
       hydraulicDiametersCm: closureArea.hydraulic_diameters_cm,
       hydraulicLossScales: closureArea.hydraulic_loss_scales,
+      oralChannelModel: closureChannels,
+      finiteContactBand: closureArea.finite_contact_band,
     }
   );
   const coupledFinishedAt = timingEnabled ? performance.now() : 0;
@@ -11504,7 +12217,9 @@ function synthesizeCoupledNasalSyllable(context) {
       release_minimum_hydraulic_diameter_cm: coronalReleaseArea
         ? Number(Math.min(...coronalReleaseArea.hydraulic_diameters_cm).toFixed(6))
         : null,
-      propagation: "section-local wall-memory loss inside the oral waveguide",
+      propagation: nasalClass === "n"
+        ? "section-local wall-memory loss in independently propagated midline, left-lateral, and right-lateral oral paths"
+        : "section-local wall-memory loss inside the oral waveguide",
     },
     acoustic_topology: coupled.topology,
     side_branch_loss_model: sideBranchLossModel,
@@ -11542,7 +12257,9 @@ function synthesizeCoupledNasalSyllable(context) {
       attack_fade_curve: "half_cosine",
       transition_model: "single-state branched waveguide with time-varying oral closure, place-derived tongue posture, vowel posture, and velopharyngeal port",
     },
-    limitation: "The nasal geometry is an aggregate-scale synthetic tube; the three-port junction and derived coronal tongue dome are one-dimensional approximations.",
+    limitation: nasalClass === "n"
+      ? "The nasal geometry is an aggregate-scale synthetic tube. Coronal contact now uses a finite three-channel oral graph, but its left/right symmetry and channel boundaries remain synthetic design assumptions."
+      : "The nasal geometry is an aggregate-scale synthetic tube; the three-port junction remains a one-dimensional approximation.",
   };
   if (timingEnabled) {
     nasalModel.performance_timing = {

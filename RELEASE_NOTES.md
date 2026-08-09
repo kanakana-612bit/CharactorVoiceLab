@@ -28,6 +28,12 @@
 - Connected each 2.5D section's width and height to section-local hydraulic
   wall-loss scaling. Nasal metadata now exports the explicit closed oral branch,
   branch volume, hydraulic diameter, and release cross-section loss provenance.
+- Replaced the `/n/` oral path with a pressure-coupled graph containing separate
+  midline, left-lateral, and right-lateral states between an oral split and merge.
+  All three paths share a finite alveolar contact band and reconnect before lip
+  radiation; `/m/` retains its bilabial single-oral-path topology.
+- Preserved finite contact cells during spatial oversampling so a closed design
+  cannot be reopened by interpolation between the contact and adjacent sections.
 - Added a Birkholz/VocalTractLab methodology citation without importing VTL code,
   speaker geometries, area functions, recordings, or fitted coefficients.
 - Documented the reduced but remaining integer tube-count quantization and the current

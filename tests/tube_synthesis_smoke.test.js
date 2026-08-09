@@ -576,6 +576,18 @@ if (process.env.CVD_NASAL_HIGH_RES_BENCHMARK === "1") {
   const vowelElapsedMs = performance.now() - vowelStartedAt;
   const startedAt = performance.now();
   const benchmarkAudio = synthesizeSyllable(benchmarkToken);
+  if (benchmarkToken.startsWith("n")) {
+    const topology = benchmarkAudio.nasal_model?.acoustic_topology;
+    if (topology?.schema_version !== "coronal_multichannel_nasal_waveguide_0.1"
+      || topology?.oral_channel_count !== 3
+      || topology?.scattering !== "lossy_multiport_pressure_junction_graph"
+      || topology?.finite_contact_band?.schema_version !== "finite_coronal_contact_band_0.1"
+      || topology?.minimum_combined_contact_area_cm2 >= 0.02
+      || topology?.peak_oral_contact_strength <= 0.9
+      || topology?.channel_split_node >= topology?.channel_merge_node) {
+      throw new Error("The representative /n/ benchmark did not use the finite-contact three-channel waveguide");
+    }
+  }
   console.log(JSON.stringify({
     token: benchmarkAudio.token,
     vowel_elapsed_ms: Number(vowelElapsedMs.toFixed(2)),
@@ -584,6 +596,7 @@ if (process.env.CVD_NASAL_HIGH_RES_BENCHMARK === "1") {
     sample_count: benchmarkAudio.samples.length,
     output_sample_rate_hz: benchmarkAudio.sampleRate,
     resolution_model: benchmarkAudio.nasal_model.acoustic_topology.resolution_model,
+    acoustic_topology: benchmarkAudio.nasal_model.acoustic_topology,
     stage_timing: benchmarkAudio.nasal_model.performance_timing,
     finite: benchmarkAudio.samples.every(Number.isFinite),
     peak: benchmarkAudio.samples.reduce((peak, sample) => Math.max(peak, Math.abs(sample)), 0),
@@ -785,11 +798,13 @@ if (ma.nasal_model.level_matching?.schema_version !== "coupled_radiation_level_d
   || moraicNasal.nasal_model.level_matching !== null) {
   throw new Error("CV nasal level matching metadata is missing or was incorrectly applied to moraic /N/");
 }
-if (na.nasal_model.acoustic_topology?.schema_version !== "branched_nasal_oral_waveguide_0.3"
+if (na.nasal_model.acoustic_topology?.schema_version !== "coronal_multichannel_nasal_waveguide_0.1"
   || ma.nasal_model.acoustic_topology?.schema_version !== "branched_nasal_oral_waveguide_0.3"
   || na.nasal_model.acoustic_topology?.resolution_model?.internal_oversampling_factor !== 1
   || na.nasal_model.acoustic_topology?.geometry_control_rate_hz !== 11025
-  || na.nasal_model.acoustic_topology?.scattering !== "lossy_three_port_pressure_junction"
+  || na.nasal_model.acoustic_topology?.scattering !== "lossy_multiport_pressure_junction_graph"
+  || na.nasal_model.acoustic_topology?.oral_channel_count !== 3
+  || na.nasal_model.acoustic_topology?.finite_contact_band?.schema_version !== "finite_coronal_contact_band_0.1"
   || na.nasal_model.acoustic_topology?.shared_glottal_source !== true
   || na.nasal_model.acoustic_topology?.oral_and_nasal_radiation_summed_once !== true
   || na.nasal_model.resonance_model?.explicit_nasal_pole_zero_filter !== false
@@ -801,7 +816,7 @@ if (na.nasal_model.acoustic_topology?.schema_version !== "branched_nasal_oral_wa
   throw new Error("CV nasals did not use the pressure-coupled branched waveguide exclusively");
 }
 for (const alveolarAudio of [na, ni, nu, ne, no]) {
-  if (alveolarAudio.nasal_model?.acoustic_topology?.schema_version !== "branched_nasal_oral_waveguide_0.3"
+  if (alveolarAudio.nasal_model?.acoustic_topology?.schema_version !== "coronal_multichannel_nasal_waveguide_0.1"
     || alveolarAudio.nasal_model?.place_cue_model?.schema_version !== "coronal_nasal_release_target_0.2"
     || alveolarAudio.nasal_model.place_cue_model.final_f2_relative_error > 0.08
     || !alveolarAudio.nasal_model.place_cue_model.source_keys?.includes("iskarousFowlerWhalen2010LocusEquations")
@@ -837,7 +852,7 @@ if (ma.nasal_model.release_trajectory?.area_trajectory_schema !== "multi_stage_a
 if (ma.nasal_model.place_gesture?.kind !== "bilabial_end_closure"
   || ma.nasal_model.coronal_release_area_function !== null
   || na.nasal_model.place_gesture?.kind !== "coronal_alveolar"
-  || na.nasal_model.coronal_release_area_function?.schema_version !== "nasal_oral_closure_area_0.3"
+  || na.nasal_model.coronal_release_area_function?.schema_version !== "nasal_oral_closure_area_0.4"
   || na.nasal_model.place_cue_model?.schema_version !== "coronal_nasal_release_target_0.2"
   || na.nasal_model.place_cue_model?.active !== true
   || !na.nasal_model.place_cue_model.source_keys?.includes("malecot1956NasalTransitions")
