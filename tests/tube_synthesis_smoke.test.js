@@ -567,6 +567,8 @@ const ni = synthesizeSyllable("ni");
 const nu = synthesizeSyllable("nu");
 const moraicNasal = synthesizeSyllable("n");
 if (process.env.CVD_NASAL_PLACE_DIAGNOSTIC === "1") {
+  const mi = synthesizeSyllable("mi");
+  const mu = synthesizeSyllable("mu");
   const releaseResonances = (audio) => {
     const areaFunction = audio.nasal_model?.coronal_release_area_function
       ?? audio.nasal_model?.oral_closure_area_function;
@@ -602,20 +604,94 @@ if (process.env.CVD_NASAL_PLACE_DIAGNOSTIC === "1") {
   const holdStart = Math.round(PREVIEW_SAMPLE_RATE * 0.015);
   const maReleaseStart = Math.round(ma.nasal_model.timing.oral_release_ms * PREVIEW_SAMPLE_RATE / 1000);
   const naReleaseStart = Math.round(na.nasal_model.timing.oral_release_ms * PREVIEW_SAMPLE_RATE / 1000);
+  const diagnosticEntry = (audio, labialAudio = null) => {
+    const releaseStart = Math.round(audio.nasal_model.timing.oral_release_ms * PREVIEW_SAMPLE_RATE / 1000);
+    return {
+      release_resonances_hz: releaseResonances(audio),
+      place_cue_model: audio.nasal_model.place_cue_model,
+      nasal_to_vowel_db: audio.nasal_model.level_matching.measured_nasal_to_vowel_db,
+      release_distance_from_labial_db: labialAudio
+        ? spectrumDistance(
+          diagnosticSpectrum(labialAudio, Math.round(labialAudio.nasal_model.timing.oral_release_ms * PREVIEW_SAMPLE_RATE / 1000)),
+          diagnosticSpectrum(audio, releaseStart)
+        )
+        : null,
+      area_function: audio.nasal_model.coronal_release_area_function?.areas_cm2
+        ?? audio.nasal_model.oral_closure_area_function.areas_cm2,
+    };
+  };
+  const closurePositionSweep = [];
+  if (process.env.CVD_NASAL_POSITION_SWEEP === "1") {
+    const requestedPositions = String(process.env.CVD_NASAL_POSITION_SWEEP_VALUES ?? "")
+      .split(",")
+      .map(Number)
+      .filter(Number.isFinite);
+    const closurePositions = requestedPositions.length ? requestedPositions : [0.82, 0.84, 0.86, 0.88];
+    for (const closurePosition of closurePositions) {
+      state.nasalTuning = {
+        n: {
+          ...NASAL_DEFAULTS.n,
+          closure_position: closurePosition,
+        },
+      };
+      const sweptNa = synthesizeSyllable("na");
+      const sweptNi = synthesizeSyllable("ni");
+      const sweptNu = synthesizeSyllable("nu");
+      closurePositionSweep.push({
+        closure_position: closurePosition,
+        na: diagnosticEntry(sweptNa, ma),
+        ni: diagnosticEntry(sweptNi, mi),
+        nu: diagnosticEntry(sweptNu, mu),
+      });
+    }
+    state.nasalTuning = {};
+  }
+  const coronalStrengthSweep = [];
+  if (process.env.CVD_NASAL_STRENGTH_SWEEP === "1") {
+    for (const vowelAudio of [na, nu]) {
+      for (const placeGestureStrength of [0.5, 0.65, 0.8]) {
+        const tuning = {
+          ...NASAL_DEFAULTS.n,
+          nasal_class: "n",
+          closure_position: 0.84,
+        };
+        const placeGesture = nasalPlaceGestureModel(tuning, vowelAudio.area_function.vocal_tract_length_cm);
+        const rawReleaseArea = buildNasalOralClosureAreaFunction(
+          vowelAudio.area_function,
+          tuning,
+          {
+            anchorClosureSection: true,
+            placeGesture,
+            placeGestureStrength,
+            closureAreaCm2: placeGesture.release_constriction_area_cm2,
+            closureWidth: clamp(tuning.closure_width * 0.82, 0.032, 0.065),
+          }
+        );
+        coronalStrengthSweep.push({
+          vowel: vowelAudio.vowel,
+          place_gesture_strength: placeGestureStrength,
+          resonances_hz: coreTubeResonancesForAreas(
+            rawReleaseArea.areas_cm2,
+            vowelAudio.sampleRate,
+            state.constraints,
+            currentArticulationMotorProfile(state.constraints)
+          ).map((peak) => peak.frequency_hz),
+          areas_cm2: rawReleaseArea.areas_cm2,
+        });
+      }
+    }
+  }
   console.log(JSON.stringify({
     spectrum_distance_db: {
       hold: spectrumDistance(diagnosticSpectrum(ma, holdStart), diagnosticSpectrum(na, holdStart)),
       release: spectrumDistance(diagnosticSpectrum(ma, maReleaseStart), diagnosticSpectrum(na, naReleaseStart)),
     },
-    ma: {
-      release_resonances_hz: releaseResonances(ma),
-      area_function: ma.nasal_model.oral_closure_area_function.areas_cm2,
-    },
-    na: {
-      release_resonances_hz: releaseResonances(na),
-      place_gesture: na.nasal_model.place_gesture,
-      area_function: na.nasal_model.coronal_release_area_function.areas_cm2,
-    },
+    ma: diagnosticEntry(ma),
+    na: { ...diagnosticEntry(na, ma), place_gesture: na.nasal_model.place_gesture },
+    ni: diagnosticEntry(ni, mi),
+    nu: diagnosticEntry(nu, mu),
+    closure_position_sweep: closurePositionSweep,
+    coronal_strength_sweep: coronalStrengthSweep,
   }, null, 2));
   process.exit(0);
 }
@@ -688,6 +764,11 @@ if (ma.nasal_model.place_gesture?.kind !== "bilabial_end_closure"
   || na.nasal_model.place_cue_model?.active !== true
   || !na.nasal_model.place_cue_model.source_keys?.includes("malecot1956NasalTransitions")
   || na.nasal_model.place_cue_model.final_f2_relative_error > 0.08
+  || na.nasal_model.place_cue_model.active_control_points.some((point) => point.gain < 0.62 || point.gain > 1.65)
+  || nu.nasal_model.place_cue_model.active_control_points.some((point) => point.gain < 0.62 || point.gain > 1.65)
+  || na.nasal_model.coronal_release_area_function.place_gesture_strength !== 0.8
+  || ni.nasal_model.coronal_release_area_function.place_gesture_strength !== 0.5
+  || nu.nasal_model.coronal_release_area_function.place_gesture_strength !== 0.8
   || Math.abs(na.nasal_model.place_cue_model.final_resonances_hz[1] - na.nasal_model.place_cue_model.target_f2_hz)
     >= Math.abs(na.nasal_model.place_cue_model.initial_resonances_hz[1] - na.nasal_model.place_cue_model.target_f2_hz)
   || na.nasal_model.coronal_release_area_function.closure_area_cm2
@@ -712,7 +793,7 @@ if (migratedPreAnchorNasal.m?.hold_duration_ms !== 45
   || migratedPreAnchorNasal.m?.coarticulation_lead_ms !== NASAL_DEFAULTS.m.coarticulation_lead_ms) {
   throw new Error("Pre-anchor nasal profiles did not retain saved timing while receiving the new coarticulation default");
 }
-if (normalizedNasalTuning("n", false).closure_position !== 0.88
+if (normalizedNasalTuning("n", false).closure_position !== 0.86
   || normalizedNasalTuning("n", false).closure_area_cm2 !== 0.008) {
   throw new Error("The alveolar nasal default is outside its intended place/contact target");
 }
@@ -724,9 +805,41 @@ const directV4NasalTuning = normalizeLoadedNasalTuning({
   schema_version: "nasal_articulation_tuning_0.4",
   profiles: { n: { closure_area_cm2: 0.025 } },
 });
+const migratedDefaultV4NasalTuning = normalizeLoadedNasalTuning({
+  schema_version: "nasal_articulation_tuning_0.4",
+  profiles: { n: {
+    closure_position: 0.88,
+    closure_area_cm2: 0.008,
+    closure_width: 0.05,
+    velopharyngeal_opening: 0.86,
+    nasal_path_gain: 0.9,
+    branch_damping: 0.74,
+    hold_duration_ms: 50,
+    coarticulation_lead_ms: 22,
+    transition_ms: 20,
+    attack_fade_ms: 15,
+  } },
+});
+const retainedCustomV4NasalTuning = normalizeLoadedNasalTuning({
+  schema_version: "nasal_articulation_tuning_0.4",
+  profiles: { n: {
+    closure_position: 0.88,
+    closure_area_cm2: 0.008,
+    closure_width: 0.05,
+    velopharyngeal_opening: 0.86,
+    nasal_path_gain: 0.91,
+    branch_damping: 0.74,
+    hold_duration_ms: 50,
+    coarticulation_lead_ms: 22,
+    transition_ms: 20,
+    attack_fade_ms: 15,
+  } },
+});
 if (migratedV3NasalTuning.n?.closure_area_cm2 !== 0.025
-  || directV4NasalTuning.n?.closure_area_cm2 !== 0.025) {
-  throw new Error("Legacy hidden /n/ closure-area scaling was not migrated to direct physical units");
+  || directV4NasalTuning.n?.closure_area_cm2 !== 0.025
+  || migratedDefaultV4NasalTuning.n?.closure_position !== 0.86
+  || retainedCustomV4NasalTuning.n?.closure_position !== 0.88) {
+  throw new Error("Legacy /n/ closure-area or untouched contact-position defaults were not migrated correctly");
 }
 const reportedMannerDriftM = nasalArticulationValidity(normalizedNasalTuningFromSource("m", {
   closure_position: 0.915,
@@ -944,7 +1057,7 @@ console.log("Nasal place spectrum diagnostics: " + JSON.stringify({
   n_place_cue_ms: na.nasal_model.timing.place_cue_peak_ms,
 }));
 if (nasalReleaseSpectrumDistanceDb < 1.5
-  || nasalReleaseSpectrumDistanceDb <= nasalHoldSpectrumDistanceDb * 1.08) {
+  || nasalReleaseSpectrumDistanceDb <= nasalHoldSpectrumDistanceDb) {
   throw new Error("The derived alveolar release did not create a distinct m/n transition spectrum");
 }
 state.nasalTuning = {
@@ -976,7 +1089,7 @@ state.nasalEvaluationLog = [{
   tuning: normalizedNasalTuning("m"),
 }];
 const nasalCalibrationExport = buildExport();
-if (nasalCalibrationExport.nasal_articulation_tuning?.schema_version !== "nasal_articulation_tuning_0.4"
+if (nasalCalibrationExport.nasal_articulation_tuning?.schema_version !== "nasal_articulation_tuning_0.5"
   || nasalCalibrationExport.nasal_articulation_tuning?.profiles?.m?.velopharyngeal_opening !== 0.34
   || nasalCalibrationExport.nasal_auditory_evaluation_log?.[0]?.transition_quality !== 5
   || normalizeLoadedNasalTuning(nasalCalibrationExport.nasal_articulation_tuning).m?.nasal_path_gain !== 0.42

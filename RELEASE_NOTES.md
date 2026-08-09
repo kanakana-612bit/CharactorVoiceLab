@@ -12,6 +12,10 @@
   the character-derived coronal A(x) toward a tract-length-scaled historical
   alveolar F2 locus. The target and before/after resonances are exported for
   inspection; `/m/`, the nasal hold, and the glottal source remain unchanged.
+- Moved the untouched `/n/` default contact from x/L 0.88 to 0.86, retained more
+  tongue-blade shaping for central/back-vowel releases, and bounded inverse A(x)
+  gains to prevent `/na/` and `/nu/` from reaching the target through excessive
+  whole-tract deformation. Manually tuned legacy contacts remain unchanged.
 - Added a Birkholz/VocalTractLab methodology citation without importing VTL code,
   speaker geometries, area functions, recordings, or fitted coefficients.
 - Documented the remaining integer tube-count quantization and the current

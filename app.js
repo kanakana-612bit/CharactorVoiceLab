@@ -7786,7 +7786,7 @@ const NASAL_DEFAULTS = Object.freeze({
   }),
   n: Object.freeze({
     label: "歯茎鼻音 /n/",
-    closure_position: 0.88,
+    closure_position: 0.86,
     closure_area_cm2: 0.008,
     closure_width: 0.05,
     velopharyngeal_opening: 0.86,
@@ -7867,7 +7867,7 @@ function exportNasalTuning() {
     profiles[nasalClass] = normalizedNasalTuning(nasalClass);
   }
   return {
-    schema_version: "nasal_articulation_tuning_0.4",
+    schema_version: "nasal_articulation_tuning_0.5",
     position_axis: "normalized glottis-to-lips distance x/L",
     parameter_semantics: {
       closure_position: "oral closure location along the vowel area function",
@@ -7887,12 +7887,32 @@ function exportNasalTuning() {
 
 function normalizeLoadedNasalTuning(data) {
   const source = data?.profiles ?? data;
-  const directClosureAreaSchema = data?.schema_version === "nasal_articulation_tuning_0.4";
+  const schemaVersion = String(data?.schema_version ?? "");
+  const directClosureAreaSchema = schemaVersion === "nasal_articulation_tuning_0.4"
+    || schemaVersion === "nasal_articulation_tuning_0.5";
   const next = {};
   if (!source || typeof source !== "object") return next;
   for (const nasalClass of Object.keys(NASAL_DEFAULTS)) {
     if (!source[nasalClass] || typeof source[nasalClass] !== "object") continue;
     const profileSource = { ...source[nasalClass] };
+    if (nasalClass === "n" && schemaVersion === "nasal_articulation_tuning_0.4") {
+      const legacyDefaults = {
+        closure_position: 0.88,
+        closure_area_cm2: 0.008,
+        closure_width: 0.05,
+        velopharyngeal_opening: 0.86,
+        nasal_path_gain: 0.9,
+        branch_damping: 0.74,
+        hold_duration_ms: 50,
+        coarticulation_lead_ms: 22,
+        transition_ms: 20,
+        attack_fade_ms: 15,
+      };
+      const matchesLegacyDefaults = Object.entries(legacyDefaults).every(
+        ([field, value]) => Math.abs(Number(profileSource[field]) - value) < 1e-6
+      );
+      if (matchesLegacyDefaults) profileSource.closure_position = NASAL_DEFAULTS.n.closure_position;
+    }
     if (nasalClass === "n" && !directClosureAreaSchema && Number.isFinite(Number(profileSource.closure_area_cm2))) {
       profileSource.closure_area_cm2 = clamp(Number(profileSource.closure_area_cm2) * 0.2, 0.006, 0.025);
     }
@@ -8337,7 +8357,13 @@ function adaptCoronalNasalReleaseArea(areaFunction, followingVowel, sampleRate, 
     for (const scale of [1, 0.5, 0.25]) {
       const gains = AREA_TUNING_HANDLES.map(() => 1);
       for (let column = 0; column < activeHandleIndices.length; column++) {
-        gains[activeHandleIndices[column]] = Math.exp(clamp(solution[column] * scale, -0.24, 0.24));
+        const handleIndex = activeHandleIndices[column];
+        const proposedGain = Math.exp(clamp(solution[column] * scale, -0.24, 0.24));
+        gains[handleIndex] = clamp(
+          proposedGain,
+          0.62 / cumulativeGains[handleIndex],
+          1.65 / cumulativeGains[handleIndex]
+        );
       }
       const candidateAreas = enforceContact(applyAreaControlPointGains(currentAreas, gains));
       const candidateResonances = coreTubeResonancesForAreas(candidateAreas, sampleRate, constraints, motorProfile);
@@ -8370,6 +8396,7 @@ function adaptCoronalNasalReleaseArea(areaFunction, followingVowel, sampleRate, 
         position: AREA_TUNING_HANDLES[index],
         gain: Number(cumulativeGains[index].toFixed(5)),
       })),
+      cumulative_gain_bounds: { min: 0.62, max: 1.65 },
       initial_resonances_hz: initialResonances.map((peak) => peak.frequency_hz),
       final_resonances_hz: currentResonances.map((peak) => peak.frequency_hz),
       final_f2_relative_error: Number((Math.abs(currentResonances[1].frequency_hz - targetF2Hz) / targetF2Hz).toFixed(6)),
@@ -10146,6 +10173,16 @@ function nasalPlaceGestureModel(tuning, vocalTractLengthCm = 15.5) {
   };
 }
 
+function coronalReleaseGestureStrength(followingVowel) {
+  return {
+    a: 0.8,
+    i: 0.5,
+    u: 0.8,
+    e: 0.65,
+    o: 0.75,
+  }[followingVowel] ?? 0.65;
+}
+
 function nasalOralSideCavityModel(tuning, vocalTractLengthCm = 15.5) {
   const vpJunctionPosition = 0.34;
   const sideLengthCm = clamp((tuning.closure_position - vpJunctionPosition) * vocalTractLengthCm, 2.2, 12.5);
@@ -11039,7 +11076,7 @@ function synthesizeNasalSyllable(token, parsed, options = {}) {
           {
             anchorClosureSection: true,
             placeGesture,
-            placeGestureStrength: 0.5,
+            placeGestureStrength: coronalReleaseGestureStrength(parsed.vowel),
             closureAreaCm2: placeGesture.release_constriction_area_cm2,
             closureWidth: clamp(coupledClosureTuning.closure_width * 0.82, 0.032, 0.065),
           }
