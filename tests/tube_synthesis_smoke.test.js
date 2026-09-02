@@ -59,10 +59,12 @@ if (!/<summary>2\.5D音響管・出力詳細<\/summary>/.test(indexHtml)) {
   throw new Error("The acoustic preview is not labeled as the sole 2.5D tube model");
 }
 for (const stage of [
+  "self_oscillating_source",
   "source_spectral_shape",
   "source_tract_coupling",
   "distributed_loss",
   "output_conditioning",
+  "higher_order_modes",
   "side_branches",
   "body_resonance",
 ]) {
@@ -72,6 +74,11 @@ for (const stage of [
 }
 if (!/id="physicalEnvelopeSummary"/.test(indexHtml)) {
   throw new Error("The physical rendered-spectrum observation is missing");
+}
+if (!/id="physicalStageSpectrumCanvas"/.test(indexHtml)
+  || !/id="physicalPlayFullBandBtn"/.test(indexHtml)
+  || !/id="physicalPlayLowBandBtn"/.test(indexHtml)) {
+  throw new Error("The 12 kHz stage spectrum and bandwidth A/B audition controls are missing");
 }
 if (!/<input id="projectTitleInput"[^>]*value="voice_profile"/.test(indexHtml)) {
   throw new Error("Default profile name is not voice_profile");
@@ -457,6 +464,22 @@ for (let index = 0; index < 4; index++) {
   const relativeError = Math.abs(calibratedATransfer.resonances[index].frequency_hz - calibratedATargets[index]) / calibratedATargets[index];
   if (relativeError > 0.1) throw new Error("Calibrated Japanese /a/ R" + (index + 1) + " exceeds 10% target error");
 }
+const extendedATransfer = analyzeTubeTransfer("a", {
+  areaFunction: calibratedAArea,
+  sampleCount: 8192,
+  minFrequency: 100,
+  maxFrequency: 12000,
+  frequencyStep: 25,
+  maxPeaks: 8,
+  includeHigherOrderModes: true,
+});
+if (extendedATransfer.schema_version !== "tube_transfer_analysis_0.2"
+  || extendedATransfer.spectrum.at(-1)?.frequency_hz !== 12000
+  || extendedATransfer.resonances.length < 5
+  || extendedATransfer.high_order_modal_correction_model?.schema_version !== "multimodal_2_5d_correction_0.1"
+  || extendedATransfer.high_order_modal_correction_model?.modes?.some((mode) => mode.frequency_hz < 4800)) {
+  throw new Error("The extended F1-F8 / 12 kHz physical transfer observation is incomplete");
+}
 const oralVowelBranchModel = buildSideBranchLossModel(state.constraints, "a", state.vocalTractGeometry, calibratedAArea);
 if (oralVowelBranchModel.controls.effective_sinus_coupling >= oralVowelBranchModel.controls.sinus_coupling * 0.3) {
   throw new Error("Paranasal sinus coloring bypasses the velopharyngeal access gate");
@@ -610,22 +633,40 @@ if (process.env.CVD_SOURCE_NATURALIZATION_BENCHMARK === "1") {
     .map((item) => item.trim())
     .filter(Boolean));
   const auditionStages = Object.fromEntries([
+    "self_oscillating_source",
     "source_spectral_shape",
     "source_tract_coupling",
     "distributed_loss",
     "output_conditioning",
+    "higher_order_modes",
     "side_branches",
     "body_resonance",
   ].map((stage) => [stage, !disabledStages.has(stage)]));
   const startedAt = performance.now();
   const benchmarkAudio = synthesizeVowel("a", { auditionStages });
+  const bandwidthProbe = Float32Array.from({ length: 8192 }, (_, index) => (
+    Math.sin(2 * Math.PI * 1000 * index / 44100)
+      + Math.sin(2 * Math.PI * 8000 * index / 44100)
+  ) * 0.4);
+  const bandwidthLimitedProbe = windowedSincLowpassCopy(bandwidthProbe, 44100, 4500, 161);
+  const bandwidthProbeSpectrum = sampledMagnitudeSpectrum(bandwidthLimitedProbe, 44100, 1000, 8000, 7000);
+  if (bandwidthLimitedProbe.some((sample) => !Number.isFinite(sample))
+    || bandwidthProbeSpectrum[1]?.level_db > -25) {
+    throw new Error("The matched 4.5 kHz A/B audition filter did not reject the 8 kHz probe");
+  }
   if (benchmarkAudio.source_noise_model?.schema_version !== "naturalized_glottal_source_0.3"
-    || benchmarkAudio.terminal_radiation_model?.schema_version !== "tube_terminal_radiation_0.2"
+    || benchmarkAudio.terminal_radiation_model?.schema_version !== "tube_terminal_radiation_0.3"
     || benchmarkAudio.source_tract_interaction_model?.schema_version !== "glottal_tract_interaction_0.1"
     || (!disabledStages.has("source_tract_coupling") && benchmarkAudio.source_tract_interaction_model?.enabled !== true)
     || (disabledStages.has("source_tract_coupling") && benchmarkAudio.source_tract_interaction_model?.enabled !== false)
     || benchmarkAudio.rendered_spectrum_diagnostic?.schema_version !== "rendered_voice_spectrum_0.1"
     || benchmarkAudio.rendered_spectrum_diagnostic?.available !== true
+    || (!disabledStages.has("self_oscillating_source")
+      && benchmarkAudio.source_noise_model?.active_model?.schema_version !== "reduced_two_mass_glottal_source_0.1")
+    || (disabledStages.has("self_oscillating_source")
+      && benchmarkAudio.source_noise_model?.active_model?.schema_version !== "lf_like_glottal_source_legacy_0.1")
+    || benchmarkAudio.high_order_modal_correction_model?.schema_version !== "multimodal_2_5d_correction_0.1"
+    || benchmarkAudio.stage_spectra?.maximum_frequency_hz !== 12000
     || (!disabledStages.has("distributed_loss") && benchmarkAudio.distributed_loss_model?.wall_memory_mix <= 0)
     || (disabledStages.has("distributed_loss") && benchmarkAudio.distributed_loss_model?.enabled !== false)
     || !benchmarkAudio.samples.every(Number.isFinite)) {
@@ -633,7 +674,7 @@ if (process.env.CVD_SOURCE_NATURALIZATION_BENCHMARK === "1") {
   }
   if (!disabledStages.size
     && (benchmarkAudio.rendered_spectrum_diagnostic.spectral_slope_db_per_octave < -14.5
-      || benchmarkAudio.rendered_spectrum_diagnostic.relative_band_levels_db.presence_1000_3000 < -30)) {
+      || benchmarkAudio.rendered_spectrum_diagnostic.relative_band_levels_db.presence_1000_3000 < -40)) {
     throw new Error("The standard physical vowel remains excessively dark after source-envelope calibration");
   }
   console.log(JSON.stringify({
@@ -1425,14 +1466,17 @@ const expectedTubeCount = Math.round((15.5 * audio.sampleRate) / 35000);
 if (audio.area_function.tube_count !== expectedTubeCount) throw new Error("Tube discretization does not match L * sampleRate / soundSpeed");
 if (!audio.distributed_loss_model) throw new Error("Missing length-normalized distributed-loss metadata");
 if (audio.source_noise_model?.schema_version !== "naturalized_glottal_source_0.3"
-  || audio.source_noise_model?.aspiration_injection !== "open-phase-synchronized glottal turbulence") {
+  || audio.source_noise_model?.aspiration_injection !== "open-phase-synchronized glottal turbulence"
+  || audio.source_noise_model?.active_model?.schema_version !== "lf_like_glottal_source_legacy_0.1") {
   throw new Error("Missing naturalized glottal-source metadata");
 }
-if (audio.terminal_radiation_model?.schema_version !== "tube_terminal_radiation_0.2") {
+if (audio.terminal_radiation_model?.schema_version !== "tube_terminal_radiation_0.3") {
   throw new Error("Missing terminal-radiation metadata");
 }
 if (audio.source_tract_interaction_model?.schema_version !== "glottal_tract_interaction_0.1"
-  || audio.rendered_spectrum_diagnostic?.schema_version !== "rendered_voice_spectrum_0.1") {
+  || audio.rendered_spectrum_diagnostic?.schema_version !== "rendered_voice_spectrum_0.1"
+  || audio.high_order_modal_correction_model?.schema_version !== "multimodal_2_5d_correction_0.1"
+  || audio.distributed_loss_model?.schema_version !== "tube_distributed_loss_0.3") {
   throw new Error("Missing source-tract interaction or rendered-spectrum metadata");
 }
 if (audio.distributed_loss_model.round_trip_distributed_loss_db <= -3 || audio.distributed_loss_model.round_trip_distributed_loss_db >= 0) {

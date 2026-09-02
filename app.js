@@ -73,11 +73,14 @@ const state = {
   selectedTractTuningHandle: null,
   physicalAreaTuningPlot: null,
   physicalTransferCache: null,
+  physicalBandwidthAudition: null,
   physicalAuditionStages: {
+    self_oscillating_source: false,
     source_spectral_shape: true,
     source_tract_coupling: true,
     distributed_loss: true,
     output_conditioning: true,
+    higher_order_modes: true,
     side_branches: true,
     body_resonance: true,
   },
@@ -336,6 +339,7 @@ const els = {
   physicalSagittalCanvas: document.getElementById("physicalSagittalCanvas"),
   physicalAreaCanvas: document.getElementById("physicalAreaCanvas"),
   physicalTransferCanvas: document.getElementById("physicalTransferCanvas"),
+  physicalStageSpectrumCanvas: document.getElementById("physicalStageSpectrumCanvas"),
   physicalGlottalCanvas: document.getElementById("physicalGlottalCanvas"),
   physicalCrossSectionCanvas: document.getElementById("physicalCrossSectionCanvas"),
   physicalModelStatus: document.getElementById("physicalModelStatus"),
@@ -364,6 +368,8 @@ const els = {
   physicalTargetProfileValue: document.getElementById("physicalTargetProfileValue"),
   physicalResonanceSummary: document.getElementById("physicalResonanceSummary"),
   physicalEnvelopeSummary: document.getElementById("physicalEnvelopeSummary"),
+  physicalPlayFullBandBtn: document.getElementById("physicalPlayFullBandBtn"),
+  physicalPlayLowBandBtn: document.getElementById("physicalPlayLowBandBtn"),
   physicalAuditionStageInputs: Array.from(document.querySelectorAll("[data-physical-audition-stage]")),
   physicalTractEditStatus: document.getElementById("physicalTractEditStatus"),
   physicalEditAreaModeBtn: document.getElementById("physicalEditAreaModeBtn"),
@@ -927,6 +933,8 @@ function handleAreaTuningPointerUp(event) {
   canvas?.releasePointerCapture?.(event.pointerId);
   state.areaTuningDrag = null;
   state.physicalTransferCache = null;
+  state.physicalBandwidthAudition = null;
+  state.lastPhysicalSynthesisDiagnostic = null;
   updateTractEditStatus();
   renderConstraints();
   draw();
@@ -2067,6 +2075,7 @@ function drawPhysicalModelWorkspace(geometry = state.vocalTractGeometry) {
   drawPhysicalSagittalModel(geometry, areaFunction);
   drawPhysicalAreaProfile(geometry);
   drawPhysicalTransferChart(transfer);
+  drawPhysicalStageSpectrumChart(transfer, state.lastPhysicalSynthesisDiagnostic);
   drawPhysicalGlottalSource();
   drawPhysicalCrossSectionProfile(geometry, vowel);
   renderPhysicalModelReadouts(geometry, areaFunction, transfer);
@@ -2315,11 +2324,11 @@ function currentPhysicalTransferAnalysis(geometry, vowel, areaFunction) {
   const analysis = analyzeTubeTransfer(vowel, {
     geometry,
     areaFunction,
-    sampleCount: 4096,
-    frequencyStep: 20,
+    sampleCount: 8192,
+    frequencyStep: PHYSICAL_DIAGNOSTIC_STEP_HZ,
     minFrequency: 100,
-    maxFrequency: 4500,
-    maxPeaks: 5,
+    maxFrequency: PHYSICAL_DIAGNOSTIC_MAX_HZ,
+    maxPeaks: 8,
     includeSideBranches: true,
     includeBodyResonance: true,
   });
@@ -2353,8 +2362,10 @@ function drawPhysicalTransferChart(analysis) {
     ctx.fillText(`${level}`, plot.left - 6, y + 3);
   }
   ctx.textAlign = "center";
-  for (let frequency = 0; frequency <= 4000; frequency += 1000) {
-    const x = plot.left + frequency / 4500 * (plot.right - plot.left);
+  const maximumFrequency = Math.max(4500, analysis?.spectrum?.at(-1)?.frequency_hz ?? PHYSICAL_DIAGNOSTIC_MAX_HZ);
+  const frequencyTick = maximumFrequency > 6000 ? 2000 : 1000;
+  for (let frequency = 0; frequency <= maximumFrequency; frequency += frequencyTick) {
+    const x = plot.left + frequency / maximumFrequency * (plot.right - plot.left);
     ctx.beginPath();
     ctx.moveTo(x, plot.top);
     ctx.lineTo(x, plot.bottom);
@@ -2371,7 +2382,7 @@ function drawPhysicalTransferChart(analysis) {
   ctx.beginPath();
   for (let index = 0; index < (analysis?.spectrum?.length ?? 0); index++) {
     const point = analysis.spectrum[index];
-    const x = plot.left + point.frequency_hz / 4500 * (plot.right - plot.left);
+    const x = plot.left + point.frequency_hz / maximumFrequency * (plot.right - plot.left);
     const y = plot.bottom - (clamp(point.level_db, -60, 0) + 60) / 60 * (plot.bottom - plot.top);
     if (index === 0) ctx.moveTo(x, y);
     else ctx.lineTo(x, y);
@@ -2380,7 +2391,7 @@ function drawPhysicalTransferChart(analysis) {
   const targetFormants = analysis?.area_function?.formant_target_reference?.target_formants_hz ?? [];
   ctx.setLineDash([5, 4]);
   targetFormants.slice(0, 4).forEach((frequency, index) => {
-    const x = plot.left + frequency / 4500 * (plot.right - plot.left);
+    const x = plot.left + frequency / maximumFrequency * (plot.right - plot.left);
     ctx.strokeStyle = "rgba(44,126,92,0.78)";
     ctx.lineWidth = 1.2;
     ctx.beginPath();
@@ -2392,9 +2403,9 @@ function drawPhysicalTransferChart(analysis) {
     ctx.fillText(`F${index + 1}`, x - 3, plot.bottom - 6 - (index % 2) * 12);
   });
   ctx.setLineDash([]);
-  const peaks = [...(analysis?.resonances ?? [])].sort((a, b) => a.frequency_hz - b.frequency_hz).slice(0, 5);
+  const peaks = [...(analysis?.resonances ?? [])].sort((a, b) => a.frequency_hz - b.frequency_hz).slice(0, 8);
   peaks.forEach((peak, index) => {
-    const x = plot.left + peak.frequency_hz / 4500 * (plot.right - plot.left);
+    const x = plot.left + peak.frequency_hz / maximumFrequency * (plot.right - plot.left);
     ctx.strokeStyle = "rgba(185,71,47,0.76)";
     ctx.lineWidth = 1.5;
     ctx.beginPath();
@@ -2406,6 +2417,79 @@ function drawPhysicalTransferChart(analysis) {
     ctx.fillText(`R${index + 1}`, x + 4, plot.top + 12 + (index % 2) * 12);
   });
   ctx.restore();
+}
+
+function drawPhysicalStageSpectrumChart(analysis, observation) {
+  const canvas = els.physicalStageSpectrumCanvas;
+  if (!canvas) return;
+  const ctx = canvas.getContext("2d");
+  const width = canvas.width;
+  const height = canvas.height;
+  const plot = { left: 48, right: width - 150, top: 18, bottom: height - 38 };
+  ctx.clearRect(0, 0, width, height);
+  ctx.fillStyle = "#fffdf8";
+  ctx.fillRect(0, 0, width, height);
+  ctx.fillStyle = "#f8f6ef";
+  ctx.fillRect(plot.left, plot.top, plot.right - plot.left, plot.bottom - plot.top);
+  ctx.strokeStyle = "rgba(184,177,163,0.5)";
+  ctx.lineWidth = 1;
+  ctx.font = "10px Segoe UI";
+  ctx.fillStyle = "#666257";
+  ctx.textAlign = "right";
+  for (let level = -80; level <= 0; level += 20) {
+    const y = plot.bottom - (level + 80) / 80 * (plot.bottom - plot.top);
+    ctx.beginPath();
+    ctx.moveTo(plot.left, y);
+    ctx.lineTo(plot.right, y);
+    ctx.stroke();
+    ctx.fillText(`${level}`, plot.left - 6, y + 3);
+  }
+  ctx.textAlign = "center";
+  for (let frequency = 0; frequency <= PHYSICAL_DIAGNOSTIC_MAX_HZ; frequency += 2000) {
+    const x = plot.left + frequency / PHYSICAL_DIAGNOSTIC_MAX_HZ * (plot.right - plot.left);
+    ctx.beginPath();
+    ctx.moveTo(x, plot.top);
+    ctx.lineTo(x, plot.bottom);
+    ctx.stroke();
+    ctx.fillText(`${frequency / 1000}k`, x, height - 17);
+  }
+  ctx.fillText("周波数 Hz", (plot.left + plot.right) / 2, height - 4);
+
+  const stageSpectra = observation?.vowel === selectedVowel()
+    && observation?.analysis_revision === state.analysisRevision
+    ? observation.stage_spectra
+    : null;
+  const curves = [
+    { label: "声門源", color: "#a06b13", spectrum: stageSpectra?.source },
+    { label: "声道伝達", color: "#36648c", spectrum: analysis?.spectrum },
+    { label: "放射後音声", color: "#2c7e5c", spectrum: stageSpectra?.radiated },
+  ];
+  ctx.save();
+  ctx.beginPath();
+  ctx.rect(plot.left, plot.top, plot.right - plot.left, plot.bottom - plot.top);
+  ctx.clip();
+  for (const curve of curves) {
+    if (!curve.spectrum?.length) continue;
+    ctx.strokeStyle = curve.color;
+    ctx.lineWidth = curve.label === "声道伝達" ? 1.7 : 2;
+    ctx.beginPath();
+    curve.spectrum.forEach((point, index) => {
+      const x = plot.left + point.frequency_hz / PHYSICAL_DIAGNOSTIC_MAX_HZ * (plot.right - plot.left);
+      const y = plot.bottom - (clamp(point.level_db, -80, 0) + 80) / 80 * (plot.bottom - plot.top);
+      if (index === 0) ctx.moveTo(x, y);
+      else ctx.lineTo(x, y);
+    });
+    ctx.stroke();
+  }
+  ctx.restore();
+  drawChartLegend(ctx, curves.map((curve) => [curve.label, curve.color]), plot.right + 18, 42);
+  if (!stageSpectra) {
+    ctx.fillStyle = "#666257";
+    ctx.font = "11px Segoe UI";
+    ctx.textAlign = "left";
+    ctx.fillText("試聴後に声門源と", plot.right + 18, 112);
+    ctx.fillText("放射後音声を重ねます。", plot.right + 18, 128);
+  }
 }
 
 function drawPhysicalGlottalSource() {
@@ -2433,10 +2517,34 @@ function drawPhysicalGlottalSource() {
   ctx.strokeStyle = "#a06b13";
   ctx.lineWidth = 2.2;
   ctx.beginPath();
-  const sampleCount = 280;
+  const previewRate = currentOutputSampleRate();
+  const previewDisplayF0 = currentDerivedF0(state.constraints);
+  const sampleCount = Math.max(240, Math.round(previewRate / previewDisplayF0 * 3));
+  const useSelfOscillator = physicalAuditionStagesFromUi().self_oscillating_source;
+  const preRollCount = Math.round(previewRate / previewDisplayF0 * 15);
+  const sourcePreviewFull = useSelfOscillator
+    ? synthesizeReducedTwoMassSourceSamples({
+      sampleCount: sampleCount + preRollCount,
+      sampleRate: previewRate,
+      f0: previewDisplayF0,
+      pressure: currentRespiratoryProfile(state.constraints).effective_pressure_pa,
+      effectiveClosure: glottalClosureProxyFromOpenQuotient(params.open_quotient),
+      respiratorySupport: currentRespiratoryProfile(state.constraints).effective_support,
+      motorControlPrecision: 1,
+      glottalParams: params,
+      sourceAttackSeconds: 0,
+      sourceReleaseSeconds: 0,
+    })
+    : null;
+  const sourcePreview = useSelfOscillator ? sourcePreviewFull.slice(preRollCount) : null;
+  const previewMaximum = useSelfOscillator
+    ? Math.max(0.0001, ...sourcePreview.map((value) => Math.abs(value)))
+    : 1;
   for (let index = 0; index < sampleCount; index++) {
     const cycle = index / (sampleCount - 1) * 3;
-    const flow = lfLikeGlottalFlow(cycle % 1, params);
+    const flow = useSelfOscillator
+      ? sourcePreview[index] / previewMaximum
+      : lfLikeGlottalFlow(cycle % 1, params);
     const x = plot.left + index / (sampleCount - 1) * (plot.right - plot.left);
     const y = plot.bottom - (flow + 0.08) / 1.12 * (plot.bottom - plot.top);
     if (index === 0) ctx.moveTo(x, y);
@@ -2446,7 +2554,7 @@ function drawPhysicalGlottalSource() {
   ctx.fillStyle = "#666257";
   ctx.font = "10px Segoe UI";
   ctx.textAlign = "center";
-  ctx.fillText("3声門周期", (plot.left + plot.right) / 2, height - 12);
+  ctx.fillText(useSelfOscillator ? "縮約二質点モデル · 3周期相当" : "LF型 · 3声門周期", (plot.left + plot.right) / 2, height - 12);
 }
 
 function renderPhysicalModelReadouts(geometry, areaFunction, transfer) {
@@ -2460,7 +2568,7 @@ function renderPhysicalModelReadouts(geometry, areaFunction, transfer) {
   const volume = areaFunction.areas_cm2.reduce((sum, area) => sum + area * areaFunction.section_length_cm, 0);
   const tongueWarpStrength = Math.max(0, ...(target.tongue_warps ?? []).map((warp) => Math.abs(Math.log(Math.max(0.05, warp.gain)))));
   const tongueWarpMeter = clamp(tongueWarpStrength / Math.log(3), 0, 1);
-  const transferPeaks = [...(transfer?.resonances ?? [])].sort((a, b) => a.frequency_hz - b.frequency_hz).slice(0, 4);
+  const transferPeaks = [...(transfer?.resonances ?? [])].sort((a, b) => a.frequency_hz - b.frequency_hz).slice(0, 8);
 
   if (els.physicalModelStatus) {
     const outputRate = currentOutputSampleRate();
@@ -2486,7 +2594,7 @@ function renderPhysicalModelReadouts(geometry, areaFunction, transfer) {
     const targetFormants = areaFunction.formant_target_reference?.target_formants_hz ?? [];
     els.physicalResonanceSummary.textContent = transferPeaks.length
       ? transferPeaks.map((peak, index) => {
-        const targetHz = targetFormants[index];
+        const targetHz = index < 4 ? targetFormants[index] : null;
         const error = Number.isFinite(targetHz) ? Math.round((peak.frequency_hz - targetHz) / targetHz * 100) : null;
         return `R${index + 1} ${Math.round(peak.frequency_hz)} Hz${error === null ? "" : ` (${error >= 0 ? "+" : ""}${error}%)`}`;
       }).join(" · ")
@@ -2494,12 +2602,16 @@ function renderPhysicalModelReadouts(geometry, areaFunction, transfer) {
   }
   if (els.physicalEnvelopeSummary) {
     const observation = state.lastPhysicalSynthesisDiagnostic;
-    const diagnostic = observation?.vowel === vowel ? observation.rendered_spectrum_diagnostic : null;
+    const diagnostic = observation?.vowel === vowel && observation?.analysis_revision === state.analysisRevision
+      ? observation.rendered_spectrum_diagnostic
+      : null;
     const f1Bandwidth = transferPeaks[0]?.bandwidth_3db_hz;
     els.physicalEnvelopeSummary.textContent = diagnostic?.available
       ? [
+        `実測F0 ${diagnostic.observed_f0_hz?.toFixed(1) ?? "-"} Hz`,
         `H1-H2 ${diagnostic.h1_h2_db.toFixed(1)} dB`,
         `高域傾斜 ${diagnostic.spectral_slope_db_per_octave?.toFixed(1) ?? "-"} dB/oct`,
+        `5–8 kHz ${diagnostic.relative_band_levels_db?.high_order_5000_8000?.toFixed(1) ?? "-"} dB`,
         `F1幅 ${Number.isFinite(f1Bandwidth) ? `${Math.round(f1Bandwidth)} Hz` : "-"}`,
       ].join(" · ")
       : "再生後に倍音包絡を表示します。";
@@ -7821,6 +7933,8 @@ function setOutputSampleRate(value, { redraw = true } = {}) {
   if (state.ttsResultUrl) URL.revokeObjectURL(state.ttsResultUrl);
   state.ttsResultUrl = null;
   state.physicalTransferCache = null;
+  state.physicalBandwidthAudition = null;
+  state.lastPhysicalSynthesisDiagnostic = null;
   if (els.downloadTtsDemoBtn) els.downloadTtsDemoBtn.disabled = true;
   if (els.ttsDemoAudio) {
     els.ttsDemoAudio.removeAttribute("src");
@@ -8096,6 +8210,9 @@ function setAreaTuningPoint(vowel, handleIndex, gain) {
     ...(state.vowelAreaTuning ?? {}),
     [vowel]: points,
   };
+  if (!state.areaTuningDrag) state.physicalTransferCache = null;
+  state.physicalBandwidthAudition = null;
+  state.lastPhysicalSynthesisDiagnostic = null;
   state.lastWav = null;
 }
 
@@ -8121,6 +8238,9 @@ function setWidthTuningPoint(vowel, handleIndex, gain) {
     ...(state.vowelWidthTuning ?? {}),
     [vowel]: points,
   };
+  if (!state.areaTuningDrag) state.physicalTransferCache = null;
+  state.physicalBandwidthAudition = null;
+  state.lastPhysicalSynthesisDiagnostic = null;
   state.lastWav = null;
 }
 
@@ -8133,6 +8253,8 @@ function resetAreaTuning(vowel = selectedVowel()) {
   state.vowelWidthTuning = nextWidth;
   state.selectedTractTuningHandle = null;
   state.physicalTransferCache = null;
+  state.physicalBandwidthAudition = null;
+  state.lastPhysicalSynthesisDiagnostic = null;
   state.lastWav = null;
   updateTractEditStatus();
   renderConstraints();
@@ -8711,18 +8833,23 @@ function tubeGlottalSourceMetadata(glottalParams, motorControlPrecision, aspirat
 }
 
 const PHYSICAL_AUDITION_STAGE_KEYS = [
+  "self_oscillating_source",
   "source_spectral_shape",
   "source_tract_coupling",
   "distributed_loss",
   "output_conditioning",
+  "higher_order_modes",
   "side_branches",
   "body_resonance",
 ];
 
+const PHYSICAL_DIAGNOSTIC_MAX_HZ = 12000;
+const PHYSICAL_DIAGNOSTIC_STEP_HZ = 25;
+
 function normalizedPhysicalAuditionStages(stages = null) {
   return Object.fromEntries(PHYSICAL_AUDITION_STAGE_KEYS.map((key) => [
     key,
-    stages?.[key] !== false,
+    key === "self_oscillating_source" ? stages?.[key] === true : stages?.[key] !== false,
   ]));
 }
 
@@ -8739,6 +8866,7 @@ function physicalAuditionStagesFromUi() {
 function tubeSourceTractCouplingModel(options, sampleRate) {
   const closure = clamp(options.effectiveClosure ?? 0.55, 0, 1);
   const enabled = options.sourceMode !== "impulse" && options.sourceTractCouplingEnabled !== false;
+  const selfOscillating = enabled && options.selfOscillatingSourceEnabled === true;
   return {
     schema_version: "glottal_tract_interaction_0.1",
     enabled,
@@ -8747,7 +8875,9 @@ function tubeSourceTractCouplingModel(options, sampleRate) {
       : 0,
     return_pressure_alpha: sampleRateAdjustedAlpha(0.1, sampleRate),
     inertive_feedback_scale: enabled ? 0.085 : 0,
-    model: "bounded return-pressure modulation of glottal volume velocity",
+    model: selfOscillating
+      ? "direct supraglottal return-pressure loading of the reduced two-mass oscillator"
+      : "bounded return-pressure modulation of prescribed glottal volume velocity",
   };
 }
 
@@ -8855,7 +8985,8 @@ function synthesizeTubeVowel(vowel = selectedVowel(), options = {}) {
     sampleRate,
     areaFunction.areas_cm2.length
   );
-  const out = synthesizeKellyLochbaumTube(areaFunction.areas_cm2, {
+  const captureStageSpectra = options.captureStageSpectra === true || options.auditionStages != null;
+  const tubeOptions = {
     sampleCount: n,
     sampleRate,
     f0,
@@ -8867,6 +8998,7 @@ function synthesizeTubeVowel(vowel = selectedVowel(), options = {}) {
     motorControlPrecision: motorProfile.motor_control_precision,
     glottalParams,
     aspirationNoiseScale,
+    selfOscillatingSourceEnabled: auditionStages.self_oscillating_source,
     sourceSpectralShapeEnabled: auditionStages.source_spectral_shape,
     sourceTractCouplingEnabled: auditionStages.source_tract_coupling,
     distributedLossEnabled: auditionStages.distributed_loss,
@@ -8875,15 +9007,51 @@ function synthesizeTubeVowel(vowel = selectedVowel(), options = {}) {
     lossModel: tubeLossModel,
     hydraulicDiametersCm: hydraulicDiametersFromAreaFunction(areaFunction),
     hydraulicLossScales: hydraulicLossScalesFromAreaFunction(areaFunction),
-  });
+  };
+  const sourceObservation = captureStageSpectra
+    ? auditionStages.self_oscillating_source
+      ? synthesizeReducedTwoMassSourceSamples(tubeOptions)
+      : synthesizeTubeSourceSamples(tubeOptions)
+    : null;
+  const out = synthesizeKellyLochbaumTube(areaFunction.areas_cm2, tubeOptions);
   const sideBranchLossModel = auditionStages.side_branches
     ? applySideBranchLosses(out, sampleRate, constraints, vowel, geometry, areaFunction, { strength: 1 })
     : buildSideBranchLossModel(constraints, vowel, geometry, areaFunction, { strength: 0 });
   const bodyResonanceModel = auditionStages.body_resonance
     ? applyBodyResonance(out, sampleRate, constraints)
     : { ...bodyResonanceModelMetadata(constraints), enabled: false };
+  const highOrderModalCorrectionModel = applyHighOrderModalCorrection(
+    out,
+    sampleRate,
+    areaFunction,
+    auditionStages.higher_order_modes ? 1 : 0
+  );
   normalize(out, 0.92);
-  const renderedSpectrumDiagnostic = analyzeRenderedVoiceSpectrum(out, sampleRate, f0);
+  const renderedSpectrumDiagnostic = analyzeRenderedVoiceSpectrum(
+    out,
+    sampleRate,
+    f0,
+    captureStageSpectra ? PHYSICAL_DIAGNOSTIC_MAX_HZ : 5000
+  );
+  const stageSpectra = !captureStageSpectra ? null : {
+    schema_version: "physical_stage_spectra_0.1",
+    maximum_frequency_hz: Math.min(PHYSICAL_DIAGNOSTIC_MAX_HZ, sampleRate * 0.45),
+    normalization: "each stage independently normalized to 0 dB",
+    source: sampledWindowedMagnitudeSpectrum(
+      sourceObservation,
+      sampleRate,
+      100,
+      Math.min(PHYSICAL_DIAGNOSTIC_MAX_HZ, sampleRate * 0.45),
+      PHYSICAL_DIAGNOSTIC_STEP_HZ
+    ),
+    radiated: sampledWindowedMagnitudeSpectrum(
+      out,
+      sampleRate,
+      100,
+      Math.min(PHYSICAL_DIAGNOSTIC_MAX_HZ, sampleRate * 0.45),
+      PHYSICAL_DIAGNOSTIC_STEP_HZ
+    ),
+  };
   return {
     sampleRate,
     samples: out,
@@ -8894,15 +9062,23 @@ function synthesizeTubeVowel(vowel = selectedVowel(), options = {}) {
     physical_resolution_model: physicalResolutionModel,
     audition_stages: auditionStages,
     distributed_loss_model: tubeLossModel,
-    terminal_radiation_model: tubeTerminalRadiationModel(lossParams, sampleRate, false),
+    terminal_radiation_model: tubeTerminalRadiationModel(
+      lossParams,
+      sampleRate,
+      false,
+      areaFunction.areas_cm2.at(-1)
+    ),
     source_tract_interaction_model: tubeSourceTractCouplingModel({
       effectiveClosure,
       sourceTractCouplingEnabled: auditionStages.source_tract_coupling,
+      selfOscillatingSourceEnabled: auditionStages.self_oscillating_source,
     }, sampleRate),
     side_branch_loss_model: sideBranchLossModel,
     body_resonance_model: bodyResonanceModel,
+    high_order_modal_correction_model: highOrderModalCorrectionModel,
     respiratory_drive: respiratoryProfile,
     rendered_spectrum_diagnostic: renderedSpectrumDiagnostic,
+    stage_spectra: stageSpectra,
     derived_f0_hz: Number(f0.toFixed(4)),
     source_noise_model: {
       ...tubeGlottalSourceMetadata(
@@ -8912,6 +9088,12 @@ function synthesizeTubeVowel(vowel = selectedVowel(), options = {}) {
       ),
       spectral_shape_enabled: auditionStages.source_spectral_shape,
       closing_flank: "finite-slope cosine",
+      model: auditionStages.self_oscillating_source
+        ? "reduced two-mass self-oscillating volume-velocity source"
+        : "prescribed LF-like volume-velocity source with deterministic cycle microvariation",
+      active_model: auditionStages.self_oscillating_source
+        ? createReducedTwoMassGlottalOscillator(tubeOptions, sampleRate).metadata
+        : { schema_version: "lf_like_glottal_source_legacy_0.1", model: "prescribed LF-like source" },
     },
   };
 }
@@ -9433,6 +9615,135 @@ function synthesizeTubeSourceSamples(options) {
       : sourceSample;
     out[sampleIndex] = tiltedSource * env * pressureDrive * 0.145;
   }
+  return out;
+}
+
+function createReducedTwoMassGlottalOscillator(options, sampleRate) {
+  const f0 = clamp(Number(options.f0) || 165, 45, 520);
+  const pressureRatio = clamp((Number(options.pressure) || 900) / 900, 0.25, 2.2);
+  const respiratorySupport = clamp(Number(options.respiratorySupport) || 1, 0.35, 1.8);
+  const closure = clamp(Number(options.effectiveClosure) || 0.55, 0, 1);
+  const precision = clamp(Number(options.motorControlPrecision) || 1, 0.15, 1.4);
+  const glottalParams = options.glottalParams ?? currentGlottalSourceParams({}, options.tension ?? 1);
+  const frequencyCalibration = 0.878;
+  const phaseStep = 2 * Math.PI * f0 * frequencyCalibration / sampleRate;
+  const coupling = 0.31;
+  const lowerDrive = 0.15 + pressureRatio * 0.115;
+  const upperDrive = 0.12 + pressureRatio * 0.1;
+  const restGap = clamp(0.54 - closure * 0.24, 0.22, 0.55);
+  const aspirationScale = clamp(options.aspirationNoiseScale ?? 1, 0, 1);
+  const spectralShapeEnabled = options.sourceSpectralShapeEnabled !== false;
+  const tiltAlpha = glottalTiltAlpha(sampleRate, glottalParams.spectral_tilt_db);
+  const tiltCascadeMix = glottalTiltCascadeMix(glottalParams.spectral_tilt_db) * 0.34;
+  const sourceAttackSamples = Math.max(1, Math.round((options.sourceAttackSeconds ?? 0.08) * sampleRate));
+  const sourceReleaseSamples = Math.max(1, Math.round((options.sourceReleaseSeconds ?? 0.14) * sampleRate));
+  const sampleCount = Math.max(1, Math.round(options.sampleCount ?? sampleRate));
+  const state = {
+    lower: 0.04,
+    upper: -0.025,
+    lowerVelocity: 0,
+    upperVelocity: 0,
+    returnPressure: 0,
+    tilt1: 0,
+    tilt2: 0,
+    noiseMemory: 0,
+    lastFlow: 0,
+    seed: 0x9e3779b9,
+  };
+
+  return {
+    metadata: {
+      schema_version: "reduced_two_mass_glottal_source_0.1",
+      model: "two coupled self-oscillating vocal-fold masses with collision and supraglottal return-pressure loading",
+      integration: "semi-implicit Euler in normalized phase time",
+      output_drive: "volume velocity with configured inertive flow-acceleration contribution",
+      intended_scope: "CPU-scale physical voice prototyping; not a tissue finite-element model",
+      f0_hz: Number(f0.toFixed(4)),
+      pressure_ratio: Number(pressureRatio.toFixed(5)),
+      rest_gap_normalized: Number(restGap.toFixed(5)),
+      coupling: Number(coupling.toFixed(5)),
+      frequency_calibration: frequencyCalibration,
+    },
+    step(returnWave = 0, sampleIndex = 0) {
+      state.returnPressure += sampleRateAdjustedAlpha(0.08, sampleRate) * (returnWave - state.returnPressure);
+      const supraglottalLoad = Math.tanh(state.returnPressure * 5.2);
+      const transglottalDrive = clamp(1 - supraglottalLoad * 0.08, 0.72, 1.24);
+      const lowerCollision = Math.max(0, -(restGap + state.lower * 0.34));
+      const upperCollision = Math.max(0, -(restGap + state.upper * 0.29));
+      const lowerAcceleration =
+        lowerDrive * (1 - state.lower * state.lower * 0.28) * state.lowerVelocity
+        - state.lower
+        - coupling * (state.lower - state.upper)
+        + transglottalDrive * 0.085
+        + supraglottalLoad * -0.015
+        + lowerCollision * 5.8
+        - (lowerCollision > 0 ? state.lowerVelocity * 0.8 : 0);
+      const upperAcceleration =
+        upperDrive * (1 - state.upper * state.upper * 0.32) * state.upperVelocity
+        - 1.16 * state.upper
+        - coupling * (state.upper - state.lower)
+        + transglottalDrive * 0.07
+        + supraglottalLoad * -0.012
+        + upperCollision * 6.6
+        - (upperCollision > 0 ? state.upperVelocity * 0.9 : 0);
+      state.lowerVelocity += lowerAcceleration * phaseStep;
+      state.upperVelocity += upperAcceleration * phaseStep;
+      state.lower += state.lowerVelocity * phaseStep;
+      state.upper += state.upperVelocity * phaseStep;
+      state.lower = clamp(state.lower, -3.2, 3.2);
+      state.upper = clamp(state.upper, -3.2, 3.2);
+      state.lowerVelocity = clamp(state.lowerVelocity, -4.8, 4.8);
+      state.upperVelocity = clamp(state.upperVelocity, -4.8, 4.8);
+
+      const lowerGap = Math.max(0, restGap + state.lower * 0.34);
+      const upperGap = Math.max(0, restGap + state.upper * 0.29);
+      const effectiveGap = Math.sqrt(lowerGap * upperGap);
+      const flowSeparationGate = smoothstep01((Math.min(lowerGap, upperGap) - 0.012) / 0.11);
+      let volumeVelocity = Math.pow(effectiveGap, 2.08)
+        * flowSeparationGate
+        * Math.sqrt(pressureRatio * transglottalDrive);
+      volumeVelocity *= 0.095 * (0.86 + respiratorySupport * 0.14);
+
+      state.seed = (state.seed * 1664525 + 1013904223) >>> 0;
+      const whiteNoise = state.seed / 0xffffffff * 2 - 1;
+      state.noiseMemory += 0.22 * (whiteNoise - state.noiseMemory);
+      const openGate = clamp(effectiveGap / Math.max(0.001, restGap * 2.2), 0, 1);
+      const motorInstability = Math.max(0, 1 - precision);
+      volumeVelocity += (whiteNoise * 0.68 + state.noiseMemory * 0.32)
+        * openGate
+        * (glottalParams.breathiness + motorInstability * 0.012)
+        * aspirationScale
+        * Math.sqrt(PREVIEW_REFERENCE_SAMPLE_RATE / sampleRate)
+        * 0.009;
+      const normalizedFlowAcceleration = (volumeVelocity - state.lastFlow) / Math.max(0.001, phaseStep);
+      state.lastFlow = volumeVelocity;
+      const volumeVelocityDrive = clamp(glottalParams.volume_velocity_drive ?? 0.86, 0.62, 1);
+      const inertiveAccelerationScale = clamp(
+        0.85 + (glottalParams.flow_inertance ?? 0.12) * 5,
+        0.85,
+        1.8
+      );
+      volumeVelocity = volumeVelocity * volumeVelocityDrive
+        + normalizedFlowAcceleration * (1 - volumeVelocityDrive) * inertiveAccelerationScale;
+      state.tilt1 += tiltAlpha * (volumeVelocity - state.tilt1);
+      state.tilt2 += tiltAlpha * (state.tilt1 - state.tilt2);
+      if (spectralShapeEnabled) {
+        const shaped = state.tilt1 * (1 - tiltCascadeMix) + state.tilt2 * tiltCascadeMix;
+        volumeVelocity = volumeVelocity * 0.32 + shaped * 0.68;
+      }
+      const attack = clamp(sampleIndex / sourceAttackSamples, 0, 1);
+      const release = clamp((sampleCount - 1 - sampleIndex) / sourceReleaseSamples, 0, 1);
+      return volumeVelocity * smoothstep01(Math.min(attack, release));
+    },
+  };
+}
+
+function synthesizeReducedTwoMassSourceSamples(options) {
+  const sampleCount = Math.max(1, Math.round(options.sampleCount ?? 1));
+  const sampleRate = Math.max(8000, options.sampleRate ?? currentOutputSampleRate());
+  const oscillator = createReducedTwoMassGlottalOscillator(options, sampleRate);
+  const out = new Float32Array(sampleCount);
+  for (let index = 0; index < sampleCount; index++) out[index] = oscillator.step(0, index);
   return out;
 }
 
@@ -9958,6 +10269,8 @@ function synthesizeKellyLochbaumTubeCore(areas, options) {
   const wallRight = new Float32Array(count + 1);
   const wallLeft = new Float32Array(count + 1);
   const wallComplianceMix = new Float32Array(count + 1);
+  const boundaryLayerRight = new Float32Array(count + 1);
+  const boundaryLayerLeft = new Float32Array(count + 1);
   const geometryUpdateStride = Math.max(1, Math.round(sampleRate / 11025));
   updateTubeGeometry(0);
   updateWallComplianceMix(
@@ -9970,13 +10283,18 @@ function synthesizeKellyLochbaumTubeCore(areas, options) {
   let lastMouthFlow = 0;
   let lastOutput = 0;
   let radiationSmoothState = 0;
-  const radiationModel = tubeTerminalRadiationModel(lossParams, sampleRate, false);
+  const radiationModel = tubeTerminalRadiationModel(lossParams, sampleRate, false, activeAreas[count - 1]);
   const radiationAlpha = radiationModel.flow_smoothing_alpha;
   const radiationMemory = radiationModel.differentiator_memory;
   const outputMemory = radiationModel.output_memory;
-  const sourceSamples = options.sourceSamples?.length >= sampleCount
-    ? options.sourceSamples
-    : synthesizeTubeSourceSamples(options);
+  const selfOscillator = options.sourceMode !== "impulse" && options.selfOscillatingSourceEnabled === true
+    ? createReducedTwoMassGlottalOscillator(options, sampleRate)
+    : null;
+  const sourceSamples = selfOscillator
+    ? null
+    : options.sourceSamples?.length >= sampleCount
+      ? options.sourceSamples
+      : synthesizeTubeSourceSamples(options);
   const outputAmplitude = 0.68 * (options.amplitude ?? 0.9);
   for (let sampleIndex = 0; sampleIndex < sampleCount; sampleIndex++) {
     if (hasAreaTrajectory && sampleIndex > 0 && sampleIndex % geometryUpdateStride === 0) {
@@ -9991,14 +10309,18 @@ function synthesizeKellyLochbaumTubeCore(areas, options) {
     }
     nextRight.fill(0);
     nextLeft.fill(0);
-    const source = sourceSamples[sampleIndex] ?? 0;
-    nextRight[1] += sourceTractCoupledInjection(
-      source,
-      left[0],
-      glottalReflection,
-      sourceTractState,
-      sourceTractInteraction
-    ) * damping;
+    const source = selfOscillator
+      ? selfOscillator.step(left[0], sampleIndex)
+      : sourceSamples[sampleIndex] ?? 0;
+    nextRight[1] += (selfOscillator
+      ? source + glottalReflection * left[0]
+      : sourceTractCoupledInjection(
+        source,
+        left[0],
+        glottalReflection,
+        sourceTractState,
+        sourceTractInteraction
+      )) * damping;
     const mouthFlow = (1 - lipReflection) * right[count];
     nextLeft[count - 1] += lipReflection * right[count] * damping;
     for (let junction = 1; junction < count; junction++) {
@@ -10016,6 +10338,15 @@ function synthesizeKellyLochbaumTubeCore(areas, options) {
       wallLeft,
       wallComplianceMix,
       complianceRelaxation
+    );
+    applyBoundaryLayerLossToTubeState(
+      nextRight,
+      nextLeft,
+      boundaryLayerRight,
+      boundaryLayerLeft,
+      activeHydraulicLossScales,
+      lossModel.boundary_layer_mix_per_section,
+      lossModel.boundary_layer_relaxation
     );
     radiationSmoothState += radiationAlpha * (mouthFlow - radiationSmoothState);
     const radiated = (radiationSmoothState - lastMouthFlow * radiationMemory) + lastOutput * outputMemory;
@@ -11035,7 +11366,7 @@ function buildTubeDistributedLossModel(lossParams, sampleRate, tubeCount, enable
   const oneWayLossNp = oneWayLossNpAtReference * (tractLengthCm / referenceLengthCm);
   const perSectionGain = Math.exp(-oneWayLossNp / count);
   return {
-    schema_version: "tube_distributed_loss_0.2",
+    schema_version: "tube_distributed_loss_0.3",
     enabled,
     section_length_cm: Number(sectionLengthCm.toFixed(6)),
     tract_length_cm: Number(tractLengthCm.toFixed(4)),
@@ -11056,27 +11387,59 @@ function buildTubeDistributedLossModel(lossParams, sampleRate, tubeCount, enable
       clamp(0.08 + wallCompliance * 0.2 + viscothermalLoss * 0.4, 0.06, 0.28),
       sampleRate
     ),
-    basis: "length-normalized distributed loss with restrained section memory; post-waveguide output conditioning is not duplicated here",
+    boundary_layer_mix_per_section: enabled
+      ? clamp((viscothermalLoss * 0.2 + highFrequencyDamping * 0.1 + wallLoss * 0.035) / count, 0, 0.012)
+      : 0,
+    boundary_layer_relaxation: 1 - Math.exp(-2 * Math.PI * clamp(
+      1250 + wallCompliance * 700 + viscothermalLoss * 1550,
+      900,
+      4200
+    ) / sampleRate),
+    frequency_dependence: "one-pole boundary-layer shelf distributed by section and scaled by hydraulic perimeter",
+    basis: "length-normalized distributed wall and viscothermal loss with hydraulic-diameter-dependent boundary-layer attenuation",
   };
 }
 
-function tubeTerminalRadiationModel(lossParams, sampleRate, nasal = false) {
+function tubeTerminalRadiationModel(lossParams, sampleRate, nasal = false, apertureAreaCm2 = null) {
   const highDamping = clamp(lossParams.high_frequency_damping ?? 0, 0, 1);
   const broadening = clamp(lossParams.resonance_broadening ?? 0, 0, 1);
   const smoothing = clamp(lossParams.lip_radiation_smoothing ?? 0, 0, 1);
-  const referenceDifferentiatorPole = clamp(
-    (nasal ? 0.955 : 0.945) - highDamping * 0.1 - broadening * 0.035,
-    nasal ? 0.8 : 0.76,
-    nasal ? 0.965 : 0.955
+  if (!Number.isFinite(Number(apertureAreaCm2)) || Number(apertureAreaCm2) <= 0) {
+    const referenceDifferentiatorPole = clamp(
+      (nasal ? 0.955 : 0.945) - highDamping * 0.1 - broadening * 0.035,
+      nasal ? 0.8 : 0.76,
+      nasal ? 0.965 : 0.955
+    );
+    return {
+      schema_version: "tube_terminal_radiation_0.2",
+      flow_smoothing_alpha: sampleRateAdjustedAlpha(clamp(1 - smoothing, 0.08, 1), sampleRate),
+      differentiator_memory: sampleRateAdjustedPole(referenceDifferentiatorPole, sampleRate),
+      output_memory: sampleRateAdjustedPole(
+        clamp(0.1 + highDamping * 0.09 + broadening * 0.035, 0.08, 0.24),
+        sampleRate
+      ),
+      approximation: "legacy calibrated termination retained for consonant and branched-path compatibility",
+      role: nasal ? "nostril volume-velocity radiation" : "lip volume-velocity radiation",
+    };
+  }
+  const fallbackArea = nasal ? 0.9 : 2.1;
+  const areaCm2 = clamp(Number(apertureAreaCm2) || fallbackArea, 0.08, 12);
+  const equivalentRadiusM = Math.sqrt(areaCm2 / Math.PI) * 0.01;
+  const radiationCornerHz = clamp(
+    343 / (2 * Math.PI * equivalentRadiusM) * (nasal ? 1.12 : 0.92),
+    nasal ? 1700 : 1200,
+    nasal ? 9500 : 8000
   );
+  const highpassMemory = 1 / (1 + 2 * Math.PI * radiationCornerHz / sampleRate);
   return {
-    schema_version: "tube_terminal_radiation_0.2",
+    schema_version: "tube_terminal_radiation_0.3",
     flow_smoothing_alpha: sampleRateAdjustedAlpha(clamp(1 - smoothing, 0.08, 1), sampleRate),
-    differentiator_memory: sampleRateAdjustedPole(referenceDifferentiatorPole, sampleRate),
-    output_memory: sampleRateAdjustedPole(
-      clamp(0.1 + highDamping * 0.09 + broadening * 0.035, 0.08, 0.24),
-      sampleRate
-    ),
+    differentiator_memory: 1,
+    output_memory: clamp(highpassMemory * (1 - highDamping * 0.045 - broadening * 0.02), 0.25, 0.94),
+    aperture_area_cm2: Number(areaCm2.toFixed(5)),
+    equivalent_radius_cm: Number((equivalentRadiusM * 100).toFixed(5)),
+    radiation_corner_hz: Number(radiationCornerHz.toFixed(3)),
+    approximation: "first-order unflanged circular-aperture radiation high-pass",
     role: nasal ? "nostril volume-velocity radiation" : "lip volume-velocity radiation",
   };
 }
@@ -11113,6 +11476,9 @@ function analyzeTubeTransfer(vowel = selectedVowel(), options = {}) {
   const bodyResonanceModel = options.includeBodyResonance
     ? applyBodyResonance(impulse, sampleRate, constraints)
     : null;
+  const highOrderModalCorrectionModel = options.includeHigherOrderModes === false
+    ? buildHighOrderModalCorrectionModel(areaFunction, sampleRate, 0)
+    : applyHighOrderModalCorrection(impulse, sampleRate, areaFunction, 1);
   const spectrum = sampledMagnitudeSpectrum(
     impulse,
     sampleRate,
@@ -11121,12 +11487,13 @@ function analyzeTubeTransfer(vowel = selectedVowel(), options = {}) {
     options.frequencyStep ?? 10
   );
   return {
-    schema_version: "tube_transfer_analysis_0.1",
+    schema_version: "tube_transfer_analysis_0.2",
     vowel,
     area_function: areaFunction,
     distributed_loss_model: distributedLossModel,
     side_branch_loss_model: sideBranchLossModel,
     body_resonance_model: bodyResonanceModel,
+    high_order_modal_correction_model: highOrderModalCorrectionModel,
     resonances: selectResonancePeaks(spectrum, options.minimumPeakSpacingHz ?? 260, options.maxPeaks ?? 5),
     spectrum,
   };
@@ -11155,7 +11522,27 @@ function sampledMagnitudeSpectrum(samples, sampleRate, minFrequency, maxFrequenc
   }));
 }
 
-function analyzeRenderedVoiceSpectrum(samples, sampleRate, f0Hz) {
+function sampledWindowedMagnitudeSpectrum(samples, sampleRate, minFrequency, maxFrequency, frequencyStep) {
+  const available = samples?.length ?? 0;
+  const windowLength = Math.min(8192, Math.max(0, available - Math.floor(sampleRate * 0.18)));
+  if (windowLength < 1024) return [];
+  const start = clamp(
+    Math.round(available * 0.5 - windowLength * 0.5),
+    0,
+    Math.max(0, available - windowLength)
+  );
+  let mean = 0;
+  for (let index = 0; index < windowLength; index++) mean += samples[start + index];
+  mean /= windowLength;
+  const windowed = new Float32Array(windowLength);
+  for (let index = 0; index < windowLength; index++) {
+    const window = 0.5 - 0.5 * Math.cos(2 * Math.PI * index / Math.max(1, windowLength - 1));
+    windowed[index] = (samples[start + index] - mean) * window;
+  }
+  return sampledMagnitudeSpectrum(windowed, sampleRate, minFrequency, maxFrequency, frequencyStep);
+}
+
+function analyzeRenderedVoiceSpectrum(samples, sampleRate, f0Hz, maximumFrequencyHz = 5000) {
   const available = samples?.length ?? 0;
   const windowLength = Math.min(16384, Math.max(0, available - Math.floor(sampleRate * 0.18)));
   if (windowLength < 2048 || !Number.isFinite(f0Hz) || f0Hz < 40) {
@@ -11174,7 +11561,8 @@ function analyzeRenderedVoiceSpectrum(samples, sampleRate, f0Hz) {
     const window = 0.5 - 0.5 * Math.cos(2 * Math.PI * index / Math.max(1, windowLength - 1));
     windowed[index] = (samples[start + index] - mean) * window;
   }
-  const maximumFrequency = Math.min(5000, sampleRate * 0.42);
+  const maximumFrequency = Math.min(maximumFrequencyHz, sampleRate * 0.42);
+  const observedFundamental = estimateFundamentalNearTarget(windowed, sampleRate, f0Hz);
   const harmonicCount = Math.max(2, Math.floor(maximumFrequency / f0Hz));
   const harmonics = [];
   for (let harmonic = 1; harmonic <= harmonicCount; harmonic++) {
@@ -11219,6 +11607,11 @@ function analyzeRenderedVoiceSpectrum(samples, sampleRate, f0Hz) {
     analysis_window_samples: windowLength,
     analysis_start_sample: start,
     f0_hz: Number(f0Hz.toFixed(4)),
+    observed_f0_hz: observedFundamental.frequency_hz,
+    f0_periodicity: observedFundamental.periodicity,
+    f0_relative_error: observedFundamental.frequency_hz === null
+      ? null
+      : Number(((observedFundamental.frequency_hz - f0Hz) / f0Hz).toFixed(5)),
     h1_h2_db: Number((harmonics[0].level_db - harmonics[1].level_db).toFixed(3)),
     h2_h4_db: harmonics.length >= 4
       ? Number((harmonics[1].level_db - harmonics[3].level_db).toFixed(3))
@@ -11229,7 +11622,9 @@ function analyzeRenderedVoiceSpectrum(samples, sampleRate, f0Hz) {
     relative_band_levels_db: {
       low_100_1000: relativeBandLevel(100, 1000),
       presence_1000_3000: relativeBandLevel(1000, 3000),
-      high_3000_5000: relativeBandLevel(3000, 5001),
+      high_3000_5000: relativeBandLevel(3000, 5000),
+      high_order_5000_8000: relativeBandLevel(5000, 8000),
+      upper_8000_12000: relativeBandLevel(8000, 12001),
     },
     harmonics: harmonics.map((item) => ({
       harmonic: item.harmonic,
@@ -11237,6 +11632,37 @@ function analyzeRenderedVoiceSpectrum(samples, sampleRate, f0Hz) {
       relative_level_db: Number(item.level_db.toFixed(3)),
     })),
     interpretation: "engineering observation only; not a speaker-identity or clinical metric",
+  };
+}
+
+function estimateFundamentalNearTarget(samples, sampleRate, targetF0Hz) {
+  if (!samples?.length || !Number.isFinite(targetF0Hz) || targetF0Hz <= 0) {
+    return { frequency_hz: null, periodicity: null };
+  }
+  const minimumLag = Math.max(2, Math.floor(sampleRate / (targetF0Hz * 1.45)));
+  const maximumLag = Math.min(samples.length - 2, Math.ceil(sampleRate / (targetF0Hz * 0.65)));
+  let bestLag = null;
+  let bestCorrelation = -1;
+  for (let lag = minimumLag; lag <= maximumLag; lag++) {
+    let cross = 0;
+    let energyA = 0;
+    let energyB = 0;
+    for (let index = lag; index < samples.length; index++) {
+      const a = samples[index];
+      const b = samples[index - lag];
+      cross += a * b;
+      energyA += a * a;
+      energyB += b * b;
+    }
+    const correlation = cross / Math.sqrt(Math.max(1e-24, energyA * energyB));
+    if (correlation > bestCorrelation) {
+      bestCorrelation = correlation;
+      bestLag = lag;
+    }
+  }
+  return {
+    frequency_hz: bestLag ? Number((sampleRate / bestLag).toFixed(4)) : null,
+    periodicity: bestLag ? Number(clamp(bestCorrelation, -1, 1).toFixed(5)) : null,
   };
 }
 
@@ -11315,6 +11741,28 @@ function applyWallComplianceToTubeState(
   }
 }
 
+function applyBoundaryLayerLossToTubeState(
+  nextRight,
+  nextLeft,
+  lowpassRight,
+  lowpassLeft,
+  hydraulicLossScales,
+  baseMix,
+  relaxation
+) {
+  if (!(baseMix > 0) || !(relaxation > 0)) return;
+  const count = Math.min(nextRight.length, nextLeft.length) - 1;
+  for (let waveIndex = 1; waveIndex <= count; waveIndex++) {
+    const sectionIndex = Math.min(count - 1, waveIndex - 1);
+    const perimeterScale = clamp(Number(hydraulicLossScales?.[sectionIndex]) || 1, 0.85, 3.4);
+    const mix = clamp(baseMix * perimeterScale, 0, 0.045);
+    lowpassRight[waveIndex] += relaxation * (nextRight[waveIndex] - lowpassRight[waveIndex]);
+    lowpassLeft[waveIndex] += relaxation * (nextLeft[waveIndex] - lowpassLeft[waveIndex]);
+    nextRight[waveIndex] -= (nextRight[waveIndex] - lowpassRight[waveIndex]) * mix;
+    nextLeft[waveIndex] -= (nextLeft[waveIndex] - lowpassLeft[waveIndex]) * mix;
+  }
+}
+
 function applyTubeOutputConditioning(samples, sampleRate, lossParams) {
   const wallCompliance = clamp(lossParams.wall_compliance ?? 0, 0, 1);
   const highDamping = clamp(lossParams.high_frequency_damping ?? 0, 0, 1);
@@ -11335,6 +11783,107 @@ function applyTubeOutputConditioning(samples, sampleRate, lossParams) {
   if (warmthMix > 0.001) {
     applyOnePoleLowpassBlend(samples, sampleRate, 1450, warmthMix);
   }
+}
+
+function buildHighOrderModalCorrectionModel(areaFunction, sampleRate, strength = 1) {
+  const upperFrequency = Math.min(PHYSICAL_DIAGNOSTIC_MAX_HZ, sampleRate * 0.42);
+  const crossSections = areaFunction?.cross_sections_2_5d ?? [];
+  const candidates = [];
+  for (let index = 0; index < crossSections.length; index++) {
+    const section = crossSections[index];
+    const width = Math.max(0.08, Number(section.coronal_width_cm) || 0);
+    const height = Math.max(0.08, Number(section.sagittal_height_cm) || 0);
+    const majorDiameter = Math.max(width, height);
+    const minorDiameter = Math.min(width, height);
+    const cutoffHz = 35000 / (2 * majorDiameter);
+    if (cutoffHz < 4800 || cutoffHz > upperFrequency) continue;
+    const eccentricity = clamp(Math.abs(Math.log(majorDiameter / minorDiameter)), 0, 2.4);
+    const area = Math.max(0.01, Number(section.area_cm2) || width * height * Math.PI / 4);
+    const position = Number.isFinite(section.position)
+      ? section.position
+      : index / Math.max(1, crossSections.length - 1);
+    const prominence = eccentricity * 0.72 + clamp(Math.sqrt(area) / 3, 0, 0.55);
+    candidates.push({ cutoffHz, eccentricity, position, prominence, width, height });
+  }
+  const selected = [];
+  for (const candidate of candidates.sort((a, b) => b.prominence - a.prominence)) {
+    if (selected.some((mode) => Math.abs(mode.frequency_hz - candidate.cutoffHz) < 520)) continue;
+    selected.push({
+      frequency_hz: candidate.cutoffHz,
+      q: clamp(2.1 + candidate.eccentricity * 0.85, 2.1, 4.4),
+      gain_db: clamp((0.7 + candidate.prominence * 0.82) * strength, 0, 2.6),
+      tract_position: candidate.position,
+      width_cm: candidate.width,
+      height_cm: candidate.height,
+      mode: "first transverse cut-on of locally elliptical section",
+    });
+    if (selected.length >= 4) break;
+  }
+  selected.sort((a, b) => a.frequency_hz - b.frequency_hz);
+  return {
+    schema_version: "multimodal_2_5d_correction_0.1",
+    enabled: strength > 0 && selected.length > 0,
+    lower_boundary_hz: 4800,
+    upper_boundary_hz: Number(upperFrequency.toFixed(3)),
+    modes: selected.map((mode) => ({
+      ...mode,
+      frequency_hz: Number(mode.frequency_hz.toFixed(3)),
+      q: Number(mode.q.toFixed(4)),
+      gain_db: Number(mode.gain_db.toFixed(4)),
+      tract_position: Number(mode.tract_position.toFixed(5)),
+      width_cm: Number(mode.width_cm.toFixed(5)),
+      height_cm: Number(mode.height_cm.toFixed(5)),
+    })),
+    basis: "geometry-derived high-order modal correction above the validated 1D longitudinal-mode range",
+    limitation: "reduced modal correction; not a full 3D finite-element acoustic solution",
+  };
+}
+
+function peakingEqualizerCoefficients(sampleRate, frequencyHz, q, gainDb) {
+  const omega = 2 * Math.PI * clamp(frequencyHz, 20, sampleRate * 0.47) / sampleRate;
+  const alpha = Math.sin(omega) / (2 * Math.max(0.2, q));
+  const amplitude = Math.pow(10, gainDb / 40);
+  const cosOmega = Math.cos(omega);
+  const a0 = 1 + alpha / amplitude;
+  return {
+    b0: (1 + alpha * amplitude) / a0,
+    b1: (-2 * cosOmega) / a0,
+    b2: (1 - alpha * amplitude) / a0,
+    a1: (-2 * cosOmega) / a0,
+    a2: (1 - alpha / amplitude) / a0,
+  };
+}
+
+function applyBiquadInPlace(samples, coefficients) {
+  let x1 = 0;
+  let x2 = 0;
+  let y1 = 0;
+  let y2 = 0;
+  for (let index = 0; index < samples.length; index++) {
+    const x0 = samples[index];
+    const y0 = coefficients.b0 * x0
+      + coefficients.b1 * x1
+      + coefficients.b2 * x2
+      - coefficients.a1 * y1
+      - coefficients.a2 * y2;
+    samples[index] = Number.isFinite(y0) ? y0 : 0;
+    x2 = x1;
+    x1 = x0;
+    y2 = y1;
+    y1 = y0;
+  }
+}
+
+function applyHighOrderModalCorrection(samples, sampleRate, areaFunction, strength = 1) {
+  const model = buildHighOrderModalCorrectionModel(areaFunction, sampleRate, strength);
+  if (!model.enabled) return model;
+  for (const mode of model.modes) {
+    applyBiquadInPlace(
+      samples,
+      peakingEqualizerCoefficients(sampleRate, mode.frequency_hz, mode.q, mode.gain_db)
+    );
+  }
+  return model;
 }
 
 function buildSideBranchLossModel(constraints, vowel, geometry = null, areaFunction = null, options = {}) {
@@ -11659,13 +12208,81 @@ async function playVowel() {
   if (state.activeTab === "physicalModelTab") {
     state.lastPhysicalSynthesisDiagnostic = {
       vowel,
+      analysis_revision: state.analysisRevision,
       audition_stages: audio.audition_stages,
       rendered_spectrum_diagnostic: audio.rendered_spectrum_diagnostic,
+      stage_spectra: audio.stage_spectra,
     };
     draw();
   }
   state.lastWav = encodeWav(audio.samples, audio.sampleRate);
   await playAudioSamples(audio.samples, audio.sampleRate);
+}
+
+function physicalBandwidthAuditionAudio() {
+  if (!Object.keys(state.constraints).length) analyze();
+  const vowel = selectedVowel();
+  const auditionStages = physicalAuditionStagesFromUi();
+  const signature = JSON.stringify({
+    revision: state.analysisRevision,
+    vowel,
+    sample_rate: currentOutputSampleRate(),
+    audition_stages: auditionStages,
+    area_tuning: state.vowelAreaTuning?.[vowel] ?? null,
+    width_tuning: state.vowelWidthTuning?.[vowel] ?? null,
+  });
+  if (state.physicalBandwidthAudition?.signature === signature) return state.physicalBandwidthAudition.audio;
+  const audio = synthesizeVowel(vowel, { auditionStages, captureStageSpectra: true });
+  state.physicalBandwidthAudition = { signature, audio };
+  state.lastPhysicalSynthesisDiagnostic = {
+    vowel,
+    analysis_revision: state.analysisRevision,
+    audition_stages: audio.audition_stages,
+    rendered_spectrum_diagnostic: audio.rendered_spectrum_diagnostic,
+    stage_spectra: audio.stage_spectra,
+  };
+  state.lastWav = encodeWav(audio.samples, audio.sampleRate);
+  draw();
+  return audio;
+}
+
+async function playPhysicalBandwidthVariant(cutoffHz = null) {
+  const audio = physicalBandwidthAuditionAudio();
+  const samples = cutoffHz
+    ? windowedSincLowpassCopy(audio.samples, audio.sampleRate, cutoffHz, 161)
+    : new Float32Array(audio.samples);
+  normalize(samples, 0.92);
+  await playAudioSamples(samples, audio.sampleRate);
+}
+
+function windowedSincLowpassCopy(samples, sampleRate, cutoffHz, tapCount = 161) {
+  const count = Math.max(31, Math.round(tapCount) | 1);
+  const half = (count - 1) / 2;
+  const cutoff = clamp(cutoffHz / sampleRate, 0.002, 0.48);
+  const kernel = new Float64Array(count);
+  let kernelSum = 0;
+  for (let index = 0; index < count; index++) {
+    const offset = index - half;
+    const sinc = offset === 0
+      ? 2 * cutoff
+      : Math.sin(2 * Math.PI * cutoff * offset) / (Math.PI * offset);
+    const window = 0.42
+      - 0.5 * Math.cos(2 * Math.PI * index / (count - 1))
+      + 0.08 * Math.cos(4 * Math.PI * index / (count - 1));
+    kernel[index] = sinc * window;
+    kernelSum += kernel[index];
+  }
+  for (let index = 0; index < count; index++) kernel[index] /= kernelSum;
+  const out = new Float32Array(samples.length);
+  for (let sampleIndex = 0; sampleIndex < samples.length; sampleIndex++) {
+    let value = 0;
+    for (let tap = 0; tap < count; tap++) {
+      const sourceIndex = sampleIndex + tap - half;
+      if (sourceIndex >= 0 && sourceIndex < samples.length) value += samples[sourceIndex] * kernel[tap];
+    }
+    out[sampleIndex] = value;
+  }
+  return out;
 }
 
 async function playAudioSamples(samples, sampleRate) {
@@ -13576,6 +14193,7 @@ function init() {
       if (!PHYSICAL_AUDITION_STAGE_KEYS.includes(key)) return;
       state.physicalAuditionStages[key] = input.checked;
       state.lastPhysicalSynthesisDiagnostic = null;
+      state.physicalBandwidthAudition = null;
       draw();
     });
   }
@@ -13585,9 +14203,12 @@ function init() {
   els.analyzeBtn.addEventListener("click", runBasicAnalysis);
   els.recalculateBtn?.addEventListener("click", runDetailRecalculation);
   els.playSampleButton.addEventListener("click", playVowel);
+  els.physicalPlayFullBandBtn?.addEventListener("click", () => playPhysicalBandwidthVariant());
+  els.physicalPlayLowBandBtn?.addEventListener("click", () => playPhysicalBandwidthVariant(4500));
   els.vowelSelect.addEventListener("input", () => {
     state.lastWav = null;
     state.physicalTransferCache = null;
+    state.physicalBandwidthAudition = null;
     state.selectedTractTuningHandle = null;
     updateTractEditStatus();
     renderAuditoryEvaluation();

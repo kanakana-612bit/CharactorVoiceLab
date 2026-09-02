@@ -1872,6 +1872,7 @@ summary {
 #physicalSagittalCanvas,
 #physicalAreaCanvas,
 #physicalTransferCanvas,
+#physicalStageSpectrumCanvas,
 #physicalGlottalCanvas,
 #physicalCrossSectionCanvas {
   display: block;
@@ -1900,7 +1901,33 @@ summary {
 }
 
 .physical-audition-heading span,
+.physical-spectrum-heading span,
 .physical-envelope-summary {
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.physical-spectrum-heading {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+  margin: 10px 2px 5px;
+}
+
+.physical-bandwidth-audition {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  flex-wrap: wrap;
+}
+
+.physical-bandwidth-audition button {
+  min-height: 30px;
+  padding: 5px 9px;
+}
+
+.physical-bandwidth-audition span {
   color: var(--muted);
   font-size: 11px;
 }
@@ -1943,6 +1970,7 @@ summary {
 }
 
 #physicalTransferCanvas,
+#physicalStageSpectrumCanvas,
 #physicalGlottalCanvas {
   aspect-ratio: 31 / 15;
 }
