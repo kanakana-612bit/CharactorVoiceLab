@@ -1,5 +1,23 @@
 # CharacterVoiceDesigner Release Notes
 
+## Ver 0.2 Physical Model Update - 2026-09-02
+
+- Made the reduced two-mass source the default physical-preview source and added a
+  deterministic respiratory trajectory that jointly controls pressure, F0, glottal
+  closure, and amplitude. The trajectory includes attack/release, phrase declination,
+  and bounded respiratory/laryngeal modulation while remaining exactly reproducible.
+- Replaced single-memory return pressure with stable dual-time-constant supraglottal
+  loading. The inertive component is bounded separately so source-tract feedback does
+  not push the oscillator into a different vibratory regime.
+- Added center-frequency-preserving formant-bandwidth regularization. It measures the oral
+  waveguide impulse response, matches only physically detected resonances, and changes
+  their pole radii toward the selected aggregate vowel bandwidths. Bounded
+  constant-energy compensation adjusts resonance gain without replacing the
+  geometry-derived resonance frequencies.
+- Added rendered onset/release, sustained-amplitude CV, and framewise F0-variation
+  diagnostics, plus independent audition bypasses for phonation dynamics and bandwidth
+  regularization.
+
 ## Ver 0.2 Physical Model Update - 2026-08-09
 
 - Reduced the common buzzer/woodwind bias without changing vowel or consonant

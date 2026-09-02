@@ -60,9 +60,11 @@ if (!/<summary>2\.5D音響管・出力詳細<\/summary>/.test(indexHtml)) {
 }
 for (const stage of [
   "self_oscillating_source",
+  "phonation_dynamics",
   "source_spectral_shape",
   "source_tract_coupling",
   "distributed_loss",
+  "resonance_bandwidth",
   "output_conditioning",
   "higher_order_modes",
   "side_branches",
@@ -634,9 +636,11 @@ if (process.env.CVD_SOURCE_NATURALIZATION_BENCHMARK === "1") {
     .filter(Boolean));
   const auditionStages = Object.fromEntries([
     "self_oscillating_source",
+    "phonation_dynamics",
     "source_spectral_shape",
     "source_tract_coupling",
     "distributed_loss",
+    "resonance_bandwidth",
     "output_conditioning",
     "higher_order_modes",
     "side_branches",
@@ -656,13 +660,21 @@ if (process.env.CVD_SOURCE_NATURALIZATION_BENCHMARK === "1") {
   }
   if (benchmarkAudio.source_noise_model?.schema_version !== "naturalized_glottal_source_0.3"
     || benchmarkAudio.terminal_radiation_model?.schema_version !== "tube_terminal_radiation_0.3"
-    || benchmarkAudio.source_tract_interaction_model?.schema_version !== "glottal_tract_interaction_0.1"
+    || benchmarkAudio.source_tract_interaction_model?.schema_version !== "glottal_tract_interaction_0.2"
     || (!disabledStages.has("source_tract_coupling") && benchmarkAudio.source_tract_interaction_model?.enabled !== true)
     || (disabledStages.has("source_tract_coupling") && benchmarkAudio.source_tract_interaction_model?.enabled !== false)
     || benchmarkAudio.rendered_spectrum_diagnostic?.schema_version !== "rendered_voice_spectrum_0.1"
     || benchmarkAudio.rendered_spectrum_diagnostic?.available !== true
+    || benchmarkAudio.rendered_dynamics_diagnostic?.schema_version !== "rendered_voice_dynamics_0.1"
+    || benchmarkAudio.rendered_dynamics_diagnostic?.available !== true
+    || benchmarkAudio.phonation_dynamics_model?.schema_version !== "coupled_phonation_trajectory_0.1"
+    || (!disabledStages.has("phonation_dynamics") && benchmarkAudio.phonation_dynamics_model?.enabled !== true)
+    || (disabledStages.has("phonation_dynamics") && benchmarkAudio.phonation_dynamics_model?.enabled !== false)
+    || benchmarkAudio.formant_bandwidth_regularization_model?.schema_version !== "formant_bandwidth_regularization_0.1"
+    || (!disabledStages.has("resonance_bandwidth") && benchmarkAudio.formant_bandwidth_regularization_model?.enabled !== true)
+    || (disabledStages.has("resonance_bandwidth") && benchmarkAudio.formant_bandwidth_regularization_model?.enabled !== false)
     || (!disabledStages.has("self_oscillating_source")
-      && benchmarkAudio.source_noise_model?.active_model?.schema_version !== "reduced_two_mass_glottal_source_0.1")
+      && benchmarkAudio.source_noise_model?.active_model?.schema_version !== "reduced_two_mass_glottal_source_0.2")
     || (disabledStages.has("self_oscillating_source")
       && benchmarkAudio.source_noise_model?.active_model?.schema_version !== "lf_like_glottal_source_legacy_0.1")
     || benchmarkAudio.high_order_modal_correction_model?.schema_version !== "multimodal_2_5d_correction_0.1"
@@ -674,8 +686,49 @@ if (process.env.CVD_SOURCE_NATURALIZATION_BENCHMARK === "1") {
   }
   if (!disabledStages.size
     && (benchmarkAudio.rendered_spectrum_diagnostic.spectral_slope_db_per_octave < -14.5
-      || benchmarkAudio.rendered_spectrum_diagnostic.relative_band_levels_db.presence_1000_3000 < -40)) {
+      || benchmarkAudio.rendered_spectrum_diagnostic.relative_band_levels_db.presence_1000_3000 < -40
+      || Math.abs(benchmarkAudio.rendered_spectrum_diagnostic.f0_relative_error) > 0.03
+      || benchmarkAudio.rendered_spectrum_diagnostic.f0_periodicity < 0.9
+      || benchmarkAudio.rendered_dynamics_diagnostic.observed_f0_sd_hz <= 0
+      || benchmarkAudio.rendered_dynamics_diagnostic.observed_f0_sd_hz > 3
+      || benchmarkAudio.rendered_dynamics_diagnostic.sustained_rms_cv_percent <= 0.1
+      || benchmarkAudio.rendered_dynamics_diagnostic.sustained_rms_cv_percent > 6)) {
     throw new Error("The standard physical vowel remains excessively dark after source-envelope calibration");
+  }
+  const bandwidthCorrections = benchmarkAudio.formant_bandwidth_regularization_model?.corrections ?? [];
+  if (!disabledStages.has("resonance_bandwidth") && (
+    bandwidthCorrections.length < 2
+      || bandwidthCorrections.some((correction) => (
+        !Object.values(correction.coefficients ?? {}).every(Number.isFinite)
+          || Math.abs(correction.applied_bandwidth_hz - correction.aggregate_target_bandwidth_hz)
+            >= Math.abs(correction.measured_bandwidth_hz - correction.aggregate_target_bandwidth_hz)
+      ))
+  )) {
+    throw new Error("Formant-bandwidth regularization did not move measured widths toward aggregate targets");
+  }
+  const reproducibilityGlottalParams = currentGlottalSourceParams(state.constraints, 1);
+  const reproducibilityOptions = {
+    sampleCount: 4096,
+    sampleRate: 44100,
+    f0: 180,
+    pressure: 900,
+    effectiveClosure: glottalClosureProxyFromOpenQuotient(reproducibilityGlottalParams.open_quotient),
+    respiratorySupport: 1,
+    motorControlPrecision: 1,
+    glottalParams: reproducibilityGlottalParams,
+    aspirationNoiseScale: 1,
+    sourceSpectralShapeEnabled: true,
+    phonationDynamicsEnabled: true,
+    sourceTractCouplingEnabled: false,
+    sourceAttackSeconds: 0.052,
+    sourceReleaseSeconds: 0.12,
+  };
+  const deterministicSourceA = synthesizeReducedTwoMassSourceSamples(reproducibilityOptions);
+  const deterministicSourceB = synthesizeReducedTwoMassSourceSamples(reproducibilityOptions);
+  for (let index = 0; index < deterministicSourceA.length; index++) {
+    if (deterministicSourceA[index] !== deterministicSourceB[index]) {
+      throw new Error("The physical phonation trajectory is not exactly reproducible");
+    }
   }
   console.log(JSON.stringify({
     token: "a",
@@ -688,7 +741,10 @@ if (process.env.CVD_SOURCE_NATURALIZATION_BENCHMARK === "1") {
     distributed_loss_model: benchmarkAudio.distributed_loss_model,
     terminal_radiation_model: benchmarkAudio.terminal_radiation_model,
     source_tract_interaction_model: benchmarkAudio.source_tract_interaction_model,
+    phonation_dynamics_model: benchmarkAudio.phonation_dynamics_model,
+    formant_bandwidth_regularization_model: benchmarkAudio.formant_bandwidth_regularization_model,
     rendered_spectrum_diagnostic: benchmarkAudio.rendered_spectrum_diagnostic,
+    rendered_dynamics_diagnostic: benchmarkAudio.rendered_dynamics_diagnostic,
     finite: benchmarkAudio.samples.every(Number.isFinite),
     peak: benchmarkAudio.samples.reduce((peak, sample) => Math.max(peak, Math.abs(sample)), 0),
   }, null, 2));
@@ -1473,8 +1529,11 @@ if (audio.source_noise_model?.schema_version !== "naturalized_glottal_source_0.3
 if (audio.terminal_radiation_model?.schema_version !== "tube_terminal_radiation_0.3") {
   throw new Error("Missing terminal-radiation metadata");
 }
-if (audio.source_tract_interaction_model?.schema_version !== "glottal_tract_interaction_0.1"
+if (audio.source_tract_interaction_model?.schema_version !== "glottal_tract_interaction_0.2"
   || audio.rendered_spectrum_diagnostic?.schema_version !== "rendered_voice_spectrum_0.1"
+  || audio.rendered_dynamics_diagnostic?.schema_version !== "rendered_voice_dynamics_0.1"
+  || audio.phonation_dynamics_model?.schema_version !== "coupled_phonation_trajectory_0.1"
+  || audio.formant_bandwidth_regularization_model?.schema_version !== "formant_bandwidth_regularization_0.1"
   || audio.high_order_modal_correction_model?.schema_version !== "multimodal_2_5d_correction_0.1"
   || audio.distributed_loss_model?.schema_version !== "tube_distributed_loss_0.3") {
   throw new Error("Missing source-tract interaction or rendered-spectrum metadata");
