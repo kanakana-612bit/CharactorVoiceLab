@@ -8655,6 +8655,34 @@ function glottalTiltAlpha(sampleRate, tiltDb) {
   return 1 - Math.exp((-2 * Math.PI * cutoff) / sampleRate);
 }
 
+function glottalTiltCascadeMix(tiltDb) {
+  // One pole cannot reproduce the steeper high-harmonic roll-off of a human
+  // glottal-flow source. Blend in a second pole while keeping low formants open.
+  return clamp((clamp(tiltDb, 0, 36) - 4) / 22, 0.18, 0.82);
+}
+
+function tubeGlottalSourceMetadata(glottalParams, motorControlPrecision, aspirationNoiseScale = 1) {
+  return {
+    schema_version: "naturalized_glottal_source_0.2",
+    model: "LF-like volume-velocity source with deterministic cycle microvariation",
+    spectral_tilt_filter: "blended one-pole and two-pole cascade",
+    aspiration_injection: "open-phase-synchronized glottal turbulence",
+    aspiration_noise_scale: Number(clamp(aspirationNoiseScale, 0, 3).toFixed(4)),
+    cycle_variation: {
+      jitter_floor_fraction: 0.0012,
+      shimmer_floor_fraction: 0.006,
+      motor_control_scaled: true,
+      deterministic: true,
+    },
+    controls: {
+      open_quotient: Number(glottalParams.open_quotient.toFixed(5)),
+      spectral_tilt_db: Number(glottalParams.spectral_tilt_db.toFixed(4)),
+      breathiness: Number(glottalParams.breathiness.toFixed(5)),
+      motor_control_precision: Number(clamp(motorControlPrecision, 0, 1.5).toFixed(5)),
+    },
+  };
+}
+
 function sampleRateAdjustedAlpha(referenceAlpha, sampleRate) {
   const alpha = clamp(referenceAlpha, 0.000001, 1);
   return 1 - Math.pow(1 - alpha, PREVIEW_REFERENCE_SAMPLE_RATE / sampleRate);
@@ -8762,15 +8790,16 @@ function synthesizeTubeVowel(vowel = selectedVowel(), options = {}) {
     area_function: areaFunction,
     physical_resolution_model: physicalResolutionModel,
     distributed_loss_model: tubeLossModel,
+    terminal_radiation_model: tubeTerminalRadiationModel(lossParams, sampleRate, false),
     side_branch_loss_model: sideBranchLossModel,
     body_resonance_model: bodyResonanceModel,
     respiratory_drive: respiratoryProfile,
     derived_f0_hz: Number(f0.toFixed(4)),
-    source_noise_model: {
-      schema_version: "tube_source_noise_0.1",
-      aspiration_noise_scale: Number(aspirationNoiseScale.toFixed(4)),
-      injection: "tube_glottal_source",
-    },
+    source_noise_model: tubeGlottalSourceMetadata(
+      glottalParams,
+      motorProfile.motor_control_precision,
+      aspirationNoiseScale
+    ),
   };
 }
 
@@ -9223,8 +9252,13 @@ function synthesizeTubeSourceSamples(options) {
   const sourceReleaseSeconds = Math.max(0, options.sourceReleaseSeconds ?? (0.1 + respiratorySupport * 0.05));
   const sampleRateNoiseScale = Math.sqrt(PREVIEW_REFERENCE_SAMPLE_RATE / sampleRate);
   const tiltAlpha = glottalTiltAlpha(sampleRate, glottalParams.spectral_tilt_db);
+  const tiltCascadeMix = glottalTiltCascadeMix(glottalParams.spectral_tilt_db);
   const glottalSourceState = { lastRawFlow: 0, smoothedFlow: 0, lastSmoothedFlow: 0 };
   let glottalTiltState = 0;
+  let glottalTiltState2 = 0;
+  let aspirationNoiseMemory = 0;
+  let cycleJitter = 0;
+  let cycleShimmer = 0;
   let phase = 0;
   let seed = 1;
 
@@ -9233,13 +9267,35 @@ function synthesizeTubeSourceSamples(options) {
     const attackEnvelope = sourceAttackSeconds > 0 ? t / sourceAttackSeconds : 1;
     const releaseEnvelope = sourceReleaseSeconds > 0 ? (sampleCount / sampleRate - t) / sourceReleaseSeconds : 1;
     const env = clamp(Math.min(1, attackEnvelope, releaseEnvelope), 0, 1);
-    const instability = Math.max(0, 1 - precision) * 0.006;
-    const jitterFraction = Math.sin(Math.PI * 2 * t * (4.1 + tension * 1.7)) * instability;
-    phase += ((options.f0 ?? 165) * (1 + jitterFraction)) / sampleRate;
+    const previousPhase = phase;
+    const motorInstability = Math.max(0, 1 - precision);
+    const slowJitter = Math.sin(Math.PI * 2 * t * (4.1 + tension * 1.7)) * motorInstability * 0.004;
+    phase += ((options.f0 ?? 165) * (1 + slowJitter + cycleJitter)) / sampleRate;
     phase -= Math.floor(phase);
+    const cycleWrapped = phase < previousPhase;
+    if (cycleWrapped) {
+      seed = (seed * 1664525 + 1013904223) >>> 0;
+      const cycleNoise = (seed / 0xffffffff) * 2 - 1;
+      seed = (seed * 1664525 + 1013904223) >>> 0;
+      const amplitudeNoise = (seed / 0xffffffff) * 2 - 1;
+      const jitterDepth = 0.0012 + motorInstability * 0.0065;
+      const shimmerDepth = 0.006 + motorInstability * 0.026;
+      cycleJitter += 0.42 * (cycleNoise * jitterDepth - cycleJitter);
+      cycleShimmer += 0.38 * (amplitudeNoise * shimmerDepth - cycleShimmer);
+    }
     const glottalFlow = lfLikeGlottalFlow(phase, glottalParams);
     seed = (seed * 1664525 + 1013904223) >>> 0;
-    const noise = ((seed / 0xffffffff) * 2 - 1)
+    const whiteNoise = (seed / 0xffffffff) * 2 - 1;
+    aspirationNoiseMemory += 0.24 * (whiteNoise - aspirationNoiseMemory);
+    const openPhase = phase < glottalParams.open_quotient
+      ? phase / Math.max(0.0001, glottalParams.open_quotient)
+      : 1;
+    const openGate = phase < glottalParams.open_quotient
+      ? Math.pow(Math.sin(Math.PI * openPhase), 0.7)
+      : 0;
+    const aspirationNoise = (whiteNoise * 0.72 + aspirationNoiseMemory * 0.28)
+      * (0.14 + openGate * 0.86);
+    const noise = aspirationNoise
       * (glottalParams.breathiness + (1 - effectiveClosure) * 0.04)
       * sampleRateNoiseScale
       * aspirationNoiseScale;
@@ -9248,7 +9304,7 @@ function synthesizeTubeSourceSamples(options) {
       ((options.pressure ?? 900) / 900) * (0.86 + respiratorySupport * 0.14)
     );
     const sourceSample = glottalVolumeVelocitySample(
-      glottalFlow,
+      glottalFlow * (1 + cycleShimmer),
       glottalSourceState,
       glottalParams,
       effectiveClosure,
@@ -9257,7 +9313,9 @@ function synthesizeTubeSourceSamples(options) {
       { sampleRate }
     );
     glottalTiltState += tiltAlpha * (sourceSample - glottalTiltState);
-    out[sampleIndex] = glottalTiltState * env * pressureDrive * 0.145;
+    glottalTiltState2 += tiltAlpha * (glottalTiltState - glottalTiltState2);
+    const tiltedSource = glottalTiltState * (1 - tiltCascadeMix) + glottalTiltState2 * tiltCascadeMix;
+    out[sampleIndex] = tiltedSource * env * pressureDrive * 0.145;
   }
   return out;
 }
@@ -9789,9 +9847,10 @@ function synthesizeKellyLochbaumTubeCore(areas, options) {
   let lastMouthFlow = 0;
   let lastOutput = 0;
   let radiationSmoothState = 0;
-  const radiationAlpha = sampleRateAdjustedAlpha(clamp(1 - lossParams.lip_radiation_smoothing, 0.08, 1), sampleRate);
-  const radiationMemory = sampleRateAdjustedPole(clamp(0.985 - lossParams.high_frequency_damping * 0.12, 0.82, 0.99), sampleRate);
-  const outputMemory = sampleRateAdjustedPole(clamp(0.12 + lossParams.high_frequency_damping * 0.12, 0.08, 0.28), sampleRate);
+  const radiationModel = tubeTerminalRadiationModel(lossParams, sampleRate, false);
+  const radiationAlpha = radiationModel.flow_smoothing_alpha;
+  const radiationMemory = radiationModel.differentiator_memory;
+  const outputMemory = radiationModel.output_memory;
   const sourceSamples = options.sourceSamples?.length >= sampleCount
     ? options.sourceSamples
     : synthesizeTubeSourceSamples(options);
@@ -10109,10 +10168,12 @@ function synthesizeBranchedNasalOralTubeCore(oralAreas, nasalAreas, options) {
   const sourceSamples = options.sourceSamples?.length >= sampleCount
     ? options.sourceSamples
     : synthesizeTubeSourceSamples(options);
-  const radiationAlpha = sampleRateAdjustedAlpha(clamp(1 - lossParams.lip_radiation_smoothing, 0.08, 1), sampleRate);
-  const oralRadiationMemory = sampleRateAdjustedPole(clamp(0.985 - lossParams.high_frequency_damping * 0.12, 0.82, 0.99), sampleRate);
-  const nasalRadiationMemory = sampleRateAdjustedPole(clamp(0.988 - lossParams.high_frequency_damping * 0.1, 0.84, 0.992), sampleRate);
-  const outputMemory = sampleRateAdjustedPole(clamp(0.12 + lossParams.high_frequency_damping * 0.12, 0.08, 0.28), sampleRate);
+  const oralRadiationModel = tubeTerminalRadiationModel(lossParams, sampleRate, false);
+  const nasalRadiationModel = tubeTerminalRadiationModel(lossParams, sampleRate, true);
+  const radiationAlpha = oralRadiationModel.flow_smoothing_alpha;
+  const oralRadiationMemory = oralRadiationModel.differentiator_memory;
+  const nasalRadiationMemory = nasalRadiationModel.differentiator_memory;
+  const outputMemory = oralRadiationModel.output_memory;
   let oralFlowState = 0;
   let nasalFlowState = 0;
   let previousOralFlow = 0;
@@ -10657,10 +10718,12 @@ function synthesizeCoronalMultiChannelNasalOralTubeCore(oralAreas, nasalAreas, o
   const out = new Float32Array(sampleCount);
   const oralRadiation = new Float32Array(sampleCount);
   const nasalRadiation = new Float32Array(sampleCount);
-  const radiationAlpha = sampleRateAdjustedAlpha(clamp(1 - lossParams.lip_radiation_smoothing, 0.08, 1), sampleRate);
-  const oralRadiationMemory = sampleRateAdjustedPole(clamp(0.985 - lossParams.high_frequency_damping * 0.12, 0.82, 0.99), sampleRate);
-  const nasalRadiationMemory = sampleRateAdjustedPole(clamp(0.988 - lossParams.high_frequency_damping * 0.1, 0.84, 0.992), sampleRate);
-  const outputMemory = sampleRateAdjustedPole(clamp(0.12 + lossParams.high_frequency_damping * 0.12, 0.08, 0.28), sampleRate);
+  const oralRadiationModel = tubeTerminalRadiationModel(lossParams, sampleRate, false);
+  const nasalRadiationModel = tubeTerminalRadiationModel(lossParams, sampleRate, true);
+  const radiationAlpha = oralRadiationModel.flow_smoothing_alpha;
+  const oralRadiationMemory = oralRadiationModel.differentiator_memory;
+  const nasalRadiationMemory = nasalRadiationModel.differentiator_memory;
+  const outputMemory = oralRadiationModel.output_memory;
   const outputAmplitude = options.amplitude ?? 0.9;
   let oralFlowState = 0;
   let nasalFlowState = 0;
@@ -10786,10 +10849,16 @@ function buildTubeDistributedLossModel(lossParams, sampleRate, tubeCount) {
   const referenceLengthCm = 15.5;
   const referenceSectionLengthCm = 35000 / PREVIEW_REFERENCE_SAMPLE_RATE;
   const sectionLengthScale = sectionLengthCm / referenceSectionLengthCm;
+  const wallLoss = clamp(lossParams.wall_loss ?? 0, 0, 1);
+  const viscothermalLoss = clamp(lossParams.viscothermal_loss ?? 0, 0, 1);
+  const resonanceBroadening = clamp(lossParams.resonance_broadening ?? 0, 0, 1);
+  const highFrequencyDamping = clamp(lossParams.high_frequency_damping ?? 0, 0, 1);
+  const wallCompliance = clamp(lossParams.wall_compliance ?? 0, 0, 1);
   const oneWayLossNpAtReference =
-    lossParams.wall_loss * 0.9
-    + lossParams.viscothermal_loss * 1.25
-    + lossParams.resonance_broadening * 0.065;
+    wallLoss * 0.9
+    + viscothermalLoss * 1.25
+    + resonanceBroadening * 0.16
+    + highFrequencyDamping * 0.045;
   const oneWayLossNp = oneWayLossNpAtReference * (tractLengthCm / referenceLengthCm);
   const perSectionGain = Math.exp(-oneWayLossNp / count);
   return {
@@ -10799,13 +10868,42 @@ function buildTubeDistributedLossModel(lossParams, sampleRate, tubeCount) {
     per_section_gain: perSectionGain,
     one_way_loss_db: Number((-8.685889638 * oneWayLossNp).toFixed(4)),
     round_trip_distributed_loss_db: Number((-17.371779276 * oneWayLossNp).toFixed(4)),
-    discontinuity_loss_scale: clamp(lossParams.viscothermal_loss * 0.035 * sectionLengthScale, 0, 0.012),
-    wall_memory_mix: clamp(lossParams.wall_compliance * 0.018 * sectionLengthScale, 0, 0.018),
+    discontinuity_loss_scale: clamp(viscothermalLoss * 0.035 * sectionLengthScale, 0, 0.012),
+    wall_memory_mix: clamp(
+      (
+        wallCompliance * 0.018
+        + resonanceBroadening * 0.018
+        + highFrequencyDamping * 0.01
+      ) * sectionLengthScale,
+      0,
+      0.045
+    ),
     wall_memory_relaxation: sampleRateAdjustedAlpha(
-      clamp(0.08 + lossParams.wall_compliance * 0.2 + lossParams.viscothermal_loss * 0.4, 0.06, 0.28),
+      clamp(0.08 + wallCompliance * 0.2 + viscothermalLoss * 0.4, 0.06, 0.28),
       sampleRate
     ),
-    basis: "length-normalized distributed loss; controls are no longer reapplied as full loss at every tube section",
+    basis: "length-normalized, frequency-dependent distributed loss; wall compliance, resonance broadening, and high-frequency damping shape section memory",
+  };
+}
+
+function tubeTerminalRadiationModel(lossParams, sampleRate, nasal = false) {
+  const highDamping = clamp(lossParams.high_frequency_damping ?? 0, 0, 1);
+  const broadening = clamp(lossParams.resonance_broadening ?? 0, 0, 1);
+  const smoothing = clamp(lossParams.lip_radiation_smoothing ?? 0, 0, 1);
+  const referenceDifferentiatorPole = clamp(
+    (nasal ? 0.955 : 0.945) - highDamping * 0.1 - broadening * 0.035,
+    nasal ? 0.8 : 0.76,
+    nasal ? 0.965 : 0.955
+  );
+  return {
+    schema_version: "tube_terminal_radiation_0.2",
+    flow_smoothing_alpha: sampleRateAdjustedAlpha(clamp(1 - smoothing, 0.08, 1), sampleRate),
+    differentiator_memory: sampleRateAdjustedPole(referenceDifferentiatorPole, sampleRate),
+    output_memory: sampleRateAdjustedPole(
+      clamp(0.1 + highDamping * 0.09 + broadening * 0.035, 0.08, 0.24),
+      sampleRate
+    ),
+    role: nasal ? "nostril volume-velocity radiation" : "lip volume-velocity radiation",
   };
 }
 
@@ -10961,12 +11059,21 @@ function applyWallComplianceToTubeState(
 function applyTubeOutputConditioning(samples, sampleRate, lossParams) {
   const wallCompliance = clamp(lossParams.wall_compliance ?? 0, 0, 1);
   const highDamping = clamp(lossParams.high_frequency_damping ?? 0, 0, 1);
-  const smoothingMix = clamp(highDamping * 0.08 + wallCompliance * 0.025, 0, 0.18);
+  const broadening = clamp(lossParams.resonance_broadening ?? 0, 0, 1);
+  const smoothingMix = clamp(
+    highDamping * 0.13 + wallCompliance * 0.04 + broadening * 0.08,
+    0,
+    0.22
+  );
   if (smoothingMix > 0.001) {
-    const cutoff = clamp(9000 - highDamping * 3500 - wallCompliance * 900, 4800, 9200);
+    const cutoff = clamp(
+      7800 - highDamping * 2800 - wallCompliance * 900 - broadening * 1800,
+      4200,
+      8200
+    );
     applyOnePoleLowpassBlend(samples, sampleRate, cutoff, smoothingMix);
   }
-  const warmthMix = clamp(wallCompliance * 0.018, 0, 0.025);
+  const warmthMix = clamp(wallCompliance * 0.018 + broadening * 0.008, 0, 0.035);
   if (warmthMix > 0.001) {
     applyOnePoleLowpassBlend(samples, sampleRate, 1450, warmthMix);
   }
@@ -12278,6 +12385,11 @@ function synthesizeCoupledNasalSyllable(context) {
       generated_by: coupled.topology.schema_version,
       explicit_nasal_pole_zero_filter: false,
       oral_side_antiresonance_generated_by_closed_branch: true,
+    },
+    glottal_source_model: vowelAudio.source_noise_model,
+    terminal_radiation_model: {
+      oral: tubeTerminalRadiationModel(oralReleaseOptions.lossParams, sampleRate, false),
+      nasal: tubeTerminalRadiationModel(oralReleaseOptions.lossParams, sampleRate, true),
     },
     cross_section_loss_model: {
       schema_version: "hydraulic_cross_section_loss_0.1",

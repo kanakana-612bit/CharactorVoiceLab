@@ -562,6 +562,56 @@ if (calibrationExport.vowel_width_tuning?.control_points?.i?.find((point) => poi
 }
 state.vowelWidthTuning = {};
 state.auditoryEvaluationLog = [];
+if (process.env.CVD_SOURCE_NATURALIZATION_BENCHMARK === "1") {
+  global.CVD_PHYSICAL_TUBE_OVERSAMPLING = Number(process.env.CVD_SOURCE_BENCHMARK_OVERSAMPLING) || 2;
+  const sourceParameters = currentGlottalSourceParams(state.constraints, 1);
+  sourceParameters.breathiness = 0;
+  const sourceSamples = synthesizeTubeSourceSamples({
+    sampleCount: 4410,
+    sampleRate: 44100,
+    f0: 210,
+    effectiveClosure: 1,
+    respiratorySupport: 1,
+    pressure: 900,
+    motorControlPrecision: 1,
+    glottalParams: sourceParameters,
+    aspirationNoiseScale: 0,
+    sourceAttackSeconds: 0,
+    sourceReleaseSeconds: 0,
+  });
+  const exactPeriodSamples = 210;
+  let cycleDifference = 0;
+  let comparisonCount = 0;
+  for (let index = exactPeriodSamples * 3; index < sourceSamples.length; index++) {
+    cycleDifference += Math.abs(sourceSamples[index] - sourceSamples[index - exactPeriodSamples]);
+    comparisonCount += 1;
+  }
+  cycleDifference /= Math.max(1, comparisonCount);
+  if (cycleDifference < 0.00001) {
+    throw new Error("The naturalized glottal source remains exactly periodic");
+  }
+  const startedAt = performance.now();
+  const benchmarkAudio = synthesizeVowel("a");
+  if (benchmarkAudio.source_noise_model?.schema_version !== "naturalized_glottal_source_0.2"
+    || benchmarkAudio.terminal_radiation_model?.schema_version !== "tube_terminal_radiation_0.2"
+    || benchmarkAudio.distributed_loss_model?.wall_memory_mix <= 0
+    || !benchmarkAudio.samples.every(Number.isFinite)) {
+    throw new Error("The representative vowel did not use the naturalized source/loss/radiation path");
+  }
+  console.log(JSON.stringify({
+    token: "a",
+    elapsed_ms: Number((performance.now() - startedAt).toFixed(2)),
+    sample_count: benchmarkAudio.samples.length,
+    output_sample_rate_hz: benchmarkAudio.sampleRate,
+    cycle_difference: Number(cycleDifference.toFixed(8)),
+    glottal_source_model: benchmarkAudio.source_noise_model,
+    distributed_loss_model: benchmarkAudio.distributed_loss_model,
+    terminal_radiation_model: benchmarkAudio.terminal_radiation_model,
+    finite: benchmarkAudio.samples.every(Number.isFinite),
+    peak: benchmarkAudio.samples.reduce((peak, sample) => Math.max(peak, Math.abs(sample)), 0),
+  }, null, 2));
+  process.exit(0);
+}
 const ka = synthesizeSyllable("ka");
 const aOnly = synthesizeSyllable("a");
 if (ka.samples.length <= aOnly.samples.length || ka.onset_model?.consonant !== "k" || ka.vowel !== "a") {
@@ -1333,6 +1383,13 @@ if (audio.area_function?.phonetic_target_profile?.id !== "ja_JP_standard_neutral
 const expectedTubeCount = Math.round((15.5 * audio.sampleRate) / 35000);
 if (audio.area_function.tube_count !== expectedTubeCount) throw new Error("Tube discretization does not match L * sampleRate / soundSpeed");
 if (!audio.distributed_loss_model) throw new Error("Missing length-normalized distributed-loss metadata");
+if (audio.source_noise_model?.schema_version !== "naturalized_glottal_source_0.2"
+  || audio.source_noise_model?.aspiration_injection !== "open-phase-synchronized glottal turbulence") {
+  throw new Error("Missing naturalized glottal-source metadata");
+}
+if (audio.terminal_radiation_model?.schema_version !== "tube_terminal_radiation_0.2") {
+  throw new Error("Missing terminal-radiation metadata");
+}
 if (audio.distributed_loss_model.round_trip_distributed_loss_db <= -3 || audio.distributed_loss_model.round_trip_distributed_loss_db >= 0) {
   throw new Error("Default distributed loss is outside the intended lightweight human-voice range");
 }

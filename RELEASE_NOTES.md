@@ -2,6 +2,12 @@
 
 ## Ver 0.2 Physical Model Update - 2026-08-09
 
+- Reduced the common buzzer/woodwind bias without changing vowel or consonant
+  geometry: the shared LF-like source now includes deterministic cycle jitter and
+  shimmer, open-phase aspiration, and a blended two-pole spectral tilt. Distributed
+  wall memory now responds to broadening/high-frequency damping, and softened
+  lip/nostril radiation avoids excessive harmonic differentiation. The selected
+  source, loss, and terminal-radiation models are exported as engineering metadata.
 - Added a documented smooth inverse-design seed and a character-specific,
   regularized phonetic-target area controller for Japanese `/a/`.
 - Restored four detectable `/a/` resonances and added target-versus-measured
