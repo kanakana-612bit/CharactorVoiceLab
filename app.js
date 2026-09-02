@@ -280,6 +280,7 @@ const els = {
   dataSourceInput: document.getElementById("dataSourceInput"),
   playSampleButton: document.getElementById("playSampleButton"),
   floatingPreviewDock: document.getElementById("floatingPreviewDock"),
+  floatingPhonemeSelect: document.querySelector(".floating-phoneme-select"),
   tabButtons: Array.from(document.querySelectorAll(".tab-button")),
   tabPanels: Array.from(document.querySelectorAll(".tab-panel")),
   bodyImageInput: document.getElementById("bodyImageInput"),
@@ -7773,7 +7774,13 @@ function setActiveTab(tabId) {
     panel.hidden = !active;
   }
   if (els.floatingPreviewDock) {
-    els.floatingPreviewDock.hidden = !["detailTab", "physicalModelTab", "vowelTab"].includes(tabId);
+    const isConsonantPreview = tabId === "consonantTab";
+    els.floatingPreviewDock.hidden = !["detailTab", "physicalModelTab", "vowelTab", "consonantTab"].includes(tabId);
+    els.floatingPreviewDock.classList.toggle("consonant-preview", isConsonantPreview);
+    if (els.floatingPhonemeSelect) els.floatingPhonemeSelect.hidden = isConsonantPreview;
+    if (els.playSampleButton) {
+      els.playSampleButton.textContent = isConsonantPreview ? "▶ 選択した子音を再生" : "▶ サンプル再生";
+    }
   }
   if (tabId === "ttsModelTab" || tabId === "outputTab") {
     renderVoiceDesignerControls();
@@ -10720,7 +10727,7 @@ function synthesizeBranchedNasalOralTubeCore(oralAreas, nasalAreas, options) {
 
   const glottalReflection = clamp(0.64 + options.effectiveClosure * 0.3, 0.52, 0.96);
   const sourceTractInteraction = tubeSourceTractCouplingModel(options, sampleRate);
-  const sourceTractState = { returnPressure: 0, previousReturnPressure: 0 };
+  const sourceTractState = { returnPressureFast: 0, returnPressureSlow: 0 };
   const lossParams = options.lossParams ?? currentTubeLossParams({});
   const distributedLossEnabled = options.distributedLossEnabled !== false;
   const oralLossModel = options.lossModel ?? buildTubeDistributedLossModel(
@@ -11343,7 +11350,7 @@ function synthesizeCoronalMultiChannelNasalOralTubeCore(oralAreas, nasalAreas, o
   updateGeometry(0);
   const glottalReflection = clamp(0.64 + options.effectiveClosure * 0.3, 0.52, 0.96);
   const sourceTractInteraction = tubeSourceTractCouplingModel(options, sampleRate);
-  const sourceTractState = { returnPressure: 0, previousReturnPressure: 0 };
+  const sourceTractState = { returnPressureFast: 0, returnPressureSlow: 0 };
   const nasalRadiationScale = clamp(options.nasalRadiationScale ?? 0.3, 0.08, 0.72);
   const sourceSamples = options.sourceSamples?.length >= sampleCount
     ? options.sourceSamples
@@ -12576,6 +12583,14 @@ async function playVowel() {
   }
   state.lastWav = encodeWav(audio.samples, audio.sampleRate);
   await playAudioSamples(audio.samples, audio.sampleRate);
+}
+
+async function playActivePhonemePreview() {
+  if (state.activeTab === "consonantTab") {
+    await playNasalCalibrationVariant(true);
+    return;
+  }
+  await playVowel();
 }
 
 function physicalBandwidthAuditionAudio() {
@@ -14561,7 +14576,7 @@ function init() {
   }
   els.analyzeBtn.addEventListener("click", runBasicAnalysis);
   els.recalculateBtn?.addEventListener("click", runDetailRecalculation);
-  els.playSampleButton.addEventListener("click", playVowel);
+  els.playSampleButton.addEventListener("click", playActivePhonemePreview);
   els.physicalPlayFullBandBtn?.addEventListener("click", () => playPhysicalBandwidthVariant());
   els.physicalPlayLowBandBtn?.addEventListener("click", () => playPhysicalBandwidthVariant(4500));
   els.vowelSelect.addEventListener("input", () => {

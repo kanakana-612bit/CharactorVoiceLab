@@ -157,6 +157,11 @@ button.primary:hover {
   display: none;
 }
 
+.floating-action-dock.consonant-preview {
+  grid-template-columns: 1fr;
+  width: 220px;
+}
+
 .floating-action-dock button {
   width: 100%;
   min-height: 44px;
@@ -167,6 +172,10 @@ button.primary:hover {
   gap: 3px;
   color: var(--muted);
   font-size: 11px;
+}
+
+.floating-phoneme-select[hidden] {
+  display: none;
 }
 
 .floating-phoneme-select select {

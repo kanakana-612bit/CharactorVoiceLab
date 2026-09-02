@@ -49,8 +49,13 @@ if (!/drawTractProfileCanvas\(els\.physicalAreaCanvas, geometry, "physical", fal
   throw new Error("The physical A(x) canvas does not share the existing manual tuning state");
 }
 
-if (!/\["detailTab", "physicalModelTab", "vowelTab"\]/.test(app)) {
-  throw new Error("The sample preview dock is not available in the physical workspace");
+if (!/\["detailTab", "physicalModelTab", "vowelTab", "consonantTab"\]/.test(app)) {
+  throw new Error("The sample preview dock is not available in every acoustic workspace");
+}
+
+if (!/function playActivePhonemePreview\(\)[\s\S]*state\.activeTab === "consonantTab"[\s\S]*playNasalCalibrationVariant\(true\)[\s\S]*playVowel\(\)/.test(app)
+  || !/playSampleButton\.addEventListener\("click", playActivePhonemePreview\)/.test(app)) {
+  throw new Error("The shared sample button does not dispatch consonant and vowel previews correctly");
 }
 
 if (!/#physicalModelTab\s*\{[\s\S]*grid-template-columns/.test(css)

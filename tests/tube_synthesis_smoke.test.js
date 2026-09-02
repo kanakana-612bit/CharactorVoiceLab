@@ -764,6 +764,10 @@ if (process.env.CVD_NASAL_HIGH_RES_BENCHMARK === "1") {
   const vowelElapsedMs = performance.now() - vowelStartedAt;
   const startedAt = performance.now();
   const benchmarkAudio = synthesizeSyllable(benchmarkToken);
+  const firstNonFiniteSample = benchmarkAudio.samples.findIndex((sample) => !Number.isFinite(sample));
+  if (firstNonFiniteSample >= 0) {
+    throw new Error("Representative nasal preview became non-finite at sample " + firstNonFiniteSample);
+  }
   if (benchmarkToken.startsWith("n")) {
     const topology = benchmarkAudio.nasal_model?.acoustic_topology;
     const placeCue = benchmarkAudio.nasal_model?.place_cue_model;
@@ -794,7 +798,7 @@ if (process.env.CVD_NASAL_HIGH_RES_BENCHMARK === "1") {
     acoustic_topology: benchmarkAudio.nasal_model.acoustic_topology,
     place_cue_model: benchmarkAudio.nasal_model.place_cue_model,
     stage_timing: benchmarkAudio.nasal_model.performance_timing,
-    finite: benchmarkAudio.samples.every(Number.isFinite),
+    finite: firstNonFiniteSample < 0,
     peak: benchmarkAudio.samples.reduce((peak, sample) => Math.max(peak, Math.abs(sample)), 0),
   }, null, 2));
   process.exit(0);
