@@ -8,6 +8,13 @@
   wall memory now responds to broadening/high-frequency damping, and softened
   lip/nostril radiation avoids excessive harmonic differentiation. The selected
   source, loss, and terminal-radiation models are exported as engineering metadata.
+- Replaced the nearly zero-slope glottal closing flank with finite-slope closure,
+  restoring upper-harmonic excitation while preserving F0 and tract geometry. Added
+  bounded return-pressure modulation at the glottal boundary, reduced duplicated
+  post-waveguide damping, and exposed audition-only stage bypasses for source shaping,
+  source-tract coupling, distributed loss, output conditioning, side branches, and
+  body resonance. The physical screen now reports rendered H1-H2, harmonic slope,
+  and F1 bandwidth after each preview.
 - Added a documented smooth inverse-design seed and a character-specific,
   regularized phonetic-target area controller for Japanese `/a/`.
 - Restored four detectable `/a/` resonances and added target-versus-measured

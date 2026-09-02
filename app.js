@@ -73,6 +73,15 @@ const state = {
   selectedTractTuningHandle: null,
   physicalAreaTuningPlot: null,
   physicalTransferCache: null,
+  physicalAuditionStages: {
+    source_spectral_shape: true,
+    source_tract_coupling: true,
+    distributed_loss: true,
+    output_conditioning: true,
+    side_branches: true,
+    body_resonance: true,
+  },
+  lastPhysicalSynthesisDiagnostic: null,
   phoneticAreaCalibrationCache: new Map(),
   selectedSyllableToken: "a",
   auditoryEvaluationLog: [],
@@ -354,6 +363,8 @@ const els = {
   physicalSpeedQuotientValue: document.getElementById("physicalSpeedQuotientValue"),
   physicalTargetProfileValue: document.getElementById("physicalTargetProfileValue"),
   physicalResonanceSummary: document.getElementById("physicalResonanceSummary"),
+  physicalEnvelopeSummary: document.getElementById("physicalEnvelopeSummary"),
+  physicalAuditionStageInputs: Array.from(document.querySelectorAll("[data-physical-audition-stage]")),
   physicalTractEditStatus: document.getElementById("physicalTractEditStatus"),
   physicalEditAreaModeBtn: document.getElementById("physicalEditAreaModeBtn"),
   physicalEditWidthModeBtn: document.getElementById("physicalEditWidthModeBtn"),
@@ -2480,6 +2491,18 @@ function renderPhysicalModelReadouts(geometry, areaFunction, transfer) {
         return `R${index + 1} ${Math.round(peak.frequency_hz)} Hz${error === null ? "" : ` (${error >= 0 ? "+" : ""}${error}%)`}`;
       }).join(" · ")
       : "明瞭な共鳴ピークなし";
+  }
+  if (els.physicalEnvelopeSummary) {
+    const observation = state.lastPhysicalSynthesisDiagnostic;
+    const diagnostic = observation?.vowel === vowel ? observation.rendered_spectrum_diagnostic : null;
+    const f1Bandwidth = transferPeaks[0]?.bandwidth_3db_hz;
+    els.physicalEnvelopeSummary.textContent = diagnostic?.available
+      ? [
+        `H1-H2 ${diagnostic.h1_h2_db.toFixed(1)} dB`,
+        `高域傾斜 ${diagnostic.spectral_slope_db_per_octave?.toFixed(1) ?? "-"} dB/oct`,
+        `F1幅 ${Number.isFinite(f1Bandwidth) ? `${Math.round(f1Bandwidth)} Hz` : "-"}`,
+      ].join(" · ")
+      : "再生後に倍音包絡を表示します。";
   }
 }
 
@@ -8644,7 +8667,10 @@ function lfLikeGlottalFlow(phase, params) {
   }
   if (phase < oq) {
     const x = (phase - riseEnd) / Math.max(0.0001, oq - riseEnd);
-    return Math.pow(Math.cos((Math.PI * x) / 2), 2.2);
+    // Preserve a finite closing-flank slope. The previous squared cosine
+    // approached zero with almost no closure excitation and starved the tract
+    // of upper harmonics even when its resonances were correctly positioned.
+    return Math.max(0, Math.cos((Math.PI * x) / 2));
   }
   const x = (phase - oq) / returnPhase;
   return -0.035 * Math.exp(-7 * x);
@@ -8657,13 +8683,14 @@ function glottalTiltAlpha(sampleRate, tiltDb) {
 
 function glottalTiltCascadeMix(tiltDb) {
   // One pole cannot reproduce the steeper high-harmonic roll-off of a human
-  // glottal-flow source. Blend in a second pole while keeping low formants open.
-  return clamp((clamp(tiltDb, 0, 36) - 4) / 22, 0.18, 0.82);
+  // glottal-flow source. Keep the cascade restrained because flow smoothing and
+  // lip radiation already shape the emitted harmonic envelope.
+  return clamp((clamp(tiltDb, 0, 36) - 6) / 30, 0.04, 0.3);
 }
 
 function tubeGlottalSourceMetadata(glottalParams, motorControlPrecision, aspirationNoiseScale = 1) {
   return {
-    schema_version: "naturalized_glottal_source_0.2",
+    schema_version: "naturalized_glottal_source_0.3",
     model: "LF-like volume-velocity source with deterministic cycle microvariation",
     spectral_tilt_filter: "blended one-pole and two-pole cascade",
     aspiration_injection: "open-phase-synchronized glottal turbulence",
@@ -8681,6 +8708,67 @@ function tubeGlottalSourceMetadata(glottalParams, motorControlPrecision, aspirat
       motor_control_precision: Number(clamp(motorControlPrecision, 0, 1.5).toFixed(5)),
     },
   };
+}
+
+const PHYSICAL_AUDITION_STAGE_KEYS = [
+  "source_spectral_shape",
+  "source_tract_coupling",
+  "distributed_loss",
+  "output_conditioning",
+  "side_branches",
+  "body_resonance",
+];
+
+function normalizedPhysicalAuditionStages(stages = null) {
+  return Object.fromEntries(PHYSICAL_AUDITION_STAGE_KEYS.map((key) => [
+    key,
+    stages?.[key] !== false,
+  ]));
+}
+
+function physicalAuditionStagesFromUi() {
+  const stages = normalizedPhysicalAuditionStages(state.physicalAuditionStages);
+  for (const input of els.physicalAuditionStageInputs ?? []) {
+    if (PHYSICAL_AUDITION_STAGE_KEYS.includes(input.dataset.physicalAuditionStage)) {
+      stages[input.dataset.physicalAuditionStage] = input.checked;
+    }
+  }
+  return stages;
+}
+
+function tubeSourceTractCouplingModel(options, sampleRate) {
+  const closure = clamp(options.effectiveClosure ?? 0.55, 0, 1);
+  const enabled = options.sourceMode !== "impulse" && options.sourceTractCouplingEnabled !== false;
+  return {
+    schema_version: "glottal_tract_interaction_0.1",
+    enabled,
+    feedback_strength: enabled
+      ? clamp(options.sourceTractCouplingStrength ?? (0.09 + closure * 0.09), 0, 0.32)
+      : 0,
+    return_pressure_alpha: sampleRateAdjustedAlpha(0.1, sampleRate),
+    inertive_feedback_scale: enabled ? 0.085 : 0,
+    model: "bounded return-pressure modulation of glottal volume velocity",
+  };
+}
+
+function sourceTractCoupledInjection(source, returnWave, reflection, state, model) {
+  if (!model.enabled) return source + reflection * returnWave;
+  state.returnPressure += model.return_pressure_alpha * (returnWave - state.returnPressure);
+  const normalizedPressure = Math.tanh(state.returnPressure * 4.5);
+  const sourcePresence = clamp(Math.abs(source) / 0.075, 0, 1);
+  const flowModulation = clamp(
+    1 - model.feedback_strength * normalizedPressure * sourcePresence,
+    0.72,
+    1.24
+  );
+  const pressureVelocity = state.previousReturnPressure - state.returnPressure;
+  state.previousReturnPressure = state.returnPressure;
+  const inertiveFeedback = clamp(
+    pressureVelocity * model.inertive_feedback_scale * sourcePresence,
+    -0.025,
+    0.025
+  );
+  return source * flowModulation + inertiveFeedback + reflection * returnWave;
 }
 
 function sampleRateAdjustedAlpha(referenceAlpha, sampleRate) {
@@ -8754,8 +8842,14 @@ function synthesizeTubeVowel(vowel = selectedVowel(), options = {}) {
   const glottalParams = currentGlottalSourceParams(constraints, tension);
   const effectiveClosure = glottalClosureProxyFromOpenQuotient(glottalParams.open_quotient);
   const aspirationNoiseScale = 1;
+  const auditionStages = normalizedPhysicalAuditionStages(options.auditionStages);
   const lossParams = currentTubeLossParams(constraints);
-  const tubeLossModel = buildTubeDistributedLossModel(lossParams, sampleRate, areaFunction.areas_cm2.length);
+  const tubeLossModel = buildTubeDistributedLossModel(
+    lossParams,
+    sampleRate,
+    areaFunction.areas_cm2.length,
+    auditionStages.distributed_loss
+  );
   const physicalResolutionModel = physicalTubeResolutionModel(
     physicalTubeOversamplingFactor(),
     sampleRate,
@@ -8773,14 +8867,23 @@ function synthesizeTubeVowel(vowel = selectedVowel(), options = {}) {
     motorControlPrecision: motorProfile.motor_control_precision,
     glottalParams,
     aspirationNoiseScale,
+    sourceSpectralShapeEnabled: auditionStages.source_spectral_shape,
+    sourceTractCouplingEnabled: auditionStages.source_tract_coupling,
+    distributedLossEnabled: auditionStages.distributed_loss,
+    outputConditioningEnabled: auditionStages.output_conditioning,
     lossParams,
     lossModel: tubeLossModel,
     hydraulicDiametersCm: hydraulicDiametersFromAreaFunction(areaFunction),
     hydraulicLossScales: hydraulicLossScalesFromAreaFunction(areaFunction),
   });
-  const sideBranchLossModel = applySideBranchLosses(out, sampleRate, constraints, vowel, geometry, areaFunction, { strength: 1 });
-  const bodyResonanceModel = applyBodyResonance(out, sampleRate, constraints);
+  const sideBranchLossModel = auditionStages.side_branches
+    ? applySideBranchLosses(out, sampleRate, constraints, vowel, geometry, areaFunction, { strength: 1 })
+    : buildSideBranchLossModel(constraints, vowel, geometry, areaFunction, { strength: 0 });
+  const bodyResonanceModel = auditionStages.body_resonance
+    ? applyBodyResonance(out, sampleRate, constraints)
+    : { ...bodyResonanceModelMetadata(constraints), enabled: false };
   normalize(out, 0.92);
+  const renderedSpectrumDiagnostic = analyzeRenderedVoiceSpectrum(out, sampleRate, f0);
   return {
     sampleRate,
     samples: out,
@@ -8789,17 +8892,27 @@ function synthesizeTubeVowel(vowel = selectedVowel(), options = {}) {
     backend: "area_function_tube",
     area_function: areaFunction,
     physical_resolution_model: physicalResolutionModel,
+    audition_stages: auditionStages,
     distributed_loss_model: tubeLossModel,
     terminal_radiation_model: tubeTerminalRadiationModel(lossParams, sampleRate, false),
+    source_tract_interaction_model: tubeSourceTractCouplingModel({
+      effectiveClosure,
+      sourceTractCouplingEnabled: auditionStages.source_tract_coupling,
+    }, sampleRate),
     side_branch_loss_model: sideBranchLossModel,
     body_resonance_model: bodyResonanceModel,
     respiratory_drive: respiratoryProfile,
+    rendered_spectrum_diagnostic: renderedSpectrumDiagnostic,
     derived_f0_hz: Number(f0.toFixed(4)),
-    source_noise_model: tubeGlottalSourceMetadata(
-      glottalParams,
-      motorProfile.motor_control_precision,
-      aspirationNoiseScale
-    ),
+    source_noise_model: {
+      ...tubeGlottalSourceMetadata(
+        glottalParams,
+        motorProfile.motor_control_precision,
+        aspirationNoiseScale
+      ),
+      spectral_shape_enabled: auditionStages.source_spectral_shape,
+      closing_flank: "finite-slope cosine",
+    },
   };
 }
 
@@ -9253,6 +9366,7 @@ function synthesizeTubeSourceSamples(options) {
   const sampleRateNoiseScale = Math.sqrt(PREVIEW_REFERENCE_SAMPLE_RATE / sampleRate);
   const tiltAlpha = glottalTiltAlpha(sampleRate, glottalParams.spectral_tilt_db);
   const tiltCascadeMix = glottalTiltCascadeMix(glottalParams.spectral_tilt_db);
+  const spectralShapeEnabled = options.sourceSpectralShapeEnabled !== false;
   const glottalSourceState = { lastRawFlow: 0, smoothedFlow: 0, lastSmoothedFlow: 0 };
   let glottalTiltState = 0;
   let glottalTiltState2 = 0;
@@ -9314,7 +9428,9 @@ function synthesizeTubeSourceSamples(options) {
     );
     glottalTiltState += tiltAlpha * (sourceSample - glottalTiltState);
     glottalTiltState2 += tiltAlpha * (glottalTiltState - glottalTiltState2);
-    const tiltedSource = glottalTiltState * (1 - tiltCascadeMix) + glottalTiltState2 * tiltCascadeMix;
+    const tiltedSource = spectralShapeEnabled
+      ? glottalTiltState * (1 - tiltCascadeMix) + glottalTiltState2 * tiltCascadeMix
+      : sourceSample;
     out[sampleIndex] = tiltedSource * env * pressureDrive * 0.145;
   }
   return out;
@@ -9826,8 +9942,15 @@ function synthesizeKellyLochbaumTubeCore(areas, options) {
     meanArea = areaSum / count;
   };
   const glottalReflection = clamp(0.64 + options.effectiveClosure * 0.3, 0.52, 0.96);
+  const sourceTractInteraction = tubeSourceTractCouplingModel(options, sampleRate);
+  const sourceTractState = { returnPressure: 0, previousReturnPressure: 0 };
   const lossParams = options.lossParams ?? currentTubeLossParams({});
-  const lossModel = options.lossModel ?? buildTubeDistributedLossModel(lossParams, sampleRate, count);
+  const lossModel = options.lossModel ?? buildTubeDistributedLossModel(
+    lossParams,
+    sampleRate,
+    count,
+    options.distributedLossEnabled !== false
+  );
   const damping = lossModel.per_section_gain;
   const junctionLosses = new Float32Array(count);
   const complianceBaseMix = lossModel.wall_memory_mix;
@@ -9869,7 +9992,13 @@ function synthesizeKellyLochbaumTubeCore(areas, options) {
     nextRight.fill(0);
     nextLeft.fill(0);
     const source = sourceSamples[sampleIndex] ?? 0;
-    nextRight[1] += (source + glottalReflection * left[0]) * damping;
+    nextRight[1] += sourceTractCoupledInjection(
+      source,
+      left[0],
+      glottalReflection,
+      sourceTractState,
+      sourceTractInteraction
+    ) * damping;
     const mouthFlow = (1 - lipReflection) * right[count];
     nextLeft[count - 1] += lipReflection * right[count] * damping;
     for (let junction = 1; junction < count; junction++) {
@@ -9900,7 +10029,9 @@ function synthesizeKellyLochbaumTubeCore(areas, options) {
     left = nextLeft;
     nextLeft = swapL;
   }
-  applyTubeOutputConditioning(out, sampleRate, lossParams);
+  if (options.outputConditioningEnabled !== false) {
+    applyTubeOutputConditioning(out, sampleRate, lossParams);
+  }
   return out;
 }
 
@@ -10120,9 +10251,22 @@ function synthesizeBranchedNasalOralTubeCore(oralAreas, nasalAreas, options) {
   };
 
   const glottalReflection = clamp(0.64 + options.effectiveClosure * 0.3, 0.52, 0.96);
+  const sourceTractInteraction = tubeSourceTractCouplingModel(options, sampleRate);
+  const sourceTractState = { returnPressure: 0, previousReturnPressure: 0 };
   const lossParams = options.lossParams ?? currentTubeLossParams({});
-  const oralLossModel = options.lossModel ?? buildTubeDistributedLossModel(lossParams, sampleRate, oralCount);
-  const nasalLossModel = buildTubeDistributedLossModel(lossParams, sampleRate, nasalCount);
+  const distributedLossEnabled = options.distributedLossEnabled !== false;
+  const oralLossModel = options.lossModel ?? buildTubeDistributedLossModel(
+    lossParams,
+    sampleRate,
+    oralCount,
+    distributedLossEnabled
+  );
+  const nasalLossModel = buildTubeDistributedLossModel(
+    lossParams,
+    sampleRate,
+    nasalCount,
+    distributedLossEnabled
+  );
   const oralDamping = oralLossModel.per_section_gain;
   const nasalDampingControl = clamp(options.nasalBranchDamping ?? 0.74, 0.3, 1.4);
   const nasalDamping = clamp(
@@ -10209,7 +10353,13 @@ function synthesizeBranchedNasalOralTubeCore(oralAreas, nasalAreas, options) {
     nextNasalRight.fill(0);
     nextNasalLeft.fill(0);
     const source = sourceSamples[sampleIndex] ?? 0;
-    nextOralRight[1] += (source + glottalReflection * oralLeft[0]) * oralDamping;
+    nextOralRight[1] += sourceTractCoupledInjection(
+      source,
+      oralLeft[0],
+      glottalReflection,
+      sourceTractState,
+      sourceTractInteraction
+    ) * oralDamping;
 
     const mouthFlow = (1 - lipReflection)
       * oralRight[oralCount]
@@ -10300,7 +10450,9 @@ function synthesizeBranchedNasalOralTubeCore(oralAreas, nasalAreas, options) {
     nasalLeft = nextNasalLeft;
     nextNasalLeft = swapNasalLeft;
   }
-  applyTubeOutputConditioning(out, sampleRate, lossParams);
+  if (options.outputConditioningEnabled !== false) {
+    applyTubeOutputConditioning(out, sampleRate, lossParams);
+  }
   return {
     samples: out,
     oral_radiation: oralRadiation,
@@ -10520,8 +10672,19 @@ function synthesizeCoronalMultiChannelNasalOralTubeCore(oralAreas, nasalAreas, o
   }
 
   const lossParams = options.lossParams ?? currentTubeLossParams({});
-  const oralLossModel = buildTubeDistributedLossModel(lossParams, sampleRate, oralCount);
-  const nasalLossModel = buildTubeDistributedLossModel(lossParams, sampleRate, nasalCount);
+  const distributedLossEnabled = options.distributedLossEnabled !== false;
+  const oralLossModel = buildTubeDistributedLossModel(
+    lossParams,
+    sampleRate,
+    oralCount,
+    distributedLossEnabled
+  );
+  const nasalLossModel = buildTubeDistributedLossModel(
+    lossParams,
+    sampleRate,
+    nasalCount,
+    distributedLossEnabled
+  );
   const oralDamping = oralLossModel.per_section_gain;
   const nasalDampingControl = clamp(options.nasalBranchDamping ?? 0.74, 0.3, 1.4);
   const nasalDamping = clamp(
@@ -10711,6 +10874,8 @@ function synthesizeCoronalMultiChannelNasalOralTubeCore(oralAreas, nasalAreas, o
   const geometryUpdateStride = Math.max(1, Math.round(sampleRate / 11025));
   updateGeometry(0);
   const glottalReflection = clamp(0.64 + options.effectiveClosure * 0.3, 0.52, 0.96);
+  const sourceTractInteraction = tubeSourceTractCouplingModel(options, sampleRate);
+  const sourceTractState = { returnPressure: 0, previousReturnPressure: 0 };
   const nasalRadiationScale = clamp(options.nasalRadiationScale ?? 0.3, 0.08, 0.72);
   const sourceSamples = options.sourceSamples?.length >= sampleCount
     ? options.sourceSamples
@@ -10751,7 +10916,13 @@ function synthesizeCoronalMultiChannelNasalOralTubeCore(oralAreas, nasalAreas, o
     nextToA.fill(0);
     nextToB.fill(0);
     const sourcePort = adjacency[0][0];
-    sendFrom(sourcePort, (sourceSamples[sampleIndex] ?? 0) + glottalReflection * incomingAt(sourcePort));
+    sendFrom(sourcePort, sourceTractCoupledInjection(
+      sourceSamples[sampleIndex] ?? 0,
+      incomingAt(sourcePort),
+      glottalReflection,
+      sourceTractState,
+      sourceTractInteraction
+    ));
 
     let mouthFlow = 0;
     let noseFlow = 0;
@@ -10802,7 +10973,9 @@ function synthesizeCoronalMultiChannelNasalOralTubeCore(oralAreas, nasalAreas, o
     waveToA.set(nextToA);
     waveToB.set(nextToB);
   }
-  applyTubeOutputConditioning(out, sampleRate, lossParams);
+  if (options.outputConditioningEnabled !== false) {
+    applyTubeOutputConditioning(out, sampleRate, lossParams);
+  }
   return {
     samples: out,
     oral_radiation: oralRadiation,
@@ -10842,27 +11015,28 @@ function synthesizeCoronalMultiChannelNasalOralTubeCore(oralAreas, nasalAreas, o
   };
 }
 
-function buildTubeDistributedLossModel(lossParams, sampleRate, tubeCount) {
+function buildTubeDistributedLossModel(lossParams, sampleRate, tubeCount, enabled = true) {
   const count = Math.max(1, tubeCount);
   const sectionLengthCm = 35000 / sampleRate;
   const tractLengthCm = sectionLengthCm * count;
   const referenceLengthCm = 15.5;
   const referenceSectionLengthCm = 35000 / PREVIEW_REFERENCE_SAMPLE_RATE;
   const sectionLengthScale = sectionLengthCm / referenceSectionLengthCm;
-  const wallLoss = clamp(lossParams.wall_loss ?? 0, 0, 1);
-  const viscothermalLoss = clamp(lossParams.viscothermal_loss ?? 0, 0, 1);
-  const resonanceBroadening = clamp(lossParams.resonance_broadening ?? 0, 0, 1);
-  const highFrequencyDamping = clamp(lossParams.high_frequency_damping ?? 0, 0, 1);
-  const wallCompliance = clamp(lossParams.wall_compliance ?? 0, 0, 1);
+  const wallLoss = enabled ? clamp(lossParams.wall_loss ?? 0, 0, 1) : 0;
+  const viscothermalLoss = enabled ? clamp(lossParams.viscothermal_loss ?? 0, 0, 1) : 0;
+  const resonanceBroadening = enabled ? clamp(lossParams.resonance_broadening ?? 0, 0, 1) : 0;
+  const highFrequencyDamping = enabled ? clamp(lossParams.high_frequency_damping ?? 0, 0, 1) : 0;
+  const wallCompliance = enabled ? clamp(lossParams.wall_compliance ?? 0, 0, 1) : 0;
   const oneWayLossNpAtReference =
     wallLoss * 0.9
     + viscothermalLoss * 1.25
-    + resonanceBroadening * 0.16
-    + highFrequencyDamping * 0.045;
+    + resonanceBroadening * 0.07
+    + highFrequencyDamping * 0.018;
   const oneWayLossNp = oneWayLossNpAtReference * (tractLengthCm / referenceLengthCm);
   const perSectionGain = Math.exp(-oneWayLossNp / count);
   return {
-    schema_version: "tube_distributed_loss_0.1",
+    schema_version: "tube_distributed_loss_0.2",
+    enabled,
     section_length_cm: Number(sectionLengthCm.toFixed(6)),
     tract_length_cm: Number(tractLengthCm.toFixed(4)),
     per_section_gain: perSectionGain,
@@ -10871,18 +11045,18 @@ function buildTubeDistributedLossModel(lossParams, sampleRate, tubeCount) {
     discontinuity_loss_scale: clamp(viscothermalLoss * 0.035 * sectionLengthScale, 0, 0.012),
     wall_memory_mix: clamp(
       (
-        wallCompliance * 0.018
-        + resonanceBroadening * 0.018
-        + highFrequencyDamping * 0.01
+        wallCompliance * 0.014
+        + resonanceBroadening * 0.005
+        + highFrequencyDamping * 0.004
       ) * sectionLengthScale,
       0,
-      0.045
+      0.026
     ),
     wall_memory_relaxation: sampleRateAdjustedAlpha(
       clamp(0.08 + wallCompliance * 0.2 + viscothermalLoss * 0.4, 0.06, 0.28),
       sampleRate
     ),
-    basis: "length-normalized, frequency-dependent distributed loss; wall compliance, resonance broadening, and high-frequency damping shape section memory",
+    basis: "length-normalized distributed loss with restrained section memory; post-waveguide output conditioning is not duplicated here",
   };
 }
 
@@ -10981,6 +11155,91 @@ function sampledMagnitudeSpectrum(samples, sampleRate, minFrequency, maxFrequenc
   }));
 }
 
+function analyzeRenderedVoiceSpectrum(samples, sampleRate, f0Hz) {
+  const available = samples?.length ?? 0;
+  const windowLength = Math.min(16384, Math.max(0, available - Math.floor(sampleRate * 0.18)));
+  if (windowLength < 2048 || !Number.isFinite(f0Hz) || f0Hz < 40) {
+    return { schema_version: "rendered_voice_spectrum_0.1", available: false };
+  }
+  const start = clamp(
+    Math.round(available * 0.46 - windowLength * 0.5),
+    0,
+    Math.max(0, available - windowLength)
+  );
+  let mean = 0;
+  for (let index = 0; index < windowLength; index++) mean += samples[start + index];
+  mean /= windowLength;
+  const windowed = new Float32Array(windowLength);
+  for (let index = 0; index < windowLength; index++) {
+    const window = 0.5 - 0.5 * Math.cos(2 * Math.PI * index / Math.max(1, windowLength - 1));
+    windowed[index] = (samples[start + index] - mean) * window;
+  }
+  const maximumFrequency = Math.min(5000, sampleRate * 0.42);
+  const harmonicCount = Math.max(2, Math.floor(maximumFrequency / f0Hz));
+  const harmonics = [];
+  for (let harmonic = 1; harmonic <= harmonicCount; harmonic++) {
+    const frequency = harmonic * f0Hz;
+    const omega = 2 * Math.PI * frequency / sampleRate;
+    const coefficient = 2 * Math.cos(omega);
+    let s1 = 0;
+    let s2 = 0;
+    for (let index = 0; index < windowed.length; index++) {
+      const s0 = windowed[index] + coefficient * s1 - s2;
+      s2 = s1;
+      s1 = s0;
+    }
+    const power = Math.max(1e-20, s1 * s1 + s2 * s2 - coefficient * s1 * s2);
+    harmonics.push({ harmonic, frequency_hz: frequency, power, level_db: 10 * Math.log10(power) });
+  }
+  const maximumLevel = Math.max(...harmonics.map((item) => item.level_db));
+  for (const item of harmonics) item.level_db -= maximumLevel;
+  const slopePoints = harmonics.filter((item) => item.frequency_hz >= 500 && item.frequency_hz <= maximumFrequency);
+  let spectralSlopeDbPerOctave = null;
+  if (slopePoints.length >= 3) {
+    const xMean = slopePoints.reduce((sum, item) => sum + Math.log2(item.frequency_hz / 1000), 0) / slopePoints.length;
+    const yMean = slopePoints.reduce((sum, item) => sum + item.level_db, 0) / slopePoints.length;
+    let numerator = 0;
+    let denominator = 0;
+    for (const item of slopePoints) {
+      const x = Math.log2(item.frequency_hz / 1000) - xMean;
+      numerator += x * (item.level_db - yMean);
+      denominator += x * x;
+    }
+    spectralSlopeDbPerOctave = denominator > 0 ? numerator / denominator : null;
+  }
+  const relativeBandLevel = (minimum, maximum) => {
+    const band = harmonics.filter((item) => item.frequency_hz >= minimum && item.frequency_hz < maximum);
+    if (!band.length) return null;
+    const meanPower = band.reduce((sum, item) => sum + Math.pow(10, item.level_db / 10), 0) / band.length;
+    return Number((10 * Math.log10(Math.max(1e-12, meanPower))).toFixed(3));
+  };
+  return {
+    schema_version: "rendered_voice_spectrum_0.1",
+    available: true,
+    analysis_window_samples: windowLength,
+    analysis_start_sample: start,
+    f0_hz: Number(f0Hz.toFixed(4)),
+    h1_h2_db: Number((harmonics[0].level_db - harmonics[1].level_db).toFixed(3)),
+    h2_h4_db: harmonics.length >= 4
+      ? Number((harmonics[1].level_db - harmonics[3].level_db).toFixed(3))
+      : null,
+    spectral_slope_db_per_octave: spectralSlopeDbPerOctave === null
+      ? null
+      : Number(spectralSlopeDbPerOctave.toFixed(3)),
+    relative_band_levels_db: {
+      low_100_1000: relativeBandLevel(100, 1000),
+      presence_1000_3000: relativeBandLevel(1000, 3000),
+      high_3000_5000: relativeBandLevel(3000, 5001),
+    },
+    harmonics: harmonics.map((item) => ({
+      harmonic: item.harmonic,
+      frequency_hz: Number(item.frequency_hz.toFixed(3)),
+      relative_level_db: Number(item.level_db.toFixed(3)),
+    })),
+    interpretation: "engineering observation only; not a speaker-identity or clinical metric",
+  };
+}
+
 function selectResonancePeaks(spectrum, minimumSpacingHz, maxPeaks) {
   const smoothed = spectrum.map((point, index) => {
     const start = Math.max(0, index - 2);
@@ -11059,21 +11318,20 @@ function applyWallComplianceToTubeState(
 function applyTubeOutputConditioning(samples, sampleRate, lossParams) {
   const wallCompliance = clamp(lossParams.wall_compliance ?? 0, 0, 1);
   const highDamping = clamp(lossParams.high_frequency_damping ?? 0, 0, 1);
-  const broadening = clamp(lossParams.resonance_broadening ?? 0, 0, 1);
   const smoothingMix = clamp(
-    highDamping * 0.13 + wallCompliance * 0.04 + broadening * 0.08,
+    highDamping * 0.045 + wallCompliance * 0.015,
     0,
-    0.22
+    0.075
   );
   if (smoothingMix > 0.001) {
     const cutoff = clamp(
-      7800 - highDamping * 2800 - wallCompliance * 900 - broadening * 1800,
-      4200,
-      8200
+      9400 - highDamping * 2200 - wallCompliance * 650,
+      6200,
+      9400
     );
     applyOnePoleLowpassBlend(samples, sampleRate, cutoff, smoothingMix);
   }
-  const warmthMix = clamp(wallCompliance * 0.018 + broadening * 0.008, 0, 0.035);
+  const warmthMix = clamp(wallCompliance * 0.006, 0, 0.01);
   if (warmthMix > 0.001) {
     applyOnePoleLowpassBlend(samples, sampleRate, 1450, warmthMix);
   }
@@ -11210,18 +11468,24 @@ function applySideBranchLosses(samples, sampleRate, constraints, vowel, geometry
   return model;
 }
 
-function applyBodyResonance(samples, sampleRate, constraints) {
+function bodyResonanceModelMetadata(constraints) {
   const coupling = clamp(constraints.body_resonance_coupling?.center ?? 0, 0, 1);
   const frequency = currentBodyResonanceFrequency(constraints);
   const gainDb = clamp(constraints.body_resonance_gain_db?.center ?? 4, 0, 12);
   const q = 1.3;
-  if (coupling < 0.01 || gainDb < 0.01) return { frequency_hz: frequency, gain_db: gainDb, coupling, q };
+  return { frequency_hz: frequency, gain_db: gainDb, coupling, q };
+}
+
+function applyBodyResonance(samples, sampleRate, constraints) {
+  const model = bodyResonanceModelMetadata(constraints);
+  const { coupling, frequency_hz: frequency, gain_db: gainDb, q } = model;
+  if (coupling < 0.01 || gainDb < 0.01) return model;
   const wet = Float32Array.from(samples);
   applyBiquadInPlace(wet, makeBiquad("peaking", frequency, q, gainDb, sampleRate));
   for (let index = 0; index < samples.length; index++) {
     samples[index] = samples[index] * (1 - coupling) + wet[index] * coupling;
   }
-  return { frequency_hz: frequency, gain_db: gainDb, coupling, q, topology: "parallel_wet_dry_branch" };
+  return { ...model, topology: "parallel_wet_dry_branch" };
 }
 
 function constraintRatioToReference(constraints, key) {
@@ -11387,7 +11651,19 @@ function normalize(samples, peak) {
 
 async function playVowel() {
   if (!Object.keys(state.constraints).length) analyze();
-  const audio = synthesizeVowel();
+  const vowel = selectedVowel();
+  const auditionStages = state.activeTab === "physicalModelTab"
+    ? physicalAuditionStagesFromUi()
+    : null;
+  const audio = synthesizeVowel(vowel, { auditionStages });
+  if (state.activeTab === "physicalModelTab") {
+    state.lastPhysicalSynthesisDiagnostic = {
+      vowel,
+      audition_stages: audio.audition_stages,
+      rendered_spectrum_diagnostic: audio.rendered_spectrum_diagnostic,
+    };
+    draw();
+  }
   state.lastWav = encodeWav(audio.samples, audio.sampleRate);
   await playAudioSamples(audio.samples, audio.sampleRate);
 }
@@ -12387,6 +12663,10 @@ function synthesizeCoupledNasalSyllable(context) {
       oral_side_antiresonance_generated_by_closed_branch: true,
     },
     glottal_source_model: vowelAudio.source_noise_model,
+    source_tract_interaction_model: tubeSourceTractCouplingModel(
+      oralReleaseOptions,
+      sampleRate
+    ),
     terminal_radiation_model: {
       oral: tubeTerminalRadiationModel(oralReleaseOptions.lossParams, sampleRate, false),
       nasal: tubeTerminalRadiationModel(oralReleaseOptions.lossParams, sampleRate, true),
@@ -13289,6 +13569,15 @@ function init() {
     els.physicalShowSideBranches,
   ]) {
     toggle?.addEventListener("change", draw);
+  }
+  for (const input of els.physicalAuditionStageInputs) {
+    input.addEventListener("change", () => {
+      const key = input.dataset.physicalAuditionStage;
+      if (!PHYSICAL_AUDITION_STAGE_KEYS.includes(key)) return;
+      state.physicalAuditionStages[key] = input.checked;
+      state.lastPhysicalSynthesisDiagnostic = null;
+      draw();
+    });
   }
   for (const select of els.outputSampleRateSelects ?? []) {
     select.addEventListener("change", () => setOutputSampleRate(select.value));

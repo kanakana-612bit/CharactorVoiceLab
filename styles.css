@@ -1882,6 +1882,56 @@ summary {
   background: var(--surface);
 }
 
+.physical-audition-diagnostics {
+  display: grid;
+  gap: 8px;
+  margin-top: 8px;
+  padding: 9px 10px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: #f8f6ef;
+}
+
+.physical-audition-heading {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.physical-audition-heading span,
+.physical-envelope-summary {
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.physical-audition-stage-list {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 6px 10px;
+}
+
+.physical-audition-stage-list label {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  min-width: 0;
+  color: var(--ink);
+  white-space: nowrap;
+}
+
+.physical-audition-stage-list input {
+  width: auto;
+  min-height: 0;
+  accent-color: var(--accent);
+}
+
+.physical-envelope-summary {
+  display: block;
+  min-height: 18px;
+  font-variant-numeric: tabular-nums;
+}
+
 #physicalSagittalCanvas {
   aspect-ratio: 45 / 26;
 }
@@ -2461,6 +2511,15 @@ pre {
   .physical-model-runtime-controls {
     align-items: flex-start;
     justify-content: flex-start;
+  }
+
+  .physical-audition-heading {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .physical-audition-stage-list {
+    grid-template-columns: 1fr;
   }
 
   .physical-metric-strip {

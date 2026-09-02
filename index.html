@@ -646,6 +646,21 @@
             <span id="physicalResonanceSummary">共鳴ピークを計算中</span>
           </div>
           <canvas id="physicalTransferCanvas" width="620" height="300" aria-label="音響管の推定伝達特性"></canvas>
+          <div class="physical-audition-diagnostics">
+            <div class="physical-audition-heading">
+              <strong>試聴経路の切り分け</strong>
+              <span>この画面のサンプル再生だけに反映</span>
+            </div>
+            <div class="physical-audition-stage-list" aria-label="物理合成処理段の試聴切り替え">
+              <label><input type="checkbox" data-physical-audition-stage="source_spectral_shape" checked /> 声門スペクトル</label>
+              <label><input type="checkbox" data-physical-audition-stage="source_tract_coupling" checked /> 声源・声道結合</label>
+              <label><input type="checkbox" data-physical-audition-stage="distributed_loss" checked /> 管壁損失</label>
+              <label><input type="checkbox" data-physical-audition-stage="output_conditioning" checked /> 出力整音</label>
+              <label><input type="checkbox" data-physical-audition-stage="side_branches" checked /> 側枝</label>
+              <label><input type="checkbox" data-physical-audition-stage="body_resonance" checked /> 体幹反響</label>
+            </div>
+            <output id="physicalEnvelopeSummary" class="physical-envelope-summary">再生後に倍音包絡を表示します。</output>
+          </div>
         </section>
 
         <section class="pane physical-source-pane">
