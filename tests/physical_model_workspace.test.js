@@ -63,6 +63,18 @@ if (!/#physicalModelTab\s*\{[\s\S]*grid-template-columns/.test(css)
   throw new Error("The physical workspace lacks desktop or responsive layout rules");
 }
 
+if (!/#physicalModelTab\s*\{[\s\S]*grid-template-areas:\s*"stage stage"\s*"geometry transfer"\s*"source transfer"\s*"area area"/.test(css)
+  || !/\.physical-model-shape-pane\s*\{\s*grid-area:\s*geometry/.test(css)
+  || !/\.physical-transfer-pane\s*\{\s*grid-area:\s*transfer/.test(css)
+  || !/\.physical-source-pane\s*\{\s*grid-area:\s*source/.test(css)
+  || !/\.physical-area-pane\s*\{\s*grid-area:\s*area/.test(css)) {
+  throw new Error("The physical workspace does not follow the geometry/source, transfer, then area hierarchy");
+}
+
+if (!/<h2>構音空間プレビュー<\/h2>/.test(html)) {
+  throw new Error("The articulatory geometry preview is not named consistently");
+}
+
 const ids = [...html.matchAll(/\bid="([^"]+)"/g)].map((match) => match[1]);
 const duplicates = ids.filter((id, index) => ids.indexOf(id) !== index);
 if (duplicates.length) throw new Error(`Duplicate HTML ids: ${[...new Set(duplicates)].join(", ")}`);

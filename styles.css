@@ -1798,8 +1798,48 @@ summary {
 }
 
 #physicalModelTab {
-  grid-template-columns: minmax(560px, 1.55fr) minmax(300px, 0.72fr);
+  grid-template-columns: minmax(520px, 1.05fr) minmax(520px, 1fr);
+  grid-template-areas:
+    "stage stage"
+    "geometry transfer"
+    "source transfer"
+    "area area"
+    "target sections"
+    "flow flow";
+  align-items: start;
   gap: 10px;
+}
+
+#physicalModelTab > .workflow-stage-banner {
+  grid-area: stage;
+}
+
+.physical-model-shape-pane {
+  grid-area: geometry;
+}
+
+.physical-transfer-pane {
+  grid-area: transfer;
+}
+
+.physical-source-pane {
+  grid-area: source;
+}
+
+.physical-area-pane {
+  grid-area: area;
+}
+
+.physical-articulation-pane {
+  grid-area: target;
+}
+
+.physical-cross-section-pane {
+  grid-area: sections;
+}
+
+.physical-computation-flow {
+  grid-area: flow;
 }
 
 .physical-model-workspace > .pane {
@@ -2102,12 +2142,6 @@ summary {
 .physical-derived-list dt,
 .physical-derived-list dd {
   margin: 0;
-}
-
-.physical-area-pane,
-.physical-cross-section-pane,
-.physical-computation-flow {
-  grid-column: 1 / -1;
 }
 
 .physical-area-pane .pane-head,
@@ -2821,6 +2855,18 @@ pre {
     grid-template-columns: 1fr;
   }
 
+  #physicalModelTab {
+    grid-template-areas:
+      "stage"
+      "geometry"
+      "source"
+      "transfer"
+      "area"
+      "target"
+      "sections"
+      "flow";
+  }
+
   .canvas-stack {
     min-height: 420px;
   }
@@ -2840,12 +2886,6 @@ pre {
 
   .tract-visual-grid {
     grid-template-columns: 1fr;
-  }
-
-  .physical-area-pane,
-  .physical-cross-section-pane,
-  .physical-computation-flow {
-    grid-column: auto;
   }
 
   .output-settings-grid {
