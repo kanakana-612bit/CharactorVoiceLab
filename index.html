@@ -6,18 +6,24 @@
     <title>CharacterVoiceDesigner</title>
     <link rel="stylesheet" href="./styles.css" />
   </head>
-  <body>
+  <body class="public-release">
     <header class="app-header">
       <div class="header-leading">
         <div>
-          <h1>CharacterVoiceDesigner <span class="version-badge">Ver 0.2</span></h1>
-          <p>外見的特徴をTTS用の中間制御関数へ変換</p>
+          <h1>Character Voice Design Lab <span class="version-badge">Ver 0.2 / Public Preview</span></h1>
+          <p>外見から声道を設計し、再現可能な話者条件へ接続する</p>
         </div>
       </div>
       <div class="header-actions">
-                <button id="loadProjectBtn" type="button">プロファイル読込</button>
+        <label class="header-field language-field">
+          表示言語
+          <select id="interfaceLanguageSelect" aria-label="表示言語">
+            <option value="ja" selected>日本語</option>
+          </select>
+        </label>
+        <button id="loadProjectBtn" type="button">プロファイル読込</button>
         <label class="header-field project-title-field">
-          名称
+          話者プロフィール名
           <input id="projectTitleInput" type="text" value="voice_profile" maxlength="80" />
         </label>
         <button id="saveProjectBtn">保存</button>
@@ -25,22 +31,29 @@
       </div>
     </header>
 
-    <nav class="tabbar" aria-label="解析タブ">
-      <button class="tab-button active" data-tab-target="setupTab">画像・特徴点</button>
-      <button class="tab-button" data-tab-target="detailTab">声道プロファイル</button>
-      <button class="tab-button" data-tab-target="physicalModelTab">声道物理モデル</button>
-      <button class="tab-button" data-tab-target="vowelTab">母音試聴</button>
-      <button class="tab-button" data-tab-target="consonantTab">子音試聴</button>
-      <button class="tab-button" data-tab-target="ttsModelTab">TTSモデル</button>
-      <button class="tab-button" data-tab-target="experimentTab">実験</button>
-      <button class="tab-button" data-tab-target="outputTab">出力デモ</button>
-      <button class="tab-button" data-tab-target="referenceTab">参考文献</button>
+    <nav class="workflow-nav" aria-label="話者設計工程">
+      <div class="workflow-steps">
+        <button class="tab-button workflow-step active" data-tab-target="setupTab"><span>01</span>画像と特徴点</button>
+        <button class="tab-button workflow-step" data-tab-target="physicalModelTab"><span>02</span>物理モデル</button>
+        <button class="tab-button workflow-step" data-tab-target="vowelTab"><span>03</span>母音確認</button>
+        <button class="tab-button workflow-step" data-tab-target="seedSearchTab"><span>04</span>Seed探索</button>
+        <button class="tab-button workflow-step" data-tab-target="speakerTrainingTab"><span>05</span>話者学習</button>
+        <button class="tab-button workflow-step" data-tab-target="finalPreviewTab"><span>06</span>最終確認</button>
+      </div>
+      <div class="workflow-tools" aria-label="補助画面">
+        <button class="tab-button utility-tab" data-tab-target="detailTab">詳細設計</button>
+        <button class="tab-button utility-tab" data-tab-target="referenceTab">資料・方針</button>
+      </div>
     </nav>
 
     <main class="workspace">
       <section id="setupTab" class="tab-panel active" aria-label="基本情報">
         <section class="pane input-pane" aria-label="基本情報">
-          <h2>参照画像</h2>
+          <div class="stage-heading">
+            <span class="stage-number">01</span>
+            <div><span class="section-kicker">Source design</span><h2>画像と基本情報</h2></div>
+          </div>
+          <p class="stage-description">3方向の参照画像と身体条件を入力し、ランドマークを手動で合わせます。</p>
 
           <div class="upload-grid">
             <label class="drop-zone">
@@ -201,8 +214,11 @@
 
         <section class="pane model-pane" aria-label="画像プレビュー">
           <div class="pane-head">
-            <h2>全身・頭頚部プレビュー</h2>
-            <span>正面幅と側面特徴点から2.5D声道テンプレートを半自動変形します。</span>
+            <div>
+              <span class="section-kicker">Landmark workspace</span>
+              <h2>参照画像と特徴点</h2>
+            </div>
+            <span>画像上の点を直接ドラッグして調整</span>
           </div>
           <div class="preview-layout">
             <div class="body-preview-row">
@@ -254,6 +270,9 @@
             <span id="landmarkHintDefinition">点をつかむか、カーソルを重ねると定義を表示します。</span>
             <span id="landmarkHintRole">全身・頭頚部・側面の点名は解剖学的表現へ統一しています。</span>
           </aside>
+          <div class="stage-footer-actions">
+            <button class="primary" type="button" data-next-tab="physicalModelTab">物理モデルへ進む</button>
+          </div>
         </section>
       </section>
 
@@ -536,6 +555,11 @@
       </section>
 
       <section id="physicalModelTab" class="tab-panel physical-model-workspace" aria-label="声道物理モデル" hidden>
+        <div class="workflow-stage-banner detail-full">
+          <span class="stage-number">02</span>
+          <div><strong>声道物理モデル</strong><span>特徴点から導いた形状、断面積、音響応答を確認します。</span></div>
+          <button type="button" class="tab-button stage-link" data-tab-target="detailTab">詳細パラメータ</button>
+        </div>
         <section class="pane physical-model-shape-pane">
           <div class="pane-head physical-model-heading">
             <div>
@@ -713,6 +737,10 @@
       </section>
 
       <section id="vowelTab" class="tab-panel articulation-workspace" aria-label="母音調整" hidden>
+        <div class="workflow-stage-banner detail-full">
+          <span class="stage-number">03</span>
+          <div><strong>母音プレビュー</strong><span>物理モデル由来の5母音を試聴し、話者設計値を確定します。</span></div>
+        </div>
         <section class="pane detail-full">
           <div class="pane-head">
             <h2>母音の発話運動</h2>
@@ -1503,6 +1531,113 @@
           </div>
           <p id="datasetExportStatus" class="status-line">TTSエンジン非依存のWAV + metadata.jsonとして書き出します。</p>
           </details>
+        </section>
+      </section>
+
+      <section id="seedSearchTab" class="tab-panel public-flow-panel" aria-label="Seed探索" hidden>
+        <section class="pane public-flow-main">
+          <div class="workflow-stage-banner">
+            <span class="stage-number">04</span>
+            <div><span class="section-kicker">Candidate search</span><strong>Seed探索</strong><span>短い校正文から、設計した声に近い候補を比較します。</span></div>
+            <span class="implementation-badge">接続準備中</span>
+          </div>
+          <div class="public-placeholder-notice">
+            <strong>この画面は操作設計用のプレースホルダーです</strong>
+            <span>探索サービスとの接続後も、候補の比較と採否はこの画面内で完結します。</span>
+          </div>
+          <div class="seed-search-layout">
+            <section class="workflow-form-section">
+              <div class="pane-head"><h2>探索条件</h2><span>推定時間は候補数に応じて更新</span></div>
+              <label class="stacked-field">校正テキスト
+                <textarea id="publicSeedText" rows="5">こんにちは。声の高さと響きを確認します。</textarea>
+              </label>
+              <div class="form-grid">
+                <label>候補数<input id="publicSeedCount" type="range" min="3" max="12" value="6" /></label>
+                <label>生成Step<select id="publicSeedSteps"><option>12</option><option selected>20</option></select></label>
+                <label>探索開始Seed<input id="publicSeedStart" type="number" value="20260719" /></label>
+                <label>評価基準<select><option>物理設計値との距離</option><option>F0を優先</option></select></label>
+              </div>
+              <div class="run-summary"><span>予定</span><strong id="publicSeedEstimate">6候補 / 約2分</strong></div>
+              <button id="publicSeedRun" class="primary" type="button">探索を開始</button>
+              <p id="publicSeedStatus" class="status-line">バックエンド接続後に利用できます。</p>
+            </section>
+            <section class="workflow-results-section">
+              <div class="pane-head"><h2>候補比較</h2><span id="publicCandidateCount">採用 0 / 6</span></div>
+              <div id="publicSeedCandidates" class="seed-candidate-list" aria-live="polite"></div>
+            </section>
+          </div>
+          <div class="stage-footer-actions">
+            <button type="button" data-next-tab="vowelTab">母音確認へ戻る</button>
+            <button class="primary" type="button" data-next-tab="speakerTrainingTab">採用候補を学習へ送る</button>
+          </div>
+        </section>
+      </section>
+
+      <section id="speakerTrainingTab" class="tab-panel public-flow-panel" aria-label="話者学習" hidden>
+        <section class="pane public-flow-main">
+          <div class="workflow-stage-banner">
+            <span class="stage-number">05</span>
+            <div><span class="section-kicker">Speaker inversion</span><strong>話者学習</strong><span>採用した候補だけを学習素材として固定話者へ統合します。</span></div>
+            <span class="implementation-badge">接続準備中</span>
+          </div>
+          <div class="training-layout">
+            <section class="workflow-form-section">
+              <div class="pane-head"><h2>学習素材</h2><span>Seed探索から受け渡し</span></div>
+              <div id="publicTrainingSamples" class="training-sample-list"></div>
+              <button type="button" disabled>音声ファイルを追加</button>
+            </section>
+            <section class="workflow-form-section">
+              <div class="pane-head"><h2>学習設定</h2><span>再現条件として保存</span></div>
+              <div class="form-grid">
+                <label>学習モデル<select disabled><option>モデル接続後に選択</option></select></label>
+                <label>学習デバイス<select disabled><option>自動選択</option></select></label>
+                <label>最大Step<input type="number" value="3000" disabled /></label>
+                <label>Speaker token<input type="number" value="16" disabled /></label>
+              </div>
+              <div class="training-readiness">
+                <span>素材</span><strong id="publicTrainingReadiness">候補を2件以上採用してください</strong>
+              </div>
+              <button class="primary" type="button" disabled>話者を学習</button>
+              <p class="status-line">学習ランタイムは後続実装で接続します。</p>
+            </section>
+          </div>
+          <div class="stage-footer-actions">
+            <button type="button" data-next-tab="seedSearchTab">Seed探索へ戻る</button>
+            <button class="primary" type="button" data-next-tab="finalPreviewTab">最終確認へ進む</button>
+          </div>
+        </section>
+      </section>
+
+      <section id="finalPreviewTab" class="tab-panel public-flow-panel" aria-label="最終確認と登録" hidden>
+        <section class="pane public-flow-main">
+          <div class="workflow-stage-banner">
+            <span class="stage-number">06</span>
+            <div><span class="section-kicker">Review and register</span><strong>最終確認と話者登録</strong><span>任意文で確認し、再現可能なAPI話者として保存します。</span></div>
+            <span class="implementation-badge">接続準備中</span>
+          </div>
+          <div class="final-preview-layout">
+            <section class="workflow-form-section">
+              <div class="pane-head"><h2>最終プレビュー</h2><span>学習話者を使用</span></div>
+              <label class="stacked-field">読み上げテキスト
+                <textarea rows="8">こんにちは。これは登録前の最終確認です。</textarea>
+              </label>
+              <div class="inline-actions"><button class="primary" type="button" disabled>音声を生成</button><span class="status-line">学習話者の接続待ち</span></div>
+              <audio controls></audio>
+            </section>
+            <section class="workflow-form-section registration-section">
+              <div class="pane-head"><h2>話者を登録</h2><span>ローカルAPI用</span></div>
+              <label class="stacked-field">表示名<input id="publicVoiceName" type="text" value="voice_profile" maxlength="80" /></label>
+              <label class="stacked-field">API識別子<input id="publicVoiceId" type="text" value="voice-profile" readonly /></label>
+              <div class="reproducibility-checklist">
+                <span class="check-state ready">物理プロファイル</span>
+                <span class="check-state pending">Seed探索結果</span>
+                <span class="check-state pending">学習成果物</span>
+                <span class="check-state ready">生成条件</span>
+              </div>
+              <button class="primary" type="button" disabled>話者として登録</button>
+              <p class="note">登録後は <code>POST /api/v1/speech</code> からこの識別子を指定します。</p>
+            </section>
+          </div>
         </section>
       </section>
 

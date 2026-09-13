@@ -6,7 +6,7 @@ const html = fs.readFileSync(path.join(root, "index.html"), "utf8");
 const css = fs.readFileSync(path.join(root, "styles.css"), "utf8");
 const app = fs.readFileSync(path.join(root, "app.js"), "utf8");
 
-if (!/data-tab-target="physicalModelTab">声道物理モデル<\/button>/.test(html)) {
+if (!/data-tab-target="physicalModelTab"[^>]*>[\s\S]*?物理モデル<\/button>/.test(html)) {
   throw new Error("The physical vocal-tract workspace tab is missing");
 }
 

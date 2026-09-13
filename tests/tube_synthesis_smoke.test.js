@@ -5,12 +5,13 @@ const projectRoot = path.resolve(__dirname, "..");
 const indexHtml = fs.readFileSync(path.join(projectRoot, "index.html"), "utf8");
 const styleSheet = fs.readFileSync(path.join(projectRoot, "styles.css"), "utf8");
 
-if (!/<h1>CharacterVoiceDesigner <span class="version-badge">Ver 0\.2<\/span><\/h1>/.test(indexHtml)) {
-  throw new Error("The designer branch version badge is not Ver 0.2");
+if (!/<h1>Character Voice Design Lab <span class="version-badge">Ver 0\.2 \/ Public Preview<\/span><\/h1>/.test(indexHtml)) {
+  throw new Error("The public workflow version badge is not Ver 0.2");
 }
-if (!/<button class="tab-button" data-tab-target="ttsModelTab">TTSモデル<\/button>/.test(indexHtml)
-  || !/<button class="tab-button" data-tab-target="outputTab">出力デモ<\/button>/.test(indexHtml)) {
-  throw new Error("The TTS model and output demo workflow tabs are missing");
+if (!/data-tab-target="seedSearchTab"/.test(indexHtml)
+  || !/data-tab-target="speakerTrainingTab"/.test(indexHtml)
+  || !/data-tab-target="finalPreviewTab"/.test(indexHtml)) {
+  throw new Error("The public Seed-search, training, and final-preview workflow tabs are missing");
 }
 if (!/<select id="referenceImageStyleInput">\s*<option value="illustration" selected>/.test(indexHtml)) {
   throw new Error("Illustration is not the default reference-image style");
@@ -33,8 +34,8 @@ if (!/id="syllableSetInput"[\s\S]*value="japanese_core_cv"/.test(indexHtml)
   || !/id="recordAuditoryEvaluationBtn"/.test(indexHtml)) {
   throw new Error("Syllable dataset export or vowel A(x) tuning controls are missing from the UI");
 }
-if (!/data-tab-target="vowelTab">母音試聴<\/button>/.test(indexHtml)
-  || !/data-tab-target="consonantTab">子音試聴<\/button>/.test(indexHtml)
+if (!/data-tab-target="vowelTab"[^>]*>[\s\S]*?母音確認<\/button>/.test(indexHtml)
+  || !/id="consonantTab"/.test(indexHtml)
   || !/id="vowelExecutionSliders"/.test(indexHtml)
   || !/id="consonantExecutionSliders"/.test(indexHtml)
   || !/id="vowelCalibrationMount"/.test(indexHtml)

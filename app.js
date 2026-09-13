@@ -130,6 +130,18 @@ const voiceControlProfile = window.CVD_PROFILE;
 const labels = landmarkSystem.labels;
 const featureDefs = referenceData.anthropometricFeaturePriors;
 const APP_VERSION = "0.2";
+const PUBLIC_WORKFLOW_TABS = Object.freeze([
+  "setupTab",
+  "physicalModelTab",
+  "vowelTab",
+  "seedSearchTab",
+  "speakerTrainingTab",
+  "finalPreviewTab",
+]);
+const publicWorkflowState = {
+  visited: new Set(["setupTab"]),
+  selectedSeeds: new Set(),
+};
 const STANDARD_TTS_INFERENCE_STEPS = 20;
 const MAX_EVALUATION_RESOURCES = 16;
 const MAX_CALIBRATION_RESOURCES = 16;
@@ -3006,7 +3018,7 @@ function draw() {
   const bodyImageCtx = els.bodyImageCanvas.getContext("2d");
   drawImage(bodyImageCtx, state.images.body, "\u5168\u8eab\u6b63\u9762\u753b\u50cf\u3092\u8aad\u307f\u8fbc\u307f");
   const bodyModelCtx = els.bodyModelCanvas.getContext("2d");
-  drawBodyModel(bodyModelCtx);
+  bodyModelCtx.clearRect(0, 0, bodyModelCtx.canvas.width, bodyModelCtx.canvas.height);
   drawLandmarks(bodyModelCtx, "body", state.drag?.mode === "body" ? state.drag : null);
   drawCursorGuide(bodyModelCtx, "body", state.drag?.mode === "body" ? state.drag : null, cursorForMode("body"));
 
@@ -7763,10 +7775,14 @@ function installExperimentHandlers() {
 
 function setActiveTab(tabId) {
   state.activeTab = tabId;
+  if (PUBLIC_WORKFLOW_TABS.includes(tabId)) publicWorkflowState.visited.add(tabId);
   for (const button of els.tabButtons) {
     const active = button.dataset.tabTarget === tabId;
     button.classList.toggle("active", active);
     button.setAttribute("aria-selected", active ? "true" : "false");
+    if (button.classList.contains("workflow-step")) {
+      button.classList.toggle("is-visited", publicWorkflowState.visited.has(button.dataset.tabTarget));
+    }
   }
   for (const panel of els.tabPanels) {
     const active = panel.id === tabId;
@@ -14488,6 +14504,117 @@ function installVoiceIdentityHandlers() {
   });
 }
 
+function publicSeedValues() {
+  const count = clamp(Number(document.getElementById("publicSeedCount")?.value) || 6, 3, 12);
+  const first = Math.max(0, Number(document.getElementById("publicSeedStart")?.value) || 20260719);
+  return Array.from({ length: count }, (_, index) => first + index);
+}
+
+function renderPublicWorkflowCandidates() {
+  const container = document.getElementById("publicSeedCandidates");
+  if (!container) return;
+  const seeds = publicSeedValues();
+  const available = new Set(seeds);
+  for (const seed of [...publicWorkflowState.selectedSeeds]) {
+    if (!available.has(seed)) publicWorkflowState.selectedSeeds.delete(seed);
+  }
+  container.replaceChildren();
+  seeds.forEach((seed, index) => {
+    const selected = publicWorkflowState.selectedSeeds.has(seed);
+    const row = document.createElement("article");
+    row.className = `seed-candidate${selected ? " selected" : ""}`;
+    row.dataset.seed = String(seed);
+    row.innerHTML = `
+      <span class="candidate-rank">${String(index + 1).padStart(2, "0")}</span>
+      <span class="candidate-copy"><strong>Seed ${seed}</strong><small>未生成 / 評価値は生成後に表示</small></span>
+      <span class="candidate-actions">
+        <button type="button" disabled aria-label="Seed ${seed}を再生" title="生成後に再生">▶</button>
+        <button type="button" data-select-seed="${seed}" aria-pressed="${selected}">${selected ? "採用済み" : "採用"}</button>
+      </span>`;
+    container.append(row);
+  });
+  const countLabel = document.getElementById("publicCandidateCount");
+  if (countLabel) countLabel.textContent = `採用 ${publicWorkflowState.selectedSeeds.size} / ${seeds.length}`;
+  renderPublicTrainingSamples();
+}
+
+function renderPublicTrainingSamples() {
+  const container = document.getElementById("publicTrainingSamples");
+  const readiness = document.getElementById("publicTrainingReadiness");
+  if (!container) return;
+  container.replaceChildren();
+  const selected = [...publicWorkflowState.selectedSeeds].sort((a, b) => a - b);
+  if (!selected.length) {
+    const empty = document.createElement("p");
+    empty.className = "note";
+    empty.textContent = "Seed探索で採用した候補がここに並びます。";
+    container.append(empty);
+  } else {
+    for (const seed of selected) {
+      const row = document.createElement("div");
+      row.className = "training-sample";
+      row.innerHTML = `<span class="candidate-rank">WAV</span><span class="candidate-copy"><strong>Seed ${seed}</strong><small>校正テキスト・生成条件を同時に保持</small></span><button type="button" disabled title="生成後に再生">▶</button>`;
+      container.append(row);
+    }
+  }
+  if (readiness) {
+    readiness.textContent = selected.length >= 2
+      ? `${selected.length}件を選択 / ランタイム接続待ち`
+      : "候補を2件以上採用してください";
+  }
+}
+
+function updatePublicSeedEstimate() {
+  const count = publicSeedValues().length;
+  const estimate = document.getElementById("publicSeedEstimate");
+  if (estimate) estimate.textContent = `${count}候補 / 推定 ${Math.max(1, Math.ceil(count / 3))}～${Math.max(2, Math.ceil(count / 2))}分`;
+  renderPublicWorkflowCandidates();
+}
+
+function publicVoiceId(value) {
+  const source = String(value || "voice_profile").normalize("NFKC");
+  const normalized = source
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 64);
+  if (normalized) return normalized;
+  let hash = 2166136261;
+  for (const character of source) {
+    hash ^= character.codePointAt(0);
+    hash = Math.imul(hash, 16777619);
+  }
+  return `voice-${(hash >>> 0).toString(36)}`;
+}
+
+function installPublicWorkflowHandlers() {
+  document.querySelectorAll("[data-next-tab]").forEach((button) => {
+    button.addEventListener("click", () => setActiveTab(button.dataset.nextTab));
+  });
+  const seedCount = document.getElementById("publicSeedCount");
+  const seedStart = document.getElementById("publicSeedStart");
+  seedCount?.addEventListener("input", updatePublicSeedEstimate);
+  seedStart?.addEventListener("input", updatePublicSeedEstimate);
+  document.getElementById("publicSeedCandidates")?.addEventListener("click", (event) => {
+    const button = event.target.closest("[data-select-seed]");
+    if (!button) return;
+    const seed = Number(button.dataset.selectSeed);
+    if (publicWorkflowState.selectedSeeds.has(seed)) publicWorkflowState.selectedSeeds.delete(seed);
+    else publicWorkflowState.selectedSeeds.add(seed);
+    renderPublicWorkflowCandidates();
+  });
+  document.getElementById("publicSeedRun")?.addEventListener("click", () => {
+    const status = document.getElementById("publicSeedStatus");
+    if (status) status.textContent = "画面設計は動作しています。探索ランタイムは後続実装で接続します。";
+  });
+  const voiceName = document.getElementById("publicVoiceName");
+  const voiceId = document.getElementById("publicVoiceId");
+  voiceName?.addEventListener("input", () => {
+    if (voiceId) voiceId.value = publicVoiceId(voiceName.value);
+  });
+  updatePublicSeedEstimate();
+}
+
 function init() {
   installVoiceIdentityHandlers();
   installSpeakerInversionHandlers();
@@ -14497,6 +14624,7 @@ function init() {
   renderLandmarkReference();
   renderPublicationReferences();
   installExperimentHandlers();
+  installPublicWorkflowHandlers();
   setExperimentTool(state.activeExperimentTool);
   analyze();
   for (const button of els.tabButtons) {
