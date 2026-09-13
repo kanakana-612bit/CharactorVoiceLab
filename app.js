@@ -732,9 +732,9 @@ function isLandmarkVisible(mode, key) {
 
 function landmarkStyle(mode, key) {
   if (mode === "profile" && isProfileArticulationLandmark(key)) {
-    return { fill: "#8f609d", stroke: "rgba(255, 253, 248, 0.95)", text: "#614f97" };
+    return { fill: "#8f609d", stroke: "rgba(255, 255, 255, 0.95)", text: "#614f97" };
   }
-  return { fill: "#236b5b", stroke: "white", text: "#16483d" };
+  return { fill: "#167785", stroke: "white", text: "#24545a" };
 }
 
 function canvasPoint(event, canvas) {
@@ -1088,10 +1088,10 @@ function refreshLandmarkSelect() {
 
 function drawImage(ctx, image, emptyLabel = null) {
   ctx.clearRect(0, 0, ctx.canvas.width, ctx.canvas.height);
-  ctx.fillStyle = "#ece7dc";
+  ctx.fillStyle = "#ffffff";
   ctx.fillRect(0, 0, ctx.canvas.width, ctx.canvas.height);
   if (!image) {
-    ctx.fillStyle = "#666257";
+    ctx.fillStyle = "#606060";
     ctx.textAlign = "center";
     ctx.font = "16px Segoe UI";
     ctx.fillText(emptyLabel ?? (state.mode === "body" ? "低ポリシェーマ上で全身ランドマークを手動配置" : "頭頚部ランドマークを手動配置"), ctx.canvas.width / 2, ctx.canvas.height / 2);
@@ -1191,7 +1191,7 @@ function drawCursorHud(ctx, key) {
   roundedRectPath(ctx, x, y, width, height, 6);
   ctx.fill();
   ctx.stroke();
-  ctx.fillStyle = "#16483d";
+  ctx.fillStyle = "#24545a";
   ctx.fillText(label, x + padX, y + padY - 1);
   ctx.restore();
 }
@@ -1293,7 +1293,7 @@ function drawBodyModel(ctx) {
   limb(ctx, leftKnee.x, leftKnee.y, leftFoot.x, leftFoot.y, Math.max(10, pelvisW * 0.13));
   limb(ctx, rightKnee.x, rightKnee.y, rightFoot.x, rightFoot.y, Math.max(10, pelvisW * 0.13));
 
-  ctx.fillStyle = "#16483d";
+  ctx.fillStyle = "#24545a";
   ctx.font = "12px Segoe UI";
   ctx.textAlign = "left";
   ctx.fillText(`VTL ${format(c.vocal_tract_length_cm?.center, 1)} cm`, 18, 24);
@@ -1816,7 +1816,7 @@ function drawGuideLabel(ctx, text, x, y) {
   roundedRectPath(ctx, x - width / 2, y - 10, width, 20, 5);
   ctx.fillStyle = "rgba(255, 253, 248, 0.86)";
   ctx.fill();
-  ctx.fillStyle = "#4e4a42";
+  ctx.fillStyle = "#4b535a";
   ctx.textAlign = "center";
   ctx.fillText(text, x, y + 0.5);
   ctx.restore();
@@ -1876,10 +1876,10 @@ function drawVocalTractOverlay(ctx, geometry) {
   ctx.fillStyle = "rgba(255, 253, 248, 0.9)";
   roundedRectPath(ctx, 12, 12, 188, 48, 6);
   ctx.fill();
-  ctx.fillStyle = "#16483d";
+  ctx.fillStyle = "#24545a";
   ctx.font = "12px Segoe UI";
   ctx.fillText(`2.5D声道 ${format(geometry.vocal_tract_length_cm, 1)} cm`, 22, 31);
-  ctx.fillStyle = "#666257";
+  ctx.fillStyle = "#626970";
   ctx.fillText("側面高 + 正面幅 + 断面形状", 22, 49);
   }
   ctx.restore();
@@ -1899,7 +1899,7 @@ function drawTractProfileCanvas(canvas, geometry, surface = "detail", shouldRend
   const width = canvas.width;
   const height = canvas.height;
   ctx.clearRect(0, 0, width, height);
-  ctx.fillStyle = "#fffdf8";
+  ctx.fillStyle = "#ffffff";
   ctx.fillRect(0, 0, width, height);
   if (!geometry?.sections?.length) return;
   const plot = { left: 46, right: width - 18, top: 30, bottom: height - 40 };
@@ -1926,19 +1926,19 @@ function drawTractProfileCanvas(canvas, geometry, surface = "detail", shouldRend
   for (const region of tractRegions) {
     ctx.fillStyle = region.color;
     ctx.fillRect(xAt(region.start), plot.top, xAt(Math.min(1, region.end)) - xAt(region.start), plot.bottom - plot.top);
-    ctx.fillStyle = "#4e4a42";
+    ctx.fillStyle = "#4b535a";
     ctx.font = "11px Segoe UI";
     ctx.textAlign = "center";
     ctx.fillText(region.label, (xAt(region.start) + xAt(Math.min(1, region.end))) / 2, 19);
   }
-  ctx.strokeStyle = "#b8b1a3";
+  ctx.strokeStyle = "#c2c8cd";
   ctx.lineWidth = 1;
   ctx.beginPath();
   ctx.moveTo(plot.left, plot.top);
   ctx.lineTo(plot.left, plot.bottom);
   ctx.lineTo(plot.right, plot.bottom);
   ctx.stroke();
-  ctx.fillStyle = "#666257";
+  ctx.fillStyle = "#626970";
   ctx.textAlign = "right";
   for (let tick = 0; tick <= 4; tick++) {
     const value = maxValue * tick / 4;
@@ -1951,18 +1951,18 @@ function drawTractProfileCanvas(canvas, geometry, surface = "detail", shouldRend
     ctx.stroke();
   }
   drawProfileLine(ctx, sections, "area_cm2", "rgba(138,84,47,0.32)", xAt, yAt, 1.5);
-  drawProfileLine(ctx, vowelSections, "vowel_area_cm2", "#8a542f", xAt, yAt, 3);
+  drawProfileLine(ctx, vowelSections, "vowel_area_cm2", "#7552a8", xAt, yAt, 3);
   drawProfileLine(ctx, sections, "frontal_width_cm", "rgba(54,100,140,0.30)", xAt, yAt, 1.5);
   drawProfileLine(ctx, vowelSections, "vowel_width_cm", "#36648c", xAt, yAt, 2.5);
-  drawProfileLine(ctx, sections, "sagittal_diameter_cm", "#236b5b", xAt, yAt, 2);
+  drawProfileLine(ctx, sections, "sagittal_diameter_cm", "#167785", xAt, yAt, 2);
   drawAreaTuningHandles(ctx, areaFunction, xAt, yAt);
   ctx.textAlign = "center";
-  ctx.fillStyle = "#666257";
+  ctx.fillStyle = "#626970";
   ctx.fillText(`声門からの距離 0 - ${format(geometry.vocal_tract_length_cm, 1)} cm`, (plot.left + plot.right) / 2, height - 12);
   drawChartLegend(ctx, [
-    ["母音断面積 cm²", "#8a542f"],
+    ["母音断面積 cm²", "#7552a8"],
     ["母音横幅 cm", "#36648c"],
-    ["側面径 cm", "#236b5b"],
+    ["側面径 cm", "#167785"],
   ], plot.right - 290, plot.top + 12);
   if (shouldRenderSummary) {
     renderTractRegionSummary(geometry.region_summary, geometry.honda_articulatory_space, geometry.side_branch_guides);
@@ -1977,14 +1977,14 @@ function drawAreaTuningHandles(ctx, areaFunction, xAt, yAt) {
   const values = mode === "width"
     ? areaFunction.cross_sections_2_5d.map((section) => section.coronal_width_cm)
     : areaFunction.areas_cm2;
-  const color = mode === "width" ? "#36648c" : "#8a542f";
+  const color = mode === "width" ? "#36648c" : "#7552a8";
   ctx.save();
   for (let index = 0; index < points.length; index++) {
     const point = points[index];
     const value = areaAtPositionFromArray(values, point.position);
     const x = xAt(point.position);
     const y = yAt(value);
-    ctx.fillStyle = Math.abs(point.gain - 1) > 0.0001 ? "#b9472f" : "#fffdf8";
+    ctx.fillStyle = Math.abs(point.gain - 1) > 0.0001 ? "#b34848" : "#ffffff";
     ctx.strokeStyle = color;
     ctx.lineWidth = 1.8;
     ctx.beginPath();
@@ -2030,7 +2030,7 @@ function drawTractCrossSectionProfileCanvas(canvas, geometry, vowel) {
   const width = canvas.width;
   const height = canvas.height;
   ctx.clearRect(0, 0, width, height);
-  ctx.fillStyle = "#f8f6ef";
+  ctx.fillStyle = "#f7f8f9";
   ctx.fillRect(0, 0, width, height);
   if (!geometry?.sections?.length) return;
   const areaFunction = buildTubeAreaFunction(geometry, vowel, currentOutputSampleRate());
@@ -2039,7 +2039,7 @@ function drawTractCrossSectionProfileCanvas(canvas, geometry, vowel) {
   const maxDimension = Math.max(2.8, ...crossSections.flatMap((section) => [section.sagittal_height_cm, section.coronal_width_cm]));
   const cellWidth = width / positions.length;
   const verticalScale = Math.min((cellWidth - 42) / maxDimension, (height - 86) / maxDimension);
-  ctx.fillStyle = "#16483d";
+  ctx.fillStyle = "#24545a";
   ctx.font = "12px Segoe UI";
   ctx.textAlign = "left";
   ctx.fillText(`/${vowel}/ 2.5D cross-sections`, 14, 20);
@@ -2056,7 +2056,7 @@ function drawTractCrossSectionProfileCanvas(canvas, geometry, vowel) {
     ctx.beginPath();
     ctx.ellipse(cx, cy, radiusX, radiusY, 0, 0, Math.PI * 2);
     ctx.fill();
-    ctx.strokeStyle = "#16483d";
+    ctx.strokeStyle = "#24545a";
     ctx.lineWidth = 1.4;
     ctx.stroke();
     if (section.lateral_channel_area_cm2 > 0.001) {
@@ -2069,7 +2069,7 @@ function drawTractCrossSectionProfileCanvas(canvas, geometry, vowel) {
         ctx.fill();
       }
     }
-    ctx.fillStyle = "#4e4a42";
+    ctx.fillStyle = "#4b535a";
     ctx.font = "11px Segoe UI";
     ctx.textAlign = "center";
     ctx.fillText(region.label, cx, 42);
@@ -2077,7 +2077,7 @@ function drawTractCrossSectionProfileCanvas(canvas, geometry, vowel) {
     ctx.fillText(`H ${section.sagittal_height_cm.toFixed(2)}  W ${section.coronal_width_cm.toFixed(2)}`, cx, height - 18);
   });
   ctx.textAlign = "left";
-  ctx.fillStyle = "#666257";
+  ctx.fillStyle = "#626970";
   ctx.font = "10px Segoe UI";
   ctx.fillText("幅・高さは水力損失へ反映。紫の側方流路分離は将来の多流路モデル用。", 14, height - 4);
 }
@@ -2103,7 +2103,7 @@ function drawPhysicalSagittalModel(geometry, areaFunction) {
   const width = canvas.width;
   const height = canvas.height;
   ctx.clearRect(0, 0, width, height);
-  ctx.fillStyle = "#f8f6ef";
+  ctx.fillStyle = "#f7f8f9";
   ctx.fillRect(0, 0, width, height);
   ctx.strokeStyle = "rgba(184,177,163,0.24)";
   ctx.lineWidth = 1;
@@ -2138,11 +2138,11 @@ function drawPhysicalSagittalModel(geometry, areaFunction) {
   ctx.fillStyle = "rgba(255,253,248,0.94)";
   roundedRectPath(ctx, 12, 12, 240, 50, 6);
   ctx.fill();
-  ctx.fillStyle = "#16483d";
+  ctx.fillStyle = "#24545a";
   ctx.font = "12px Segoe UI";
   ctx.textAlign = "left";
   ctx.fillText(`/${areaFunction.vowel_shape}/ 等価2.5D声道`, 22, 32);
-  ctx.fillStyle = "#666257";
+  ctx.fillStyle = "#626970";
   ctx.fillText("実線: 母音形状  破線: 安静形態", 22, 50);
 }
 
@@ -2181,8 +2181,8 @@ function drawPhysicalExternalProfile(ctx) {
   for (const key of baseKeys) {
     const point = points[key];
     if (!finitePoint(point)) continue;
-    ctx.fillStyle = "#fffdf8";
-    ctx.strokeStyle = "#236b5b";
+    ctx.fillStyle = "#ffffff";
+    ctx.strokeStyle = "#167785";
     ctx.lineWidth = 1.6;
     ctx.beginPath();
     ctx.arc(point.x, point.y, 4.5, 0, Math.PI * 2);
@@ -2359,14 +2359,14 @@ function drawPhysicalTransferChart(analysis) {
   const height = canvas.height;
   const plot = { left: 48, right: width - 16, top: 18, bottom: height - 38 };
   ctx.clearRect(0, 0, width, height);
-  ctx.fillStyle = "#fffdf8";
+  ctx.fillStyle = "#ffffff";
   ctx.fillRect(0, 0, width, height);
-  ctx.fillStyle = "#f8f6ef";
+  ctx.fillStyle = "#f7f8f9";
   ctx.fillRect(plot.left, plot.top, plot.right - plot.left, plot.bottom - plot.top);
   ctx.strokeStyle = "rgba(184,177,163,0.5)";
   ctx.lineWidth = 1;
   ctx.font = "10px Segoe UI";
-  ctx.fillStyle = "#666257";
+  ctx.fillStyle = "#626970";
   ctx.textAlign = "right";
   for (let level = -60; level <= 0; level += 15) {
     const y = plot.bottom - (level + 60) / 60 * (plot.bottom - plot.top);
@@ -2413,7 +2413,7 @@ function drawPhysicalTransferChart(analysis) {
     ctx.moveTo(x, plot.top);
     ctx.lineTo(x, plot.bottom);
     ctx.stroke();
-    ctx.fillStyle = "#2c7e5c";
+    ctx.fillStyle = "#21806f";
     ctx.textAlign = "right";
     ctx.fillText(`F${index + 1}`, x - 3, plot.bottom - 6 - (index % 2) * 12);
   });
@@ -2427,7 +2427,7 @@ function drawPhysicalTransferChart(analysis) {
     ctx.moveTo(x, plot.top);
     ctx.lineTo(x, plot.bottom);
     ctx.stroke();
-    ctx.fillStyle = "#b9472f";
+    ctx.fillStyle = "#b34848";
     ctx.textAlign = "left";
     ctx.fillText(`R${index + 1}`, x + 4, plot.top + 12 + (index % 2) * 12);
   });
@@ -2442,14 +2442,14 @@ function drawPhysicalStageSpectrumChart(analysis, observation) {
   const height = canvas.height;
   const plot = { left: 48, right: width - 150, top: 18, bottom: height - 38 };
   ctx.clearRect(0, 0, width, height);
-  ctx.fillStyle = "#fffdf8";
+  ctx.fillStyle = "#ffffff";
   ctx.fillRect(0, 0, width, height);
-  ctx.fillStyle = "#f8f6ef";
+  ctx.fillStyle = "#f7f8f9";
   ctx.fillRect(plot.left, plot.top, plot.right - plot.left, plot.bottom - plot.top);
   ctx.strokeStyle = "rgba(184,177,163,0.5)";
   ctx.lineWidth = 1;
   ctx.font = "10px Segoe UI";
-  ctx.fillStyle = "#666257";
+  ctx.fillStyle = "#626970";
   ctx.textAlign = "right";
   for (let level = -80; level <= 0; level += 20) {
     const y = plot.bottom - (level + 80) / 80 * (plot.bottom - plot.top);
@@ -2475,9 +2475,9 @@ function drawPhysicalStageSpectrumChart(analysis, observation) {
     ? observation.stage_spectra
     : null;
   const curves = [
-    { label: "声門源", color: "#a06b13", spectrum: stageSpectra?.source },
+    { label: "声門源", color: "#a76b17", spectrum: stageSpectra?.source },
     { label: "声道伝達", color: "#36648c", spectrum: analysis?.spectrum },
-    { label: "放射後音声", color: "#2c7e5c", spectrum: stageSpectra?.radiated },
+    { label: "放射後音声", color: "#21806f", spectrum: stageSpectra?.radiated },
   ];
   ctx.save();
   ctx.beginPath();
@@ -2499,7 +2499,7 @@ function drawPhysicalStageSpectrumChart(analysis, observation) {
   ctx.restore();
   drawChartLegend(ctx, curves.map((curve) => [curve.label, curve.color]), plot.right + 18, 42);
   if (!stageSpectra) {
-    ctx.fillStyle = "#666257";
+    ctx.fillStyle = "#626970";
     ctx.font = "11px Segoe UI";
     ctx.textAlign = "left";
     ctx.fillText("試聴後に声門源と", plot.right + 18, 112);
@@ -2516,9 +2516,9 @@ function drawPhysicalGlottalSource() {
   const plot = { left: 42, right: width - 14, top: 18, bottom: height - 38 };
   const params = currentGlottalSourceParams(state.constraints, 1);
   ctx.clearRect(0, 0, width, height);
-  ctx.fillStyle = "#fffdf8";
+  ctx.fillStyle = "#ffffff";
   ctx.fillRect(0, 0, width, height);
-  ctx.fillStyle = "#f8f6ef";
+  ctx.fillStyle = "#f7f8f9";
   ctx.fillRect(plot.left, plot.top, plot.right - plot.left, plot.bottom - plot.top);
   ctx.strokeStyle = "rgba(184,177,163,0.5)";
   ctx.lineWidth = 1;
@@ -2529,7 +2529,7 @@ function drawPhysicalGlottalSource() {
     ctx.lineTo(plot.right, y);
     ctx.stroke();
   }
-  ctx.strokeStyle = "#a06b13";
+  ctx.strokeStyle = "#a76b17";
   ctx.lineWidth = 2.2;
   ctx.beginPath();
   const previewRate = currentOutputSampleRate();
@@ -2566,7 +2566,7 @@ function drawPhysicalGlottalSource() {
     else ctx.lineTo(x, y);
   }
   ctx.stroke();
-  ctx.fillStyle = "#666257";
+  ctx.fillStyle = "#626970";
   ctx.font = "10px Segoe UI";
   ctx.textAlign = "center";
   ctx.fillText(useSelfOscillator ? "縮約二質点モデル · 3周期相当" : "LF型 · 3声門周期", (plot.left + plot.right) / 2, height - 12);
@@ -2673,7 +2673,7 @@ function drawChartLegend(ctx, items, x, y) {
     ctx.moveTo(x, rowY);
     ctx.lineTo(x + 18, rowY);
     ctx.stroke();
-    ctx.fillStyle = "#4e4a42";
+    ctx.fillStyle = "#4b535a";
     ctx.fillText(label, x + 25, rowY + 4);
   });
 }
@@ -2882,7 +2882,7 @@ function drawNasalProfile() {
   const width = canvas.width;
   const height = canvas.height;
   ctx.clearRect(0, 0, width, height);
-  ctx.fillStyle = "#fffdf8";
+  ctx.fillStyle = "#ffffff";
   ctx.fillRect(0, 0, width, height);
   const geometry = state.vocalTractGeometry ?? buildVocalTractGeometry();
   if (!geometry?.sections?.length) return;
@@ -2901,7 +2901,7 @@ function drawNasalProfile() {
   for (const region of tractRegions) {
     ctx.fillStyle = region.color;
     ctx.fillRect(xAt(region.start), plot.top, xAt(Math.min(1, region.end)) - xAt(region.start), plot.bottom - plot.top);
-    ctx.fillStyle = "#4e4a42";
+    ctx.fillStyle = "#4b535a";
     ctx.font = "11px Segoe UI";
     ctx.textAlign = "center";
     ctx.fillText(region.label, (xAt(region.start) + xAt(Math.min(1, region.end))) / 2, 18);
@@ -2915,7 +2915,7 @@ function drawNasalProfile() {
     ctx.moveTo(plot.left, y);
     ctx.lineTo(plot.right, y);
     ctx.stroke();
-    ctx.fillStyle = "#666257";
+    ctx.fillStyle = "#626970";
     ctx.textAlign = "right";
     ctx.fillText(value.toFixed(1), plot.left - 7, y + 4);
   }
@@ -2934,21 +2934,21 @@ function drawNasalProfile() {
   ctx.stroke();
   ctx.setLineDash([]);
 
-  ctx.fillStyle = "#f1efe7";
+  ctx.fillStyle = "#f2f4f5";
   ctx.fillRect(plot.left, closureBand.top, plot.right - plot.left, closureBand.bottom - closureBand.top);
-  ctx.strokeStyle = "#b8b1a3";
+  ctx.strokeStyle = "#c2c8cd";
   ctx.strokeRect(plot.left, closureBand.top, plot.right - plot.left, closureBand.bottom - closureBand.top);
   const areaFraction = (tuning.closure_area_cm2 - NASAL_TUNING_FIELDS.closure_area_cm2.min)
     / (NASAL_TUNING_FIELDS.closure_area_cm2.max - NASAL_TUNING_FIELDS.closure_area_cm2.min);
   const handleY = closureBand.bottom - clamp(areaFraction, 0, 1) * (closureBand.bottom - closureBand.top);
-  ctx.fillStyle = "#fffdf8";
-  ctx.strokeStyle = "#b9472f";
+  ctx.fillStyle = "#ffffff";
+  ctx.strokeStyle = "#b34848";
   ctx.lineWidth = 2;
   ctx.beginPath();
   ctx.arc(closureX, handleY, 7, 0, Math.PI * 2);
   ctx.fill();
   ctx.stroke();
-  ctx.fillStyle = "#666257";
+  ctx.fillStyle = "#626970";
   ctx.font = "11px Segoe UI";
   ctx.textAlign = "left";
   ctx.fillText("閉鎖位置 x/L・残存面積（拡大）", plot.left + 8, closureBand.top + 13);

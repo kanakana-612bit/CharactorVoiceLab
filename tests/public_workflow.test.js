@@ -55,4 +55,15 @@ if (/\.public-release canvas\s*\{\s*filter:\s*grayscale/.test(css)) {
   throw new Error("Reference images and diagnostic graphs must retain their functional colors");
 }
 
+if (!/function drawImage\([\s\S]*?ctx\.fillStyle = "#ffffff"/.test(app)
+  || !/#setupTab \.canvas-stack[\s\S]*?background: #fff/.test(css)) {
+  throw new Error("Reference-image preview surfaces must use a white background without recoloring the image");
+}
+
+for (const legacyWarmColor of ["#fff8ed", "#f8f6ef", "#f1efe7", "#ece7dc", "#e9e6dc", "#f3efe5"]) {
+  if (css.includes(legacyWarmColor) || app.includes(legacyWarmColor)) {
+    throw new Error(`Legacy warm UI color remains: ${legacyWarmColor}`);
+  }
+}
+
 console.log("Public jxiv-reader workflow static checks passed");
