@@ -2359,7 +2359,7 @@ summary {
 }
 
 /* Public jxiv-reader workflow shell. */
-.public-release canvas { filter: grayscale(1); }
+.public-release canvas { filter: none; }
 .public-release .app-header {
   position: sticky;
   top: 0;
@@ -2453,6 +2453,53 @@ summary {
   background: rgba(240, 240, 237, 0.97);
 }
 .public-release .profile-canvas-stack { background: #e8e8e5; }
+.public-release .floating-action-dock,
+.public-release .dataset-preview,
+.public-release .drop-zone,
+.public-release .canvas-stack,
+.public-release .calibration-metric,
+.public-release .calibration-status,
+.public-release .tract-region-item,
+.public-release .physical-layer-toolbar,
+.public-release .physical-audition-toolbar,
+.public-release .physical-metric-strip > div,
+.public-release .nasal-summary-item {
+  background: #f1f1ef;
+}
+.public-release .calibration-status.reconciled,
+.public-release .matched-guide-row,
+.public-release .model-guide-row {
+  background: #e8e8e5;
+}
+.compact-guide-heading,
+.guide-age-band {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+}
+.compact-guide-heading h3 {
+  margin: 0;
+  font-size: 14px;
+}
+.compact-guide-heading span,
+.guide-age-band span {
+  color: var(--muted);
+  font-size: 11px;
+}
+.guide-age-band {
+  padding: 8px 0;
+  border-block: 1px solid var(--line);
+}
+.guide-age-band strong {
+  font-size: 12px;
+  text-align: right;
+}
+.body-fat-current-summary {
+  margin: 0;
+  color: var(--ink);
+  font-weight: 600;
+}
 .stage-heading,
 .workflow-stage-banner {
   display: flex;

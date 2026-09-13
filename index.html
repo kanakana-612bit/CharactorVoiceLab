@@ -70,13 +70,6 @@
             </label>
           </div>
 
-          <aside class="privacy-notice" aria-labelledby="privacyNoticeHeading">
-            <h3 id="privacyNoticeHeading">個人情報とローカル処理について</h3>
-            <p>解析・音声生成・保存は、このPC上のローカルサービスだけで実行されます。入力画像、プロファイル、読み上げテキスト、生成音声を外部サービスへ送信しません。</p>
-            <p>実在人物の画像は、本人の明示的な同意または適法な利用権限がある場合に限って使用してください。病歴その他の医療情報は入力しないでください。保存パッケージには、選択した参照画像と設計値が含まれます。</p>
-            <p>初回セットアップと更新時に限り、依存ソフトウェアとモデルを公式配布元から取得するための通信が発生します。この通信に参照画像や設計データは含まれません。</p>
-          </aside>
-
           <h2 class="section-heading">基本プロファイル</h2>
           <div class="form-grid">
             <label>
@@ -165,27 +158,27 @@
                 <small id="bmiReferenceSource">BMI kg/m2</small>
               </div>
             </div>
-            <details class="body-fat-guide" open>
-              <summary>体脂肪率設定ガイド</summary>
-              <p id="bodyFatGuideSummary" class="note"></p>
-              <div id="bodyFatGuideBadges" class="guide-badges"></div>
-              <div class="table-wrap guide-table-wrap">
-                <table>
-                  <thead>
-                    <tr>
-                      <th>体型</th>
-                      <th>基準</th>
-                      <th>BMI</th>
-                      <th>体脂肪率</th>
-                      <th>分布</th>
-                    </tr>
-                  </thead>
-                  <tbody id="bodyFatGuideTable"></tbody>
-                </table>
+            <section class="body-fat-guide" aria-labelledby="bodyFatGuideHeading">
+              <div class="compact-guide-heading">
+                <h3 id="bodyFatGuideHeading">体脂肪率設定ガイド</h3>
+                <span>年齢・性別に応じて自動選択</span>
               </div>
-              <p id="bodyFatGuideNote" class="note"></p>
-            </details>
+              <div class="guide-age-band">
+                <span>参照年齢階級</span>
+                <strong id="bodyFatGuideAgeBand">登録データを確認中</strong>
+              </div>
+              <p id="bodyFatGuideSummary" class="body-fat-current-summary"></p>
+              <div id="bodyFatGuideBadges" class="guide-badges"></div>
+              <div id="bodyFatGuideTable" hidden></div>
+              <p id="bodyFatGuideNote" hidden></p>
+            </section>
           </section>
+
+          <aside class="privacy-notice" aria-labelledby="privacyNoticeHeading">
+            <h3 id="privacyNoticeHeading">個人情報とローカル処理について</h3>
+            <p>解析・音声生成・保存は、このPC上のローカルサービスだけで実行されます。入力画像、プロファイル、読み上げテキスト、生成音声を外部サービスへ送信しません。</p>
+            <p>実在人物の画像は、本人の同意または適法な利用権限がある場合に限って使用してください。</p>
+          </aside>
 
           <div class="landmark-internals" hidden>
             <h3>ランドマーク</h3>
@@ -234,7 +227,6 @@
                   <canvas id="bodyModelCanvas" width="720" height="560"></canvas>
                 </div>
               </div>
-              <div id="compositionGuideMount" class="preview-card composition-preview-card"></div>
             </div>
             <div class="head-preview-grid">
               <div class="preview-card">

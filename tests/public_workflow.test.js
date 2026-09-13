@@ -45,4 +45,14 @@ if (!/\.workflow-nav/.test(css) || !/\.public-flow-panel/.test(css)) {
   throw new Error("Public workflow styling is missing");
 }
 
+const guidePosition = html.indexOf('class="composition-guide"');
+const privacyPosition = html.indexOf('class="privacy-notice"');
+if (guidePosition < 0 || privacyPosition < guidePosition) {
+  throw new Error("The compact body-composition guide must precede the privacy notice in the input column");
+}
+
+if (/\.public-release canvas\s*\{\s*filter:\s*grayscale/.test(css)) {
+  throw new Error("Reference images and diagnostic graphs must retain their functional colors");
+}
+
 console.log("Public jxiv-reader workflow static checks passed");

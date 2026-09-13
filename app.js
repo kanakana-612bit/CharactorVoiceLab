@@ -314,10 +314,10 @@ const els = {
   bmiDelta: document.getElementById("bmiDelta"),
   bmiReferenceSource: document.getElementById("bmiReferenceSource"),
   bodyFatGuideSummary: document.getElementById("bodyFatGuideSummary"),
+  bodyFatGuideAgeBand: document.getElementById("bodyFatGuideAgeBand"),
   bodyFatGuideBadges: document.getElementById("bodyFatGuideBadges"),
   bodyFatGuideTable: document.getElementById("bodyFatGuideTable"),
   bodyFatGuideNote: document.getElementById("bodyFatGuideNote"),
-  compositionGuideMount: document.getElementById("compositionGuideMount"),
   vowelExecutionSliders: document.getElementById("vowelExecutionSliders"),
   consonantExecutionSliders: document.getElementById("consonantExecutionSliders"),
   vowelCalibrationMount: document.getElementById("vowelCalibrationMount"),
@@ -4159,33 +4159,21 @@ function renderCompositionGuide() {
   if (els.computedBmi) els.computedBmi.textContent = format(bmi, 1);
   if (els.computedBmiClass) els.computedBmiClass.textContent = bmiClassLabel(bmi);
   if (els.referenceBmiMedian) els.referenceBmiMedian.textContent = format(bmiReference.value, 1);
-  if (els.referenceBmiNote) els.referenceBmiNote.textContent = bmiReference.note;
+  if (els.referenceBmiNote) els.referenceBmiNote.textContent = bmiReference.status || "統計参照中心";
   if (els.bmiDelta) els.bmiDelta.textContent = bmi != null && bmiReference.value != null ? `${bmi >= bmiReference.value ? "+" : ""}${format(bmi - bmiReference.value, 1)}` : "-";
   if (els.bmiReferenceSource) {
     els.bmiReferenceSource.replaceChildren();
     if (bmiReference.source) appendSourceCitation(els.bmiReferenceSource, bmiReference.source, bmiReference.note);
     if (!els.bmiReferenceSource.childNodes.length) els.bmiReferenceSource.textContent = bmiReference.status;
   }
+  if (els.bodyFatGuideAgeBand) {
+    els.bodyFatGuideAgeBand.textContent = guide?.age_band_label ?? "該当階級の資料は未登録";
+  }
 
   if (els.bodyFatGuideBadges) {
     els.bodyFatGuideBadges.innerHTML = "";
     const estimateText = formulaEstimate ? `式推定 ${format(formulaEstimate.value, 1)}%` : "式推定なし";
-    for (const text of [bmiClassLabel(bmi), bodyFatCategoryLabel(bodyFatPercent), estimateText, guide ? `${guide.age_band_label}: ${active.available ? "参照中" : "範囲外"}` : "ガイド未搭載"]) {
-      const badge = document.createElement("span");
-      badge.textContent = text;
-      els.bodyFatGuideBadges.appendChild(badge);
-    }
-    const extraBadges = [];
-    if (modelEstimate.body_fat_percent != null) {
-      extraBadges.push(`active BF ${format(modelEstimate.body_fat_percent, 1)}%`);
-    }
-    if (modelEstimate.japanese_body_composition_reference) {
-      extraBadges.push("Komiya aggregate");
-    }
-    if (modelEstimate.regional_skinfold_estimate?.sites?.abdomen) {
-      extraBadges.push(`abdomen SF ${format(modelEstimate.regional_skinfold_estimate.sites.abdomen.estimated_mm, 1)} mm`);
-    }
-    for (const text of extraBadges) {
+    for (const text of [bmiClassLabel(bmi), bodyFatCategoryLabel(bodyFatPercent), estimateText]) {
       const badge = document.createElement("span");
       badge.textContent = text;
       els.bodyFatGuideBadges.appendChild(badge);
@@ -4195,32 +4183,20 @@ function renderCompositionGuide() {
   if (els.bodyFatGuideSummary) {
     if (!guide) {
       els.bodyFatGuideSummary.textContent = formulaEstimate
-        ? `年齢階級別の実測分布は未搭載です。暫定的には文献式から体脂肪率 ${format(formulaEstimate.value, 1)}% 程度を推定できます。`
-        : "年齢階級別の体脂肪率分布ガイドはまだ登録されていません。";
+        ? `実測分布未登録 / 式推定 ${format(formulaEstimate.value, 1)}%`
+        : "この年齢階級のガイドは未登録です。";
     } else if (!active.available) {
-      const formulaPart = formulaEstimate ? `暫定式推定は ${format(formulaEstimate.value, 1)}% です。` : "";
-      els.bodyFatGuideSummary.textContent = `${active.reason} ${formulaPart} ${guide.applicability_note}`;
+      els.bodyFatGuideSummary.textContent = formulaEstimate
+        ? `参照範囲外 / 式推定 ${format(formulaEstimate.value, 1)}%`
+        : "参照範囲外です。";
     } else if (bodyFatPercent == null) {
-      const formulaPart = formulaEstimate ? `BMI・年齢・性別からの式推定は ${format(formulaEstimate.value, 1)}% です。` : "";
-      els.bodyFatGuideSummary.textContent = `${guide.applicability_note} ${formulaPart} 体脂肪率を入力すると、BMIとの組み合わせから近い体型群を表示します。`;
+      els.bodyFatGuideSummary.textContent = formulaEstimate
+        ? `現在の式推定 ${format(formulaEstimate.value, 1)}%`
+        : "体脂肪率を入力してください。";
     } else if (matchedGroup) {
-      const delta = formulaEstimate ? `式推定との差 ${format(bodyFatPercent - formulaEstimate.value, 1)}%。` : "";
-      els.bodyFatGuideSummary.textContent = `現在の設定は「${matchedGroup.label}」に近いです。${delta}${matchedGroup.interpretation}`;
+      els.bodyFatGuideSummary.textContent = `現在の設定: ${matchedGroup.label}`;
     } else {
-      const formulaPart = formulaEstimate ? `文献式推定は ${format(formulaEstimate.value, 1)}% です。` : "";
-      els.bodyFatGuideSummary.textContent = `現在のBMIと体脂肪率の組み合わせは、この論文の6分類には直接対応しません。${formulaPart}設計値として扱い、分布補正は手動判断してください。`;
-    }
-    const komiyaGroup = modelEstimate.japanese_body_composition_reference?.group;
-    const abdomenSkinfold = modelEstimate.regional_skinfold_estimate?.sites?.abdomen;
-    const supplements = [];
-    if (komiyaGroup) {
-      supplements.push(`Komiya reference: ${modelEstimate.japanese_body_composition_reference.label}, BF center ${format(komiyaGroup.body_fat_percent?.mean, 1)}%.`);
-    }
-    if (abdomenSkinfold) {
-      supplements.push(`Skinfold response guide: abdomen ${format(abdomenSkinfold.estimated_mm, 1)} mm (${modelEstimate.regional_skinfold_estimate.status}).`);
-    }
-    if (supplements.length) {
-      els.bodyFatGuideSummary.textContent = `${els.bodyFatGuideSummary.textContent} ${supplements.join(" ")}`;
+      els.bodyFatGuideSummary.textContent = "該当する集計区分はありません。";
     }
   }
 
@@ -14415,13 +14391,6 @@ function imageExtension(name, mimeType) {
   return { "image/png": "png", "image/jpeg": "jpg", "image/webp": "webp", "image/gif": "gif", "image/bmp": "bmp" }[mimeType] ?? "png";
 }
 
-function mountCompositionGuide() {
-  const guide = document.querySelector(".composition-guide");
-  if (guide && els.compositionGuideMount && guide.parentElement !== els.compositionGuideMount) {
-    els.compositionGuideMount.appendChild(guide);
-  }
-}
-
 function mountArticulationWorkspaces() {
   const tractAnalysis = document.querySelector(".tract-analysis");
   const nasalCalibration = document.querySelector(".nasal-calibration");
@@ -14619,7 +14588,6 @@ function init() {
   installVoiceIdentityHandlers();
   installSpeakerInversionHandlers();
   refreshLandmarkSelect();
-  mountCompositionGuide();
   mountArticulationWorkspaces();
   renderLandmarkReference();
   renderPublicationReferences();
