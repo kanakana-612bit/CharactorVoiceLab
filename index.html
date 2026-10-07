@@ -41,7 +41,6 @@
         <button class="tab-button workflow-step" data-tab-target="finalPreviewTab"><span>06</span>最終確認</button>
       </div>
       <div class="workflow-tools" aria-label="補助画面">
-        <button class="tab-button utility-tab" data-tab-target="detailTab">詳細設計</button>
         <button class="tab-button utility-tab" data-tab-target="referenceTab">資料・方針</button>
       </div>
     </nav>
@@ -550,7 +549,6 @@
         <div class="workflow-stage-banner detail-full">
           <span class="stage-number">02</span>
           <div><strong>声道物理モデル</strong><span>特徴点から導いた形状、断面積、音響応答を確認します。</span></div>
-          <button type="button" class="tab-button stage-link" data-tab-target="detailTab">詳細パラメータ</button>
         </div>
         <section class="pane physical-model-shape-pane">
           <div class="pane-head physical-model-heading">
@@ -626,31 +624,7 @@
             <div><dt>Speed quotient</dt><dd id="physicalSpeedQuotientValue">-</dd></div>
             <div><dt>音素目標</dt><dd id="physicalTargetProfileValue">-</dd></div>
           </dl>
-          <p class="note">構音ターゲットは母音とPerformanceControlRangeから導く表示値です。断面形状の直接調整は下段のA(x) / W(x)で行います。</p>
-        </section>
-
-        <section class="pane physical-area-pane">
-          <div class="pane-head">
-            <div>
-              <span class="section-kicker">Editable acoustic projection</span>
-              <h2>断面積関数 A(x)・横幅 W(x)</h2>
-            </div>
-            <span id="physicalTractEditStatus">補正点を上下にドラッグできます。</span>
-          </div>
-          <div class="tract-edit-toolbar physical-tract-toolbar">
-            <div class="tract-edit-mode" role="group" aria-label="物理モデルグラフ編集対象">
-              <button id="physicalEditAreaModeBtn" class="active" type="button" aria-pressed="true">断面積 A(x)</button>
-              <button id="physicalEditWidthModeBtn" type="button" aria-pressed="false">横幅 W(x)</button>
-            </div>
-            <span>選択した補正は声道プロファイル画面と共通です。</span>
-            <div class="tract-nudge-controls" aria-label="物理モデル選択点の微調整">
-              <button id="physicalNudgeTractDownBtn" type="button" title="選択点を0.01下げる">−</button>
-              <output id="physicalTractSelectedPointValue">点を選択</output>
-              <button id="physicalNudgeTractUpBtn" type="button" title="選択点を0.01上げる">＋</button>
-            </div>
-            <button id="physicalResetAreaTuningBtn" type="button">選択母音をリセット</button>
-          </div>
-          <canvas id="physicalAreaCanvas" width="900" height="300" tabindex="0" aria-label="声道断面積と横幅の編集グラフ"></canvas>
+          <p class="note">構音ターゲットは母音とPerformanceControlRangeから導く表示値です。断面形状の直接調整は「高度な設定」内のA(x) / W(x)で行います。</p>
         </section>
 
         <section class="pane physical-transfer-pane">
@@ -667,30 +641,6 @@
             <span>各曲線を個別に正規化 · 12 kHzまで観測</span>
           </div>
           <canvas id="physicalStageSpectrumCanvas" width="900" height="300" aria-label="声門源、声道伝達、放射後音声の段階別スペクトル"></canvas>
-          <div class="physical-audition-diagnostics">
-            <div class="physical-audition-heading">
-              <strong>試聴経路の切り分け</strong>
-              <span>この画面のサンプル再生だけに反映</span>
-            </div>
-            <div class="physical-audition-stage-list" aria-label="物理合成処理段の試聴切り替え">
-              <label><input type="checkbox" data-physical-audition-stage="self_oscillating_source" checked /> 自励二質点声門</label>
-              <label><input type="checkbox" data-physical-audition-stage="phonation_dynamics" checked /> 呼吸・発声時間変動</label>
-              <label><input type="checkbox" data-physical-audition-stage="source_spectral_shape" checked /> 声門スペクトル</label>
-              <label><input type="checkbox" data-physical-audition-stage="source_tract_coupling" checked /> 声源・声道結合</label>
-              <label><input type="checkbox" data-physical-audition-stage="distributed_loss" checked /> 管壁損失</label>
-              <label><input type="checkbox" data-physical-audition-stage="resonance_bandwidth" checked /> 共鳴帯域整合</label>
-              <label><input type="checkbox" data-physical-audition-stage="output_conditioning" checked /> 出力整音</label>
-              <label><input type="checkbox" data-physical-audition-stage="higher_order_modes" checked /> 5 kHz以上の横断モード</label>
-              <label><input type="checkbox" data-physical-audition-stage="side_branches" checked /> 側枝</label>
-              <label><input type="checkbox" data-physical-audition-stage="body_resonance" checked /> 体幹反響</label>
-            </div>
-            <div class="physical-bandwidth-audition" role="group" aria-label="高域成分の聴覚比較">
-              <button id="physicalPlayFullBandBtn" type="button">全帯域を試聴</button>
-              <button id="physicalPlayLowBandBtn" type="button">4.5 kHz制限を試聴</button>
-              <span>同一条件の音を比較し、高次成分の寄与を確認します。</span>
-            </div>
-            <output id="physicalEnvelopeSummary" class="physical-envelope-summary">再生後に倍音包絡を表示します。</output>
-          </div>
         </section>
 
         <section class="pane physical-source-pane">
@@ -699,7 +649,7 @@
               <span class="section-kicker">LF / Reduced two-mass A/B</span>
               <h2>声門体積速度</h2>
             </div>
-            <span>自励源は試聴経路で比較可能</span>
+            <span>選択母音に対する声門源の時間波形</span>
           </div>
           <canvas id="physicalGlottalCanvas" width="480" height="300" aria-label="縮約二質点声門モデルの体積速度波形"></canvas>
         </section>
@@ -714,6 +664,11 @@
           </div>
           <canvas id="physicalCrossSectionCanvas" width="900" height="270" aria-label="選択母音の2.5D声道断面列"></canvas>
         </section>
+
+        <details id="physicalAdvancedSettings" class="pane physical-advanced-settings">
+          <summary>高度な設定</summary>
+          <div id="physicalAdvancedSettingsMount" class="physical-advanced-settings-content"></div>
+        </details>
 
         <section class="physical-computation-flow" aria-label="物理モデルの計算経路">
           <div><strong>外観参照点</strong><span>手動指定</span></div>

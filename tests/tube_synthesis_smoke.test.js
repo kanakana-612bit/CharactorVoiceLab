@@ -59,29 +59,11 @@ for (const id of [
 if (!/<summary>2\.5D音響管・出力詳細<\/summary>/.test(indexHtml)) {
   throw new Error("The acoustic preview is not labeled as the sole 2.5D tube model");
 }
-for (const stage of [
-  "self_oscillating_source",
-  "phonation_dynamics",
-  "source_spectral_shape",
-  "source_tract_coupling",
-  "distributed_loss",
-  "resonance_bandwidth",
-  "output_conditioning",
-  "higher_order_modes",
-  "side_branches",
-  "body_resonance",
-]) {
-  if (!new RegExp(`data-physical-audition-stage="${stage}"`).test(indexHtml)) {
-    throw new Error(`Missing physical audition stage control: ${stage}`);
-  }
+if (/data-physical-audition-stage=|id="physicalPlayFullBandBtn"|id="physicalPlayLowBandBtn"/.test(indexHtml)) {
+  throw new Error("Experimental audition-path controls remain duplicated in the physical-model overview");
 }
-if (!/id="physicalEnvelopeSummary"/.test(indexHtml)) {
-  throw new Error("The physical rendered-spectrum observation is missing");
-}
-if (!/id="physicalStageSpectrumCanvas"/.test(indexHtml)
-  || !/id="physicalPlayFullBandBtn"/.test(indexHtml)
-  || !/id="physicalPlayLowBandBtn"/.test(indexHtml)) {
-  throw new Error("The 12 kHz stage spectrum and bandwidth A/B audition controls are missing");
+if (!/id="physicalStageSpectrumCanvas"/.test(indexHtml)) {
+  throw new Error("The 12 kHz stage-spectrum observation is missing");
 }
 if (!/<input id="projectTitleInput"[^>]*value="voice_profile"/.test(indexHtml)) {
   throw new Error("Default profile name is not voice_profile");

@@ -352,7 +352,6 @@ const els = {
   tractCrossSectionCanvas: document.getElementById("tractCrossSectionCanvas"),
   tractRegionSummary: document.getElementById("tractRegionSummary"),
   physicalSagittalCanvas: document.getElementById("physicalSagittalCanvas"),
-  physicalAreaCanvas: document.getElementById("physicalAreaCanvas"),
   physicalTransferCanvas: document.getElementById("physicalTransferCanvas"),
   physicalStageSpectrumCanvas: document.getElementById("physicalStageSpectrumCanvas"),
   physicalGlottalCanvas: document.getElementById("physicalGlottalCanvas"),
@@ -382,17 +381,7 @@ const els = {
   physicalSpeedQuotientValue: document.getElementById("physicalSpeedQuotientValue"),
   physicalTargetProfileValue: document.getElementById("physicalTargetProfileValue"),
   physicalResonanceSummary: document.getElementById("physicalResonanceSummary"),
-  physicalEnvelopeSummary: document.getElementById("physicalEnvelopeSummary"),
-  physicalPlayFullBandBtn: document.getElementById("physicalPlayFullBandBtn"),
-  physicalPlayLowBandBtn: document.getElementById("physicalPlayLowBandBtn"),
   physicalAuditionStageInputs: Array.from(document.querySelectorAll("[data-physical-audition-stage]")),
-  physicalTractEditStatus: document.getElementById("physicalTractEditStatus"),
-  physicalEditAreaModeBtn: document.getElementById("physicalEditAreaModeBtn"),
-  physicalEditWidthModeBtn: document.getElementById("physicalEditWidthModeBtn"),
-  physicalNudgeTractDownBtn: document.getElementById("physicalNudgeTractDownBtn"),
-  physicalNudgeTractUpBtn: document.getElementById("physicalNudgeTractUpBtn"),
-  physicalTractSelectedPointValue: document.getElementById("physicalTractSelectedPointValue"),
-  physicalResetAreaTuningBtn: document.getElementById("physicalResetAreaTuningBtn"),
   vocalTractProfileSliders: document.getElementById("vocalTractProfileSliders"),
   glottalPhysiologySliders: document.getElementById("glottalPhysiologySliders"),
   trunkPhysiologySliders: document.getElementById("trunkPhysiologySliders"),
@@ -14585,6 +14574,12 @@ function installPublicWorkflowHandlers() {
 }
 
 function init() {
+  const advancedSettingsMount = document.getElementById("physicalAdvancedSettingsMount");
+  const legacyDetailTab = document.getElementById("detailTab");
+  if (advancedSettingsMount && legacyDetailTab) {
+    while (legacyDetailTab.firstChild) advancedSettingsMount.appendChild(legacyDetailTab.firstChild);
+    legacyDetailTab.remove();
+  }
   installVoiceIdentityHandlers();
   installSpeakerInversionHandlers();
   refreshLandmarkSelect();

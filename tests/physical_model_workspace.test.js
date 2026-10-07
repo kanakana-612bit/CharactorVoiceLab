@@ -12,12 +12,9 @@ if (!/data-tab-target="physicalModelTab"[^>]*>[\s\S]*?物理モデル<\/button>/
 
 for (const id of [
   "physicalSagittalCanvas",
-  "physicalAreaCanvas",
   "physicalTransferCanvas",
   "physicalGlottalCanvas",
   "physicalCrossSectionCanvas",
-  "physicalEditAreaModeBtn",
-  "physicalEditWidthModeBtn",
   "physicalModelStatus",
 ]) {
   if (!new RegExp(`id="${id}"`).test(html)) throw new Error(`Missing physical workspace element: ${id}`);
@@ -44,11 +41,6 @@ if (!/function drawPhysicalModelWorkspace\([\s\S]*buildTubeAreaFunction\([\s\S]*
   throw new Error("The physical workspace is not connected to the existing area-function and transfer models");
 }
 
-if (!/drawTractProfileCanvas\(els\.physicalAreaCanvas, geometry, "physical", false\)/.test(app)
-  || !/state\.areaTuningDrag = \{ \.\.\.hit, surface \}/.test(app)) {
-  throw new Error("The physical A(x) canvas does not share the existing manual tuning state");
-}
-
 if (!/\["detailTab", "physicalModelTab", "vowelTab", "consonantTab"\]/.test(app)) {
   throw new Error("The sample preview dock is not available in every acoustic workspace");
 }
@@ -63,12 +55,21 @@ if (!/#physicalModelTab\s*\{[\s\S]*grid-template-columns/.test(css)
   throw new Error("The physical workspace lacks desktop or responsive layout rules");
 }
 
-if (!/#physicalModelTab\s*\{[\s\S]*grid-template-areas:\s*"stage stage"\s*"geometry transfer"\s*"source transfer"\s*"area area"/.test(css)
+if (!/#physicalModelTab\s*\{[\s\S]*grid-template-areas:\s*"stage stage"\s*"geometry transfer"\s*"source transfer"\s*"target sections"\s*"advanced advanced"/.test(css)
   || !/\.physical-model-shape-pane\s*\{\s*grid-area:\s*geometry/.test(css)
   || !/\.physical-transfer-pane\s*\{\s*grid-area:\s*transfer/.test(css)
   || !/\.physical-source-pane\s*\{\s*grid-area:\s*source/.test(css)
-  || !/\.physical-area-pane\s*\{\s*grid-area:\s*area/.test(css)) {
-  throw new Error("The physical workspace does not follow the geometry/source, transfer, then area hierarchy");
+  || !/\.physical-advanced-settings\s*\{\s*grid-area:\s*advanced/.test(css)) {
+  throw new Error("The physical workspace does not follow the geometry/source, transfer, then advanced-settings hierarchy");
+}
+
+if (/id="physicalAreaCanvas"|class="physical-audition-diagnostics"/.test(html)) {
+  throw new Error("Duplicate area-function or audition-path controls remain in the physical workspace");
+}
+
+if (!/id="physicalAdvancedSettings"[\s\S]*<summary>高度な設定<\/summary>/.test(html)
+  || !/while \(legacyDetailTab\.firstChild\) advancedSettingsMount\.appendChild/.test(app)) {
+  throw new Error("Legacy detail controls are not mounted into the physical advanced-settings disclosure");
 }
 
 if (!/<h2>構音空間プレビュー<\/h2>/.test(html)) {

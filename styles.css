@@ -1803,8 +1803,8 @@ summary {
     "stage stage"
     "geometry transfer"
     "source transfer"
-    "area area"
     "target sections"
+    "advanced advanced"
     "flow flow";
   align-items: start;
   gap: 10px;
@@ -1826,10 +1826,6 @@ summary {
   grid-area: source;
 }
 
-.physical-area-pane {
-  grid-area: area;
-}
-
 .physical-articulation-pane {
   grid-area: target;
 }
@@ -1840,6 +1836,60 @@ summary {
 
 .physical-computation-flow {
   grid-area: flow;
+}
+
+.physical-advanced-settings {
+  grid-area: advanced;
+  padding: 0;
+  overflow: hidden;
+}
+
+.physical-advanced-settings > summary {
+  display: flex;
+  align-items: center;
+  min-height: 48px;
+  padding: 0 16px;
+  border-bottom: 0;
+  cursor: pointer;
+  font-weight: 700;
+  list-style: none;
+}
+
+.physical-advanced-settings > summary::-webkit-details-marker {
+  display: none;
+}
+
+.physical-advanced-settings > summary::before {
+  content: "+";
+  display: inline-grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  margin-right: 9px;
+  border: 1px solid var(--line-strong);
+  border-radius: 50%;
+  font-weight: 500;
+}
+
+.physical-advanced-settings[open] > summary {
+  border-bottom: 1px solid var(--line);
+}
+
+.physical-advanced-settings[open] > summary::before {
+  content: "−";
+}
+
+.physical-advanced-settings-content {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 10px;
+  padding: 10px;
+  background: var(--canvas-bg);
+}
+
+.physical-advanced-settings-content > .pane {
+  margin: 0;
+  box-shadow: none;
 }
 
 .physical-model-workspace > .pane {
@@ -2861,9 +2911,9 @@ pre {
       "geometry"
       "source"
       "transfer"
-      "area"
       "target"
       "sections"
+      "advanced"
       "flow";
   }
 
