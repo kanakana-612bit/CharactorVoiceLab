@@ -11,6 +11,11 @@ CharacterVoiceDesigner converts appearance-derived and manually designed voice f
 This repository is a concept-implementation prototype of the design framework
 proposed in [「身体構造推定に基づくキャラクター指向音声合成の設計枠組み」](https://doi.org/10.51094/jxiv.4033).
 
+The project's design principles, separation of observation/inference/design/performance,
+and public-use boundaries are documented in [`DESIGN_PHILOSOPHY.md`](DESIGN_PHILOSOPHY.md).
+The privacy, identity, and non-generation functional checks performed for the public
+release are recorded in [`PUBLIC_RELEASE_AUDIT.md`](PUBLIC_RELEASE_AUDIT.md).
+
 The **Physical Vocal-Tract Model** tab presents the experimental physical synthesizer as
 one traceable pipeline: manually placed appearance landmarks, derived morphological
 articulatory space, vowel-conditioned 2.5D equivalent-tube geometry, editable
