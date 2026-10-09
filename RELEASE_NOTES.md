@@ -1,5 +1,27 @@
 # CharacterVoiceDesigner Release Notes
 
+## Nasal Acoustic-Path Parity Fix - 2026-10-09
+
+- Fixed omissions in the nasal path: both `/m/` and the three-channel `/n/`
+  graph now use the existing frequency-dependent boundary-layer loss model.
+  Lip radiation follows the changing aperture, and nostril radiation uses its
+  own aperture-derived filter coefficients and independent filter state.
+- Added a final-vowel bandwidth measurement using each actual coupled graph's
+  oral-outlet impulse response. Center-preserving bandwidth correction and the
+  existing higher-mode correction enter oral radiation smoothly during release.
+  Closed nasal radiation receives no vowel formant targets; no separate vowel
+  recording is spliced into the continuously generated utterance.
+- Replaced inherited standalone-vowel spectrum, dynamics, radiation and loss
+  descriptions with the actual nasal output diagnostics. Raw outlet energy
+  fractions are explicitly identified as preceding spectral completion.
+- Kept the accepted vowel renderer, single-tube solver, shared oscillator and
+  prescribed-source generator unchanged, enforced by focused source checksums.
+  Added 44.1/48 kHz radiation/loss checks and exact closed-hold/bypass checks.
+  Optional representative rendering also saves an unchanged `/a/` reference.
+- These changes repair signal-chain differences, not demonstrated phoneme
+  recognition or naturalness. Perceptual `/m/-/n/` separation remains subject to
+  listening evaluation. Standalone `/N/` and other consonant paths are unchanged.
+
 ## Nasal Source and Diagnostics Update - 2026-10-09
 
 - Connected both `/m/` and the three-channel `/n/` waveguide to the existing reduced

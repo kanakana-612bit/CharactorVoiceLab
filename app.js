@@ -10795,6 +10795,10 @@ function synthesizeBranchedNasalOralTubeCore(oralAreas, nasalAreas, options) {
   const oralWallLeft = new Float32Array(oralCount + 1);
   const nasalWallRight = new Float32Array(nasalCount + 1);
   const nasalWallLeft = new Float32Array(nasalCount + 1);
+  const oralBoundaryRight = new Float32Array(oralCount + 1);
+  const oralBoundaryLeft = new Float32Array(oralCount + 1);
+  const nasalBoundaryRight = new Float32Array(nasalCount + 1);
+  const nasalBoundaryLeft = new Float32Array(nasalCount + 1);
   const oralWallComplianceMix = new Float32Array(oralCount + 1);
   const nasalWallComplianceMix = new Float32Array(nasalCount + 1);
   const nasalHydraulicLossScales = new Float32Array(nasalCount).fill(1);
@@ -10815,12 +10819,9 @@ function synthesizeBranchedNasalOralTubeCore(oralAreas, nasalAreas, options) {
     nasalWallComplianceMix
   );
   const glottalBoundary = createNasalGlottalBoundary(options, sampleRate, glottalReflection);
-  const oralRadiationModel = tubeTerminalRadiationModel(lossParams, sampleRate, false);
-  const nasalRadiationModel = tubeTerminalRadiationModel(lossParams, sampleRate, true);
-  const radiationAlpha = oralRadiationModel.flow_smoothing_alpha;
-  const oralRadiationMemory = oralRadiationModel.differentiator_memory;
-  const nasalRadiationMemory = nasalRadiationModel.differentiator_memory;
-  const outputMemory = oralRadiationModel.output_memory;
+  let oralRadiationModel = tubeTerminalRadiationModel(lossParams, sampleRate, false, lipRadiationArea);
+  const nasalRadiationModel = tubeTerminalRadiationModel(lossParams, sampleRate, true, nostrilRadiationArea);
+  const initialOralRadiationModel = oralRadiationModel;
   let oralFlowState = 0;
   let nasalFlowState = 0;
   let previousOralFlow = 0;
@@ -10834,6 +10835,7 @@ function synthesizeBranchedNasalOralTubeCore(oralAreas, nasalAreas, options) {
   for (let sampleIndex = 0; sampleIndex < sampleCount; sampleIndex++) {
     if (sampleIndex > 0 && sampleIndex % geometryUpdateStride === 0) {
       updateGeometry(sampleIndex);
+      oralRadiationModel = tubeTerminalRadiationModel(lossParams, sampleRate, false, lipRadiationArea);
       updateWallComplianceMix(
         activeOralAreas,
         oralMeanArea,
@@ -10920,11 +10922,23 @@ function synthesizeBranchedNasalOralTubeCore(oralAreas, nasalAreas, options) {
       nasalWallComplianceMix,
       nasalWallMemoryRelaxation
     );
+    applyBoundaryLayerLossToTubeState(
+      nextOralRight, nextOralLeft, oralBoundaryRight, oralBoundaryLeft,
+      activeOralHydraulicLossScales,
+      oralLossModel.boundary_layer_mix_per_section, oralLossModel.boundary_layer_relaxation
+    );
+    applyBoundaryLayerLossToTubeState(
+      nextNasalRight, nextNasalLeft, nasalBoundaryRight, nasalBoundaryLeft,
+      nasalHydraulicLossScales,
+      nasalLossModel.boundary_layer_mix_per_section, nasalLossModel.boundary_layer_relaxation
+    );
 
-    oralFlowState += radiationAlpha * (mouthFlow - oralFlowState);
-    nasalFlowState += radiationAlpha * 0.82 * (noseFlow - nasalFlowState);
-    const mouthRadiated = (oralFlowState - previousOralFlow * oralRadiationMemory) + previousOralOutput * outputMemory;
-    const noseRadiated = (nasalFlowState - previousNasalFlow * nasalRadiationMemory) + previousNasalOutput * outputMemory;
+    oralFlowState += oralRadiationModel.flow_smoothing_alpha * (mouthFlow - oralFlowState);
+    nasalFlowState += nasalRadiationModel.flow_smoothing_alpha * (noseFlow - nasalFlowState);
+    const mouthRadiated = (oralFlowState - previousOralFlow * oralRadiationModel.differentiator_memory)
+      + previousOralOutput * oralRadiationModel.output_memory;
+    const noseRadiated = (nasalFlowState - previousNasalFlow * nasalRadiationModel.differentiator_memory)
+      + previousNasalOutput * nasalRadiationModel.output_memory;
     previousOralFlow = oralFlowState;
     previousNasalFlow = nasalFlowState;
     previousOralOutput = mouthRadiated;
@@ -10969,6 +10983,12 @@ function synthesizeBranchedNasalOralTubeCore(oralAreas, nasalAreas, options) {
       nasal_wall_memory_mix: Number(nasalWallMemoryMix.toFixed(6)),
       nasal_wall_memory_relaxation: Number(nasalWallMemoryRelaxation.toFixed(6)),
       nasal_per_section_gain: Number(nasalDamping.toFixed(7)),
+      distributed_boundary_layer_loss: { oral: oralLossModel, nasal: nasalLossModel },
+      terminal_radiation: {
+        oral_initial: initialOralRadiationModel, oral: oralRadiationModel, nasal: nasalRadiationModel,
+        oral_aperture_tracks_geometry: true,
+        independent_outlet_filter_states: true,
+      },
       geometry_control_rate_hz: Number((sampleRate / geometryUpdateStride).toFixed(3)),
       geometry_update_stride_samples: geometryUpdateStride,
       oral_contact_boundary: "continuous rigid-contact blend below 0.05 cm2",
@@ -11207,12 +11227,16 @@ function synthesizeCoronalMultiChannelNasalOralTubeCore(oralAreas, nasalAreas, o
   const edgeDamping = new Float32Array(edgeCount);
   const edgeWallMix = new Float32Array(edgeCount);
   const edgeWallRelaxation = new Float32Array(edgeCount);
+  const edgeBoundaryMix = new Float32Array(edgeCount);
+  const edgeBoundaryRelaxation = new Float32Array(edgeCount);
   const waveToA = new Float32Array(edgeCount);
   const waveToB = new Float32Array(edgeCount);
   const nextToA = new Float32Array(edgeCount);
   const nextToB = new Float32Array(edgeCount);
   const wallToA = new Float32Array(edgeCount);
   const wallToB = new Float32Array(edgeCount);
+  const boundaryToA = new Float32Array(edgeCount);
+  const boundaryToB = new Float32Array(edgeCount);
   let minimumContactArea = Number.POSITIVE_INFINITY;
   let peakContactStrength = 0;
   let peakVpPortArea = vpPortArea;
@@ -11362,6 +11386,12 @@ function synthesizeCoronalMultiChannelNasalOralTubeCore(oralAreas, nasalAreas, o
         0,
         0.42
       );
+      const boundaryModel = path === "nasal" ? nasalLossModel : oralLossModel;
+      edgeBoundaryMix[edge] = clamp(
+        boundaryModel.boundary_layer_mix_per_section * clamp(hydraulicLossScale, 0.85, 3.4),
+        0, 0.045
+      );
+      edgeBoundaryRelaxation[edge] = boundaryModel.boundary_layer_relaxation;
     }
     const contactTotal = activeMidline[requestedContactIndex]
       + activeLeft[requestedContactIndex]
@@ -11381,12 +11411,9 @@ function synthesizeCoronalMultiChannelNasalOralTubeCore(oralAreas, nasalAreas, o
   const out = new Float32Array(sampleCount);
   const oralRadiation = new Float32Array(sampleCount);
   const nasalRadiation = new Float32Array(sampleCount);
-  const oralRadiationModel = tubeTerminalRadiationModel(lossParams, sampleRate, false);
-  const nasalRadiationModel = tubeTerminalRadiationModel(lossParams, sampleRate, true);
-  const radiationAlpha = oralRadiationModel.flow_smoothing_alpha;
-  const oralRadiationMemory = oralRadiationModel.differentiator_memory;
-  const nasalRadiationMemory = nasalRadiationModel.differentiator_memory;
-  const outputMemory = oralRadiationModel.output_memory;
+  let oralRadiationModel = tubeTerminalRadiationModel(lossParams, sampleRate, false, activeTotal[oralCount - 1]);
+  const nasalRadiationModel = tubeTerminalRadiationModel(lossParams, sampleRate, true, activeNasal[nasalCount - 1]);
+  const initialOralRadiationModel = oralRadiationModel;
   const outputAmplitude = options.amplitude ?? 0.9;
   let oralFlowState = 0;
   let nasalFlowState = 0;
@@ -11402,15 +11429,22 @@ function synthesizeCoronalMultiChannelNasalOralTubeCore(oralAreas, nasalAreas, o
     const relaxation = edgeWallRelaxation[edge];
     if (port.endpoint === 0) {
       wallToB[edge] += relaxation * (outgoing - wallToB[edge]);
-      nextToB[edge] = (outgoing * (1 - mix) + wallToB[edge] * mix) * edgeDamping[edge];
+      const propagated = (outgoing * (1 - mix) + wallToB[edge] * mix) * edgeDamping[edge];
+      boundaryToB[edge] += edgeBoundaryRelaxation[edge] * (propagated - boundaryToB[edge]);
+      nextToB[edge] = propagated - (propagated - boundaryToB[edge]) * edgeBoundaryMix[edge];
     } else {
       wallToA[edge] += relaxation * (outgoing - wallToA[edge]);
-      nextToA[edge] = (outgoing * (1 - mix) + wallToA[edge] * mix) * edgeDamping[edge];
+      const propagated = (outgoing * (1 - mix) + wallToA[edge] * mix) * edgeDamping[edge];
+      boundaryToA[edge] += edgeBoundaryRelaxation[edge] * (propagated - boundaryToA[edge]);
+      nextToA[edge] = propagated - (propagated - boundaryToA[edge]) * edgeBoundaryMix[edge];
     }
   };
 
   for (let sampleIndex = 0; sampleIndex < sampleCount; sampleIndex++) {
-    if (sampleIndex > 0 && sampleIndex % geometryUpdateStride === 0) updateGeometry(sampleIndex);
+    if (sampleIndex > 0 && sampleIndex % geometryUpdateStride === 0) {
+      updateGeometry(sampleIndex);
+      oralRadiationModel = tubeTerminalRadiationModel(lossParams, sampleRate, false, activeTotal[oralCount - 1]);
+    }
     nextToA.fill(0);
     nextToB.fill(0);
     const sourcePort = adjacency[0][0];
@@ -11449,12 +11483,12 @@ function synthesizeCoronalMultiChannelNasalOralTubeCore(oralAreas, nasalAreas, o
       for (const port of ports) sendFrom(port, (pressure - incomingAt(port)) * junctionLoss);
     }
 
-    oralFlowState += radiationAlpha * (mouthFlow - oralFlowState);
-    nasalFlowState += radiationAlpha * 0.82 * (noseFlow - nasalFlowState);
-    const mouthRadiated = (oralFlowState - previousOralFlow * oralRadiationMemory)
-      + previousOralOutput * outputMemory;
-    const noseRadiated = (nasalFlowState - previousNasalFlow * nasalRadiationMemory)
-      + previousNasalOutput * outputMemory;
+    oralFlowState += oralRadiationModel.flow_smoothing_alpha * (mouthFlow - oralFlowState);
+    nasalFlowState += nasalRadiationModel.flow_smoothing_alpha * (noseFlow - nasalFlowState);
+    const mouthRadiated = (oralFlowState - previousOralFlow * oralRadiationModel.differentiator_memory)
+      + previousOralOutput * oralRadiationModel.output_memory;
+    const noseRadiated = (nasalFlowState - previousNasalFlow * nasalRadiationModel.differentiator_memory)
+      + previousNasalOutput * nasalRadiationModel.output_memory;
     previousOralFlow = oralFlowState;
     previousNasalFlow = nasalFlowState;
     previousOralOutput = mouthRadiated;
@@ -11504,6 +11538,12 @@ function synthesizeCoronalMultiChannelNasalOralTubeCore(oralAreas, nasalAreas, o
       geometry_update_stride_samples: geometryUpdateStride,
       nasal_radiation_scale: Number(nasalRadiationScale.toFixed(5)),
       oral_contact_boundary: "finite three-channel low-admittance contact band",
+      distributed_boundary_layer_loss: { oral: oralLossModel, nasal: nasalLossModel },
+      terminal_radiation: {
+        oral_initial: initialOralRadiationModel, oral: oralRadiationModel, nasal: nasalRadiationModel,
+        oral_aperture_tracks_geometry: true,
+        independent_outlet_filter_states: true,
+      },
       oral_and_nasal_radiation_summed_once: true,
       shared_glottal_source: true,
     },
@@ -13394,6 +13434,10 @@ function oralReleaseTubeSynthesisOptions(sampleCount, sampleRate, constraints, a
     phonationDynamicsEnabled: stages.phonation_dynamics,
     sourceSpectralShapeEnabled: stages.source_spectral_shape,
     sourceTractCouplingEnabled: stages.source_tract_coupling,
+    auditionStages: stages,
+    distributedLossEnabled: stages.distributed_loss,
+    outputConditioningEnabled: stages.output_conditioning,
+    lossModel: buildTubeDistributedLossModel(options.lossParams, sampleRate, areaCount, stages.distributed_loss),
   };
 }
 
@@ -13590,12 +13634,100 @@ function nasalStageDiagnostics(coupled, samples, sampleRate, f0Hz, windows) {
     sample_rate_hz: sampleRate,
     target_f0_hz: f0Hz,
     source_model: coupled.source_model,
-    component_basis: "weighted oral/nasal radiation before output conditioning and global peak normalization; energy fraction excludes coherent cross terms",
+    component_basis: "weighted oral/nasal radiation before spectral completion, output conditioning and global peak normalization; energy fraction excludes coherent cross terms",
     output_basis: "post-conditioned waveform before global peak normalization",
     pressure_basis: "normalized returning acoustic wave, not a pressure measurement in Pa",
     interpretation: "engineering observations, not phoneme recognition or clinical thresholds; F0 search is target-constrained",
     stages,
   };
+}
+
+function buildNasalVowelBandwidthModel(areaFunction, sampleRate, solver, solverOptions, enabled) {
+  const reference = areaFunction.formant_target_reference ?? {};
+  const frequencies = reference.target_formants_hz ?? [];
+  const bandwidths = reference.bandwidths_hz ?? [];
+  const model = {
+    schema_version: "formant_bandwidth_regularization_0.1",
+    enabled: false,
+    corrections: [],
+    measurement: "oral outlet of the actual coupled nasal/oral graph at its final vowel geometry",
+    correction: "center-frequency-preserving pole-radius replacement with bounded constant-energy peak compensation",
+    basis: "aggregate vowel bandwidth targets; applied to oral radiation only as oral closure is released",
+    limitation: "open-endpoint engineering damping correction; no vowel formant targets imposed on closed nasal radiation",
+  };
+  if (!enabled || frequencies.length < 2 || bandwidths.length < 2) return model;
+  const impulse = solver(areaFunction.areas_cm2, solverOptions.nasalAreas, {
+    ...solverOptions,
+    sampleCount: 4096, sampleRate, sourceMode: "impulse", impulseAmplitude: 1,
+    f0: 0, amplitude: 1, sourceSamples: null, areaTrajectory: null,
+    velopharyngealAreaTrajectory: null,
+    hydraulicDiametersCm: hydraulicDiametersFromAreaFunction(areaFunction),
+    hydraulicLossScales: hydraulicLossScalesFromAreaFunction(areaFunction),
+    oralChannelModel: channelAreasFromAreaFunction(areaFunction),
+    selfOscillatingSourceEnabled: false, phonationDynamicsEnabled: false,
+    sourceTractCouplingEnabled: false, outputConditioningEnabled: false,
+  });
+  const spectrum = sampledMagnitudeSpectrum(impulse.oral_radiation, sampleRate, 100, Math.min(4500, sampleRate * 0.42), 10);
+  const resonances = selectResonancePeaks(spectrum, 180, 10);
+  const used = new Set();
+  for (let index = 0; index < Math.min(4, frequencies.length, bandwidths.length); index++) {
+    const targetFrequency = Number(frequencies[index]);
+    const targetBandwidth = Number(bandwidths[index]);
+    if (!(targetFrequency > 0) || !(targetBandwidth > 0)) continue;
+    let match = -1;
+    let distance = Infinity;
+    for (let candidate = 0; candidate < resonances.length; candidate++) {
+      if (used.has(candidate)) continue;
+      const difference = Math.abs(Math.log(resonances[candidate].frequency_hz / targetFrequency));
+      if (difference < distance) { match = candidate; distance = difference; }
+    }
+    if (match < 0 || distance > Math.log(1.32)) continue;
+    const resonance = resonances[match];
+    used.add(match);
+    if (!Number.isFinite(resonance.bandwidth_3db_hz)) continue;
+    const measured = clamp(resonance.bandwidth_3db_hz, 35, 900);
+    const applied = measured + (clamp(targetBandwidth, measured * 0.4, measured * 2) - measured) * 0.9;
+    if (Math.abs(applied - measured) < 4) continue;
+    const gainDb = clamp(10 * Math.log10(measured / applied) * (index === 0 ? 1 : 0.72), -2.5, index === 0 ? 4.5 : 3.2);
+    model.corrections.push({
+      formant: index + 1,
+      frequency_hz: resonance.frequency_hz,
+      target_frequency_hz: targetFrequency,
+      measured_bandwidth_hz: measured,
+      aggregate_target_bandwidth_hz: targetBandwidth,
+      applied_bandwidth_hz: applied,
+      center_gain_db: gainDb,
+      coefficients: bandwidthReplacementCoefficients(sampleRate, resonance.frequency_hz, measured, applied, gainDb),
+    });
+  }
+  model.enabled = model.corrections.length > 0;
+  return model;
+}
+
+function applyNasalVowelSpectralCompletion(coupled, areaFunction, sampleRate, solver, solverOptions, holdSample, targetSample) {
+  const stages = normalizedPhysicalAuditionStages(solverOptions.auditionStages);
+  const bandwidthModel = buildNasalVowelBandwidthModel(areaFunction, sampleRate, solver, solverOptions, stages.resonance_bandwidth);
+  const enhancedOral = coupled.oral_radiation.slice();
+  for (const correction of bandwidthModel.corrections) applyBiquadInPlace(enhancedOral, correction.coefficients);
+  const modalModel = applyHighOrderModalCorrection(enhancedOral, sampleRate, areaFunction, stages.higher_order_modes ? 1 : 0);
+  const difference = Float32Array.from(enhancedOral, (value, index) => value - coupled.oral_radiation[index]);
+  if (solverOptions.outputConditioningEnabled !== false) applyTubeOutputConditioning(difference, sampleRate, solverOptions.lossParams);
+  const amplitude = 0.68 * (solverOptions.amplitude ?? 0.9);
+  // Filter states run throughout the utterance; only their oral correction is
+  // introduced during release. No vowel recording is spliced into the output.
+  for (let index = Math.max(0, holdSample); index < coupled.samples.length; index++) {
+    const progress = smoothstep01((index - holdSample) / Math.max(1, targetSample - holdSample));
+    coupled.samples[index] += difference[index] * progress * amplitude;
+  }
+  const application = {
+    schema_version: "nasal_oral_spectral_completion_0.1",
+    correction_start_sample: holdSample,
+    full_correction_sample: targetSample,
+    route: "oral radiation only; continuously running filters with smoothstep release weighting",
+    nasal_radiation_corrected: false,
+    waveform_splice: false,
+  };
+  return { bandwidth: { ...bandwidthModel, application }, modes: { ...modalModel, application }, application };
 }
 
 function synthesizeCoupledNasalSyllable(context) {
@@ -13623,6 +13755,7 @@ function synthesizeCoupledNasalSyllable(context) {
     appliedTransitionSamples,
     vowelTargetSample,
   } = context;
+  const auditionStages = normalizedPhysicalAuditionStages(oralReleaseOptions.auditionStages);
   const nasalInletArea = Math.max(0.08, nasalPath.areas_cm2[0] ?? 1);
   const coupling = nasalCouplingModel(tuning, nasalInletArea);
   const maximumVpPortArea = coupling.maximum_vp_port_area_cm2;
@@ -13729,29 +13862,36 @@ function synthesizeCoupledNasalSyllable(context) {
       { role: "vowel_target", sample: vowelTargetSample, area_cm2: closedVpPortArea },
     ],
   };
-  const coupled = (nasalClass === "n"
+  const solver = nasalClass === "n"
     ? synthesizeCoronalMultiChannelNasalOralTube
-    : synthesizeBranchedNasalOralTube)(
+    : synthesizeBranchedNasalOralTube;
+  const solverOptions = {
+    ...oralReleaseOptions,
+    sourceSamples: sharedSourceSamples,
+    areaTrajectory: oralAreaTrajectory,
+    velopharyngealAreaTrajectory: vpAreaTrajectory,
+    velopharyngealPortAreaCm2: maximumVpPortArea,
+    vpJunctionPosition: sideCavity.vp_junction_position,
+    nasalBranchDamping: tuning.branch_damping,
+    nasalRadiationScale,
+    oralContactPosition: effectiveContactPosition,
+    hydraulicDiametersCm: closureArea.hydraulic_diameters_cm,
+    hydraulicLossScales: closureArea.hydraulic_loss_scales,
+    oralChannelModel: closureChannels,
+    finiteContactBand: closureArea.finite_contact_band,
+  };
+  const coupled = solver(
     closureArea.areas_cm2,
     nasalPath.areas_cm2,
-    {
-      ...oralReleaseOptions,
-      sourceSamples: sharedSourceSamples,
-      areaTrajectory: oralAreaTrajectory,
-      velopharyngealAreaTrajectory: vpAreaTrajectory,
-      velopharyngealPortAreaCm2: maximumVpPortArea,
-      vpJunctionPosition: sideCavity.vp_junction_position,
-      nasalBranchDamping: tuning.branch_damping,
-      nasalRadiationScale,
-      oralContactPosition: effectiveContactPosition,
-      hydraulicDiametersCm: closureArea.hydraulic_diameters_cm,
-      hydraulicLossScales: closureArea.hydraulic_loss_scales,
-      oralChannelModel: closureChannels,
-      finiteContactBand: closureArea.finite_contact_band,
-    }
+    solverOptions
   );
   const coupledFinishedAt = timingEnabled ? performance.now() : 0;
   const samples = coupled.samples;
+  const spectralCompletion = applyNasalVowelSpectralCompletion(
+    coupled, vowelAudio.area_function, sampleRate, solver,
+    { ...solverOptions, nasalAreas: nasalPath.areas_cm2, velopharyngealPortAreaCm2: closedVpPortArea },
+    holdSamples, vowelTargetSample
+  );
   const sideBranchLossModel = applySideBranchLosses(
     samples,
     sampleRate,
@@ -13759,10 +13899,12 @@ function synthesizeCoupledNasalSyllable(context) {
     parsed.vowel,
     state.vocalTractGeometry,
     vowelAudio.area_function,
-    { strength: 1, excludeBranches: ["velopharyngeal_nasal"] }
+    { strength: auditionStages.side_branches ? 1 : 0, excludeBranches: ["velopharyngeal_nasal"] }
   );
   const releaseCue = nasalReleaseCueMetadata(appliedTransitionSamples, sampleRate);
-  const bodyResonanceModel = applyBodyResonance(samples, sampleRate, constraints);
+  const bodyResonanceModel = auditionStages.body_resonance
+    ? applyBodyResonance(samples, sampleRate, constraints)
+    : { ...bodyResonanceModelMetadata(constraints), enabled: false };
   const postProcessingFinishedAt = timingEnabled ? performance.now() : 0;
   applyHalfCosineFade(samples, 0, Math.min(samples.length, Math.floor(sampleRate * tuning.attack_fade_ms / 1000)));
   applyFade(samples, Math.max(0, samples.length - Math.floor(sampleRate * 0.04)), samples.length, true);
@@ -13848,7 +13990,7 @@ function synthesizeCoupledNasalSyllable(context) {
     oral_render_duration_ms: Number((oralSampleCount * 1000 / sampleRate).toFixed(2)),
   };
   const nasalModel = {
-    schema_version: "nasal_consonant_model_1.5",
+    schema_version: "nasal_consonant_model_1.6",
     nasal_class: nasalClass,
     token,
     following_vowel: parsed.vowel,
@@ -13869,10 +14011,10 @@ function synthesizeCoupledNasalSyllable(context) {
     glottal_source_model: coupled.source_model,
     source_tract_interaction_model: coupled.source_model.source_tract_interaction_model,
     stage_diagnostic: stageDiagnostic,
-    terminal_radiation_model: {
-      oral: tubeTerminalRadiationModel(oralReleaseOptions.lossParams, sampleRate, false),
-      nasal: tubeTerminalRadiationModel(oralReleaseOptions.lossParams, sampleRate, true),
-    },
+    terminal_radiation_model: coupled.topology.terminal_radiation,
+    spectral_completion_model: spectralCompletion.application,
+    formant_bandwidth_regularization_model: spectralCompletion.bandwidth,
+    high_order_modal_correction_model: spectralCompletion.modes,
     cross_section_loss_model: {
       schema_version: "hydraulic_cross_section_loss_0.1",
       basis: "ellipse perimeter and hydraulic diameter derived from each 2.5D width-height section",
@@ -13945,6 +14087,16 @@ function synthesizeCoupledNasalSyllable(context) {
     source_tract_interaction_model: coupled.source_model.source_tract_interaction_model,
     phonation_dynamics_model: coupled.source_model.active_model.phonation_trajectory
       ?? createPhonationDriveModel(oralReleaseOptions, sampleRate).metadata,
+    physical_resolution_model: coupled.topology.resolution_model,
+    audition_stages: auditionStages,
+    distributed_loss_model: coupled.topology.distributed_boundary_layer_loss,
+    terminal_radiation_model: nasalModel.terminal_radiation_model,
+    formant_bandwidth_regularization_model: spectralCompletion.bandwidth,
+    high_order_modal_correction_model: spectralCompletion.modes,
+    side_branch_loss_model: sideBranchLossModel,
+    rendered_spectrum_diagnostic: analyzeRenderedVoiceSpectrum(samples, sampleRate, f0Hz, 5000),
+    rendered_dynamics_diagnostic: analyzeRenderedVoiceDynamics(samples, sampleRate, f0Hz),
+    stage_spectra: null,
     nasal_model: nasalModel,
     onset_model: nasalModel,
     body_resonance_model: bodyResonanceModel,

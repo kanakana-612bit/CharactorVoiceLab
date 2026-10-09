@@ -964,9 +964,9 @@ if (process.env.CVD_NASAL_PLACE_DIAGNOSTIC === "1") {
   }, null, 2));
   process.exit(0);
 }
-if (ma.nasal_model?.schema_version !== "nasal_consonant_model_1.5"
+if (ma.nasal_model?.schema_version !== "nasal_consonant_model_1.6"
   || ma.nasal_model.nasal_class !== "m"
-  || na.nasal_model?.schema_version !== "nasal_consonant_model_1.5"
+  || na.nasal_model?.schema_version !== "nasal_consonant_model_1.6"
   || na.nasal_model?.nasal_class !== "n"
   || moraicNasal.nasal_model?.nasal_class !== "N"
   || moraicNasal.vowel !== null) {
