@@ -93,6 +93,7 @@ const state = {
   nasalTuning: {},
   nasalEvaluationLog: [],
   nasalPreviewDiagnostics: {},
+  nasalPairComparison: null,
   nasalProfileDrag: null,
   voiceControlOverrides: {},
   ttsCaptionManual: false,
@@ -447,6 +448,10 @@ const els = {
   nasalAttackFadeValue: document.getElementById("nasalAttackFadeValue"),
   playUntunedNasalBtn: document.getElementById("playUntunedNasalBtn"),
   playTunedNasalBtn: document.getElementById("playTunedNasalBtn"),
+  compareNasalPairBtn: document.getElementById("compareNasalPairBtn"),
+  exportNasalPairBtn: document.getElementById("exportNasalPairBtn"),
+  nasalPairStatus: document.getElementById("nasalPairStatus"),
+  nasalStageDiagnostics: document.getElementById("nasalStageDiagnostics"),
   resetNasalTuningBtn: document.getElementById("resetNasalTuningBtn"),
   nasalClarityInput: document.getElementById("nasalClarityInput"),
   nasalClarityValue: document.getElementById("nasalClarityValue"),
@@ -10491,6 +10496,49 @@ function synthesizeKellyLochbaumTubeCore(areas, options) {
   return out;
 }
 
+function createNasalGlottalBoundary(options, sampleRate, reflection) {
+  // Keep one oscillator alive through closure, release, and the following vowel.
+  const oscillator = options.sourceMode !== "impulse" && options.selfOscillatingSourceEnabled === true
+    ? createReducedTwoMassGlottalOscillator(options, sampleRate)
+    : null;
+  const sampleCount = Math.max(1, Math.round(options.sampleCount ?? 1));
+  const prescribed = oscillator ? null : options.sourceSamples?.length >= sampleCount
+    ? options.sourceSamples
+    : synthesizeTubeSourceSamples(options);
+  const interaction = tubeSourceTractCouplingModel(options, sampleRate);
+  const interactionState = { returnPressureFast: 0, returnPressureSlow: 0 };
+  const source = new Float32Array(sampleCount);
+  const returnPressure = new Float32Array(sampleCount);
+  const glottalParams = options.glottalParams ?? currentGlottalSourceParams({}, options.tension ?? 1);
+  return {
+    source,
+    returnPressure,
+    metadata: {
+      ...tubeGlottalSourceMetadata(glottalParams, options.motorControlPrecision ?? 1, options.aspirationNoiseScale ?? 1),
+      model: oscillator ? "reduced two-mass self-oscillating volume-velocity source" : "prescribed LF-like volume-velocity source",
+      active_model: oscillator?.metadata ?? { schema_version: "lf_like_glottal_source_legacy_0.1", model: "prescribed LF-like source" },
+      ...(oscillator ? {
+        cycle_variation: { jitter_floor_fraction: 0.0007, shimmer_floor_fraction: 0.004, motor_control_scaled: true, deterministic: true },
+        spectral_tilt_filter: "direct flow blended with a restrained one-pole/two-pole cascade",
+      } : {}),
+      integration_sample_rate_hz: sampleRate,
+      spectral_shape_enabled: options.sourceSpectralShapeEnabled !== false,
+      continuous_state: true,
+      source_tract_interaction_model: interaction,
+    },
+    step(returnWave, sampleIndex) {
+      returnPressure[sampleIndex] = returnWave;
+      const emitted = oscillator
+        ? oscillator.step(interaction.enabled ? returnWave : 0, sampleIndex)
+        : prescribed[sampleIndex] ?? 0;
+      source[sampleIndex] = emitted;
+      return oscillator
+        ? emitted + reflection * returnWave
+        : sourceTractCoupledInjection(emitted, returnWave, reflection, interactionState, interaction);
+    },
+  };
+}
+
 function synthesizeBranchedNasalOralTube(oralAreas, nasalAreas, options) {
   const factor = physicalTubeOversamplingFactor(options);
   const outputSampleCount = Math.max(1, Math.round(options.sampleCount ?? 1));
@@ -10518,6 +10566,9 @@ function synthesizeBranchedNasalOralTube(oralAreas, nasalAreas, options) {
     samples,
     oral_radiation: oralRadiation,
     nasal_radiation: nasalRadiation,
+    glottal_source: factor > 1 ? bandlimitedDecimate(highResolutionResult.glottal_source, factor, outputSampleCount) : highResolutionResult.glottal_source,
+    glottal_return_pressure: factor > 1 ? bandlimitedDecimate(highResolutionResult.glottal_return_pressure, factor, outputSampleCount) : highResolutionResult.glottal_return_pressure,
+    source_model: highResolutionResult.source_model,
     topology: {
       ...highResolutionResult.topology,
       schema_version: "branched_nasal_oral_waveguide_0.3",
@@ -10707,8 +10758,6 @@ function synthesizeBranchedNasalOralTubeCore(oralAreas, nasalAreas, options) {
   };
 
   const glottalReflection = clamp(0.64 + options.effectiveClosure * 0.3, 0.52, 0.96);
-  const sourceTractInteraction = tubeSourceTractCouplingModel(options, sampleRate);
-  const sourceTractState = { returnPressureFast: 0, returnPressureSlow: 0 };
   const lossParams = options.lossParams ?? currentTubeLossParams({});
   const distributedLossEnabled = options.distributedLossEnabled !== false;
   const oralLossModel = options.lossModel ?? buildTubeDistributedLossModel(
@@ -10765,9 +10814,7 @@ function synthesizeBranchedNasalOralTubeCore(oralAreas, nasalAreas, options) {
     nasalHydraulicLossScales,
     nasalWallComplianceMix
   );
-  const sourceSamples = options.sourceSamples?.length >= sampleCount
-    ? options.sourceSamples
-    : synthesizeTubeSourceSamples(options);
+  const glottalBoundary = createNasalGlottalBoundary(options, sampleRate, glottalReflection);
   const oralRadiationModel = tubeTerminalRadiationModel(lossParams, sampleRate, false);
   const nasalRadiationModel = tubeTerminalRadiationModel(lossParams, sampleRate, true);
   const radiationAlpha = oralRadiationModel.flow_smoothing_alpha;
@@ -10808,14 +10855,7 @@ function synthesizeBranchedNasalOralTubeCore(oralAreas, nasalAreas, options) {
     nextOralLeft.fill(0);
     nextNasalRight.fill(0);
     nextNasalLeft.fill(0);
-    const source = sourceSamples[sampleIndex] ?? 0;
-    nextOralRight[1] += sourceTractCoupledInjection(
-      source,
-      oralLeft[0],
-      glottalReflection,
-      sourceTractState,
-      sourceTractInteraction
-    ) * oralDamping;
+    nextOralRight[1] += glottalBoundary.step(oralLeft[0], sampleIndex) * oralDamping;
 
     const mouthFlow = (1 - lipReflection)
       * oralRight[oralCount]
@@ -10913,6 +10953,9 @@ function synthesizeBranchedNasalOralTubeCore(oralAreas, nasalAreas, options) {
     samples: out,
     oral_radiation: oralRadiation,
     nasal_radiation: nasalRadiation,
+    glottal_source: glottalBoundary.source,
+    glottal_return_pressure: glottalBoundary.returnPressure,
+    source_model: glottalBoundary.metadata,
     topology: {
       schema_version: "branched_nasal_oral_waveguide_0.2",
       scattering: "lossy_three_port_pressure_junction",
@@ -10961,6 +11004,9 @@ function synthesizeCoronalMultiChannelNasalOralTube(oralAreas, nasalAreas, optio
     samples: decimate(highResolutionResult.samples),
     oral_radiation: decimate(highResolutionResult.oral_radiation),
     nasal_radiation: decimate(highResolutionResult.nasal_radiation),
+    glottal_source: decimate(highResolutionResult.glottal_source),
+    glottal_return_pressure: decimate(highResolutionResult.glottal_return_pressure),
+    source_model: highResolutionResult.source_model,
     topology: {
       ...highResolutionResult.topology,
       schema_version: "coronal_multichannel_nasal_waveguide_0.2",
@@ -11330,12 +11376,8 @@ function synthesizeCoronalMultiChannelNasalOralTubeCore(oralAreas, nasalAreas, o
   const geometryUpdateStride = Math.max(1, Math.round(sampleRate / 11025));
   updateGeometry(0);
   const glottalReflection = clamp(0.64 + options.effectiveClosure * 0.3, 0.52, 0.96);
-  const sourceTractInteraction = tubeSourceTractCouplingModel(options, sampleRate);
-  const sourceTractState = { returnPressureFast: 0, returnPressureSlow: 0 };
   const nasalRadiationScale = clamp(options.nasalRadiationScale ?? 0.3, 0.08, 0.72);
-  const sourceSamples = options.sourceSamples?.length >= sampleCount
-    ? options.sourceSamples
-    : synthesizeTubeSourceSamples(options);
+  const glottalBoundary = createNasalGlottalBoundary(options, sampleRate, glottalReflection);
   const out = new Float32Array(sampleCount);
   const oralRadiation = new Float32Array(sampleCount);
   const nasalRadiation = new Float32Array(sampleCount);
@@ -11372,13 +11414,7 @@ function synthesizeCoronalMultiChannelNasalOralTubeCore(oralAreas, nasalAreas, o
     nextToA.fill(0);
     nextToB.fill(0);
     const sourcePort = adjacency[0][0];
-    sendFrom(sourcePort, sourceTractCoupledInjection(
-      sourceSamples[sampleIndex] ?? 0,
-      incomingAt(sourcePort),
-      glottalReflection,
-      sourceTractState,
-      sourceTractInteraction
-    ));
+    sendFrom(sourcePort, glottalBoundary.step(incomingAt(sourcePort), sampleIndex));
 
     let mouthFlow = 0;
     let noseFlow = 0;
@@ -11436,6 +11472,9 @@ function synthesizeCoronalMultiChannelNasalOralTubeCore(oralAreas, nasalAreas, o
     samples: out,
     oral_radiation: oralRadiation,
     nasal_radiation: nasalRadiation,
+    glottal_source: glottalBoundary.source,
+    glottal_return_pressure: glottalBoundary.returnPressure,
+    source_model: glottalBoundary.metadata,
     topology: {
       schema_version: "coronal_multichannel_nasal_waveguide_core_0.2",
       scattering: "lossy_multiport_pressure_junction_graph",
@@ -12667,10 +12706,139 @@ async function playNasalCalibrationVariant(manualTuning) {
       manual_tuning: manualTuning,
       level: audio.nasal_model?.level_matching ?? null,
       continuity: audio.nasal_model?.voicing_continuity_diagnostic ?? null,
+      stages: audio.nasal_model?.stage_diagnostic ?? null,
+      source: audio.nasal_model?.glottal_source_model ?? null,
     },
   };
   renderNasalCalibration();
   await playAudioSamples(audio.samples, audio.sampleRate);
+}
+
+function nasalPairConditions(vowel) {
+  return JSON.parse(JSON.stringify({
+    following_vowel: vowel,
+    output_sample_rate_hz: currentOutputSampleRate(),
+    internal_oversampling_factor: physicalTubeOversamplingFactor(),
+    target_f0_hz: currentDerivedF0(state.constraints),
+    voice_constraints: state.constraints,
+    vocal_tract_geometry: state.vocalTractGeometry,
+    vowel_area_tuning: state.vowelAreaTuning,
+    vowel_width_tuning: state.vowelWidthTuning,
+    primary_language: els.primaryLanguageInput.value,
+    phonetic_target_profile: activePhoneticTargetProfile().id,
+    reference_image_style: els.referenceImageStyleInput.value,
+    manual_nasal_tuning: false,
+    audition_stages: normalizedPhysicalAuditionStages(),
+  }));
+}
+
+async function compareNasalPair() {
+  if (els.compareNasalPairBtn?.disabled) return;
+  if (els.compareNasalPairBtn) els.compareNasalPairBtn.disabled = true;
+  try {
+    if (!Object.keys(state.constraints).length) analyze();
+    const vowel = parseSyllableToken(selectedNasalToken()).vowel;
+    if (els.nasalPairStatus) els.nasalPairStatus.textContent = `/${"m" + vowel}/・/${"n" + vowel}/ を計算中…`;
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    const conditions = nasalPairConditions(vowel);
+    const started = performance.now();
+    const audio = ["m", "n"].map((consonant) => synthesizeSyllable(consonant + vowel, { manualTuning: false }));
+    const report = {
+      schema_version: "nasal_pair_comparison_0.1",
+      app_version: APP_VERSION,
+      created_at: new Date().toISOString(),
+      conditions,
+      elapsed_ms: Number((performance.now() - started).toFixed(2)),
+      comparison_basis: "same character profile, vowel, source controls and sample rate; class-specific default articulations; no manual nasal overrides",
+      interpretation: "acoustic diagnostics do not establish perceptual /m/-/n/ separation",
+      samples: audio.map((entry) => ({
+        token: entry.token,
+        file: `${entry.token}.wav`,
+        duration_s: Number((entry.samples.length / entry.sampleRate).toFixed(6)),
+        nasal_model: entry.nasal_model,
+      })),
+    };
+    state.nasalPairComparison = { audio, report };
+    renderNasalCalibration();
+  } catch (error) {
+    if (els.nasalPairStatus) els.nasalPairStatus.textContent = `比較失敗: ${error.message}`;
+  } finally {
+    if (els.compareNasalPairBtn) els.compareNasalPairBtn.disabled = false;
+  }
+}
+
+async function exportNasalPair() {
+  const comparison = state.nasalPairComparison;
+  if (!comparison) return;
+  const entries = comparison.audio.map((audio) => ({ name: `${audio.token}.wav`, data: encodeWav(audio.samples, audio.sampleRate) }));
+  entries.push({ name: "comparison.json", data: JSON.stringify(comparison.report, null, 2) });
+  const blob = await projectPackage.createZip(entries);
+  download(`${localDateStamp()}-nasal-mn-${comparison.report.conditions.following_vowel}.zip`, blob);
+}
+
+function renderNasalStageDiagnostics() {
+  if (!els.nasalStageDiagnostics) return;
+  els.nasalStageDiagnostics.replaceChildren();
+  const comparison = state.nasalPairComparison;
+  if (els.exportNasalPairBtn) els.exportNasalPairBtn.disabled = !comparison;
+  if (!comparison && els.nasalPairStatus && !els.compareNasalPairBtn?.disabled) els.nasalPairStatus.textContent = "";
+  const preview = state.nasalPreviewDiagnostics?.[selectedNasalToken()];
+  const entries = comparison
+    ? comparison.audio.map((audio) => ({ token: audio.token, diagnostic: audio.nasal_model.stage_diagnostic, audio }))
+    : preview?.stages ? [{ token: selectedNasalToken(), diagnostic: preview.stages }] : [];
+  if (!entries.length) return;
+  if (comparison && els.nasalPairStatus) {
+    const conditions = comparison.report.conditions;
+    const unchanged = JSON.stringify(conditions) === JSON.stringify(nasalPairConditions(conditions.following_vowel));
+    els.nasalPairStatus.textContent = `/${"m" + conditions.following_vowel}/・/${"n" + conditions.following_vowel}/ · F0 ${format(conditions.target_f0_hz, 1)} Hz · ${conditions.output_sample_rate_hz} Hz${unchanged ? "" : " · 設定変更あり（再比較が必要）"}`;
+  }
+  const playback = document.createElement("div");
+  playback.className = "nasal-action-row";
+  for (const entry of entries.filter((entry) => entry.audio)) {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.textContent = `▶ /${entry.token}/`;
+    button.addEventListener("click", () => playAudioSamples(entry.audio.samples, entry.audio.sampleRate));
+    playback.appendChild(button);
+  }
+  els.nasalStageDiagnostics.appendChild(playback);
+  const table = document.createElement("table");
+  const header = document.createElement("tr");
+  for (const label of ["音節 / 区間", "時刻 ms", "F0 Hz", "周期相関", "RMS", "鼻腔成分比", "戻り波 RMS"]) {
+    const cell = document.createElement("th");
+    cell.scope = "col";
+    cell.textContent = label;
+    header.appendChild(cell);
+  }
+  const head = document.createElement("thead");
+  head.appendChild(header);
+  table.appendChild(head);
+  const body = document.createElement("tbody");
+  for (const entry of entries) {
+    for (const stage of entry.diagnostic.stages) {
+      const row = document.createElement("tr");
+      const values = [
+        `/${entry.token}/ ${stage.label_ja}`,
+        `${format(stage.start_ms, 1)}–${format(stage.end_ms, 1)}`,
+        stage.observed_f0_hz === null ? "—" : format(stage.observed_f0_hz, 1),
+        format(stage.target_lag_periodicity, 2),
+        format(stage.rms, 4),
+        stage.nasal_component_energy_fraction === null ? "—" : `${format(stage.nasal_component_energy_fraction * 100, 1)}%`,
+        format(stage.return_pressure_rms, 4),
+      ];
+      for (const value of values) {
+        const cell = document.createElement("td");
+        cell.textContent = value;
+        row.appendChild(cell);
+      }
+      body.appendChild(row);
+    }
+  }
+  table.appendChild(body);
+  const caption = document.createElement("caption");
+  caption.textContent = "区間別の工学診断値。鼻腔成分比は放射成分の二乗比（干渉項を除外）。短区間・周期性不足のF0は表示しません。";
+  table.appendChild(caption);
+  els.nasalStageDiagnostics.appendChild(table);
 }
 
 function renderAuditoryEvaluation() {
@@ -12945,6 +13113,7 @@ function renderNasalCalibration() {
   }
   renderNasalParameterSummary(tuning, sideCavity);
   renderNasalEvaluation();
+  renderNasalStageDiagnostics();
 }
 
 function renderNasalParameterSummary(tuning, sideCavity) {
@@ -12997,6 +13166,11 @@ function renderNasalParameterSummary(tuning, sideCavity) {
       "鼻咽腔開放から算出し、鼻腔放射寄与から独立",
     ]);
     items.push(["固定開放バースト", "なし", "連続する口腔断面・VP開口変化だけで開放過渡を生成"]);
+    items.push([
+      "声門源",
+      previewDiagnostic?.source?.active_model?.schema_version === "lf_like_glottal_source_legacy_0.1" ? "LF類似（比較用）" : "自励二質量モデル",
+      "閉鎖・開放・母音を通じて同じ声門状態を維持し、戻り圧を入力",
+    ]);
     if (previewDiagnostic?.continuity && previewDiagnostic?.level) {
       items.push([
         previewDiagnostic.manual_tuning ? "調整後・保持音レベル" : "推定原形・保持音レベル",
@@ -13205,15 +13379,21 @@ function nasalTubeSynthesisOptions(sampleCount, sampleRate, constraints, areaCou
   };
 }
 
-function oralReleaseTubeSynthesisOptions(sampleCount, sampleRate, constraints, areaCount, vowel, vocalTractLengthCm) {
+function oralReleaseTubeSynthesisOptions(sampleCount, sampleRate, constraints, areaCount, vowel, vocalTractLengthCm, auditionStages = null) {
   const options = nasalTubeSynthesisOptions(sampleCount, sampleRate, constraints, areaCount);
   const respiratoryProfile = currentRespiratoryProfile(constraints);
+  const stages = normalizedPhysicalAuditionStages(auditionStages);
   return {
     ...options,
     pressure: respiratoryProfile.effective_pressure_pa,
     respiratorySupport: respiratoryProfile.effective_support,
     amplitude: currentVowelReference(vowel, vocalTractLengthCm).amplitude,
-    aspirationNoiseScale: 0.82,
+    aspirationNoiseScale: 1,
+    motorControlPrecision: currentArticulationMotorProfile(constraints).motor_control_precision,
+    selfOscillatingSourceEnabled: stages.self_oscillating_source,
+    phonationDynamicsEnabled: stages.phonation_dynamics,
+    sourceSpectralShapeEnabled: stages.source_spectral_shape,
+    sourceTractCouplingEnabled: stages.source_tract_coupling,
   };
 }
 
@@ -13368,6 +13548,53 @@ function applyNasalPathResonances(samples, sampleRate, tuning, sideCavity, const
     lowpass_cutoff_hz: Number(lowpassCutoffHz.toFixed(2)),
     damping,
     velopharyngeal_opening: opening,
+  };
+}
+
+function nasalStageDiagnostics(coupled, samples, sampleRate, f0Hz, windows) {
+  const round = (value, digits = 6) => Number(value.toFixed(digits));
+  const stages = windows.map(([stage, label, startSample, endSample]) => {
+    const start = clamp(Math.floor(startSample), 0, samples.length);
+    const end = clamp(Math.ceil(endSample), start, samples.length);
+    const window = samples.subarray(start, end);
+    const enoughPeriods = window.length >= sampleRate / f0Hz * 3;
+    // Short release intervals can be nonstationary; never force an F0 estimate.
+    const observation = enoughPeriods
+      ? estimateFundamentalNearTarget(window, sampleRate, f0Hz)
+      : { frequency_hz: null, periodicity: null };
+    const periodic = observation.periodicity !== null && observation.periodicity >= 0.5;
+    const oralRms = signalRms(coupled.oral_radiation, start, end) * 0.68;
+    const nasalRms = signalRms(coupled.nasal_radiation, start, end) * coupled.topology.nasal_radiation_scale;
+    const componentEnergy = oralRms * oralRms + nasalRms * nasalRms;
+    return {
+      stage,
+      label_ja: label,
+      start_sample: start,
+      end_sample: end,
+      start_ms: round(start * 1000 / sampleRate, 3),
+      end_ms: round(end * 1000 / sampleRate, 3),
+      rms: round(signalRms(samples, start, end)),
+      observed_f0_hz: periodic ? observation.frequency_hz : null,
+      f0_periodicity: observation.periodicity,
+      f0_status: !enoughPeriods ? "window_too_short" : periodic ? "observed" : "weak_periodicity",
+      target_lag_periodicity: round(signalFramewiseLagPeriodicity(samples, start, end, sampleRate / f0Hz), 5),
+      source_rms: round(signalRms(coupled.glottal_source, start, end)),
+      return_pressure_rms: round(signalRms(coupled.glottal_return_pressure, start, end)),
+      oral_radiation_rms: round(oralRms),
+      nasal_radiation_rms: round(nasalRms),
+      nasal_component_energy_fraction: componentEnergy > 1e-20 ? round(nasalRms * nasalRms / componentEnergy, 5) : null,
+    };
+  });
+  return {
+    schema_version: "nasal_stage_diagnostic_0.1",
+    sample_rate_hz: sampleRate,
+    target_f0_hz: f0Hz,
+    source_model: coupled.source_model,
+    component_basis: "weighted oral/nasal radiation before output conditioning and global peak normalization; energy fraction excludes coherent cross terms",
+    output_basis: "post-conditioned waveform before global peak normalization",
+    pressure_basis: "normalized returning acoustic wave, not a pressure measurement in Pa",
+    interpretation: "engineering observations, not phoneme recognition or clinical thresholds; F0 search is target-constrained",
+    stages,
   };
 }
 
@@ -13595,6 +13822,11 @@ function synthesizeCoupledNasalSyllable(context) {
     applied_nasal_gain: 1,
     independent_level_matching: false,
   };
+  const stageDiagnostic = nasalStageDiagnostics(coupled, samples, sampleRate, f0Hz, [
+    ["closed_hold", "閉鎖中", holdStart, holdEnd],
+    ["oral_release", "開放中", holdSamples, vowelTargetSample + 1],
+    ["vowel_sustain", "母音到達後", vowelStart, vowelEnd],
+  ]);
   normalize(samples, 0.92);
   const releaseTrajectory = {
     schema_version: "nasal_release_trajectory_0.9",
@@ -13634,11 +13866,9 @@ function synthesizeCoupledNasalSyllable(context) {
       explicit_nasal_pole_zero_filter: false,
       oral_side_antiresonance_generated_by_closed_branch: true,
     },
-    glottal_source_model: vowelAudio.source_noise_model,
-    source_tract_interaction_model: tubeSourceTractCouplingModel(
-      oralReleaseOptions,
-      sampleRate
-    ),
+    glottal_source_model: coupled.source_model,
+    source_tract_interaction_model: coupled.source_model.source_tract_interaction_model,
+    stage_diagnostic: stageDiagnostic,
     terminal_radiation_model: {
       oral: tubeTerminalRadiationModel(oralReleaseOptions.lossParams, sampleRate, false),
       nasal: tubeTerminalRadiationModel(oralReleaseOptions.lossParams, sampleRate, true),
@@ -13711,6 +13941,10 @@ function synthesizeCoupledNasalSyllable(context) {
     token,
     vowel: parsed.vowel,
     consonant: nasalClass,
+    source_noise_model: coupled.source_model,
+    source_tract_interaction_model: coupled.source_model.source_tract_interaction_model,
+    phonation_dynamics_model: coupled.source_model.active_model.phonation_trajectory
+      ?? createPhonationDriveModel(oralReleaseOptions, sampleRate).metadata,
     nasal_model: nasalModel,
     onset_model: nasalModel,
     body_resonance_model: bodyResonanceModel,
@@ -13779,7 +14013,8 @@ function synthesizeNasalSyllable(token, parsed, options = {}) {
       constraints,
       closureArea.areas_cm2.length,
       parsed.vowel,
-      vowelAudio.area_function.vocal_tract_length_cm
+      vowelAudio.area_function.vocal_tract_length_cm,
+      options.auditionStages
     );
     oralReleaseOptions.sourceAttackSeconds = tuning.attack_fade_ms / 1000;
     oralReleaseOptions.areaTrajectory = {
@@ -13792,11 +14027,12 @@ function synthesizeNasalSyllable(token, parsed, options = {}) {
         { role: "vowel_target", sample: vowelTargetSample, areas_cm2: vowelAudio.area_function.areas_cm2 },
       ],
     };
-    sharedSourceSamples = synthesizeTubeSourceSamples({
-      ...oralReleaseOptions,
-      aspirationNoiseScale: 0.68,
-      sourceReleaseSeconds: 0,
-    });
+    if (!oralReleaseOptions.selfOscillatingSourceEnabled) {
+      sharedSourceSamples = synthesizeTubeSourceSamples({
+        ...oralReleaseOptions,
+        sourceReleaseSeconds: 0,
+      });
+    }
     nasalOptions.sourceSamples = sharedSourceSamples;
     oralReleaseOptions.sourceSamples = sharedSourceSamples;
   }
@@ -14345,6 +14581,7 @@ function applyProfile(data) {
   state.auditoryEvaluationLog = normalizeAuditoryEvaluationLog(data.auditory_evaluation_log);
   state.nasalTuning = normalizeLoadedNasalTuning(data.nasal_articulation_tuning);
   state.nasalPreviewDiagnostics = {};
+  state.nasalPairComparison = null;
   state.nasalEvaluationLog = normalizeNasalEvaluationLog(data.nasal_auditory_evaluation_log);
   analyze();
   if (data.integrated_features) state.features = data.integrated_features;
@@ -14722,6 +14959,10 @@ function init() {
   }
   els.playUntunedNasalBtn?.addEventListener("click", () => playNasalCalibrationVariant(false));
   els.playTunedNasalBtn?.addEventListener("click", () => playNasalCalibrationVariant(true));
+  els.compareNasalPairBtn?.addEventListener("click", compareNasalPair);
+  els.exportNasalPairBtn?.addEventListener("click", () => exportNasalPair().catch((error) => {
+    if (els.nasalPairStatus) els.nasalPairStatus.textContent = `書き出し失敗: ${error.message}`;
+  }));
   els.resetNasalTuningBtn?.addEventListener("click", () => resetNasalTuning());
   els.nasalClarityInput?.addEventListener("input", updateNasalRatingOutputs);
   els.nasalTransitionRatingInput?.addEventListener("input", updateNasalRatingOutputs);

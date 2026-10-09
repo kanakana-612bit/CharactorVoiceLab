@@ -2342,6 +2342,36 @@ summary {
   font-variant-numeric: tabular-nums;
 }
 
+.nasal-stage-diagnostics {
+  overflow-x: auto;
+}
+
+.nasal-stage-diagnostics table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+
+.nasal-stage-diagnostics th,
+.nasal-stage-diagnostics td {
+  padding: 8px;
+  text-align: right;
+  white-space: nowrap;
+  border-bottom: 1px solid #ddd;
+}
+
+.nasal-stage-diagnostics th:first-child,
+.nasal-stage-diagnostics td:first-child {
+  text-align: left;
+}
+
+.nasal-stage-diagnostics caption {
+  caption-side: bottom;
+  text-align: left;
+  padding: 8px 0;
+  color: #555;
+}
+
 .nasal-action-row {
   display: flex;
   flex-wrap: wrap;

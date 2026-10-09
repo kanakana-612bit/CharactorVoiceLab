@@ -471,7 +471,11 @@
                 <button id="playUntunedNasalBtn" type="button">推定原形を再生</button>
                 <button id="playTunedNasalBtn" class="primary" type="button">調整後を再生</button>
                 <button id="resetNasalTuningBtn" type="button">選択鼻音をリセット</button>
+                <button id="compareNasalPairBtn" type="button">m/n 基準比較</button>
+                <button id="exportNasalPairBtn" type="button" disabled>比較WAV・条件を保存</button>
               </div>
+              <p id="nasalPairStatus" role="status" aria-live="polite"></p>
+              <div id="nasalStageDiagnostics" class="nasal-stage-diagnostics"></div>
               <div class="auditory-rating-grid nasal-rating-grid">
                 <label>
                   鼻音判別性
@@ -687,6 +691,7 @@
         <div class="workflow-stage-banner detail-full">
           <span class="stage-number">03</span>
           <div><strong>母音プレビュー</strong><span>物理モデル由来の5母音を試聴し、話者設計値を確定します。</span></div>
+          <button class="tab-button" data-tab-target="consonantTab" type="button">鼻音確認</button>
         </div>
         <section class="pane detail-full">
           <div class="pane-head">
@@ -707,6 +712,7 @@
           <div class="pane-head">
             <h2>子音の発話運動</h2>
             <span>調音位置・閉鎖・側枝結合・音素遷移を種類別に校正</span>
+            <button class="tab-button" data-tab-target="vowelTab" type="button">母音確認へ戻る</button>
           </div>
           <section class="execution-controls-section consonant-execution-controls">
             <div class="slider-list compact-list" id="consonantExecutionSliders"></div>

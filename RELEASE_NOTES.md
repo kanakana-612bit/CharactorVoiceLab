@@ -1,5 +1,27 @@
 # CharacterVoiceDesigner Release Notes
 
+## Nasal Source and Diagnostics Update - 2026-10-09
+
+- Connected both `/m/` and the three-channel `/n/` waveguide to the existing reduced
+  two-mass glottal oscillator. One oscillator state persists through closure,
+  opening and the following vowel, with the returning acoustic wave fed back at
+  every internal integration step. No changes were made to the vowel renderer or
+  the shared oscillator equations.
+- Replaced inherited vowel-source descriptions with metadata from the actual nasal
+  source. The prescribed LF-like path remains available for explicit source-bypass
+  comparisons; standalone `/N/` and other consonant placeholders are unchanged.
+- Added closed-hold, oral-release and vowel-sustain diagnostics for output RMS,
+  constrained F0/periodicity, weighted oral/nasal radiation, source amplitude and
+  normalized returning-wave amplitude. Component energy fractions exclude coherent
+  interference terms and are not clinical measures or phoneme-recognition scores.
+- Added access to nasal calibration from the vowel screen, a fixed-profile `/m,n/`
+  comparison, cached pair playback, and local WAV/JSON ZIP export. Changes to the
+  current design mark a cached pair as stale instead of silently relabeling it.
+- Added focused short-signal regression tests for both solvers, 44.1/48 kHz output,
+  baseline/doubled internal resolution, source feedback and diagnostic edge cases.
+  An optional `node tests/nasal_source_regression.test.js --render-pair` generates
+  only the representative synthetic `/ma,na/` pair under ignored `runtime/` storage.
+
 ## Ver 0.2 Physical Model Update - 2026-09-02
 
 - Made the reduced two-mass source the default physical-preview source and added a
